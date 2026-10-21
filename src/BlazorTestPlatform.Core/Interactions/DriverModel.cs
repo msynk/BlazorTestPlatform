@@ -304,9 +304,9 @@ public enum KeyboardActionKind
 }
 
 /// <summary>
-/// Executes story interactions. Implemented by the bUnit driver (in-memory) and the Playwright driver (real browsers).
-/// Drivers implement primitives; locator semantics, auto-waiting assertions and timelines live in the core so
-/// behaviour is identical everywhere.
+/// Executes story interactions. Implemented by the bUnit driver (in memory), the Playwright driver (real browsers) and
+/// the in-app driver (inside a workbench frame). Drivers implement primitives (queries, actions, keyboard, focus);
+/// locator chains, auto-waiting assertions and timelines live in the core so behaviour is identical everywhere.
 /// </summary>
 public interface IStoryDriver : IAsyncDisposable
 {

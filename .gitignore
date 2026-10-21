@@ -16,9 +16,14 @@ artifacts/
 ## Test output
 TestResults/
 coverage*/
+# ...but not source folders (git matches case-insensitively on Windows).
+!src/**/Coverage/
 *.trx
 
-## BlazorTestPlatform run output (baselines in __snapshots__ ARE committed)
-btp-results/
-**/__snapshots__/**/*.actual.png
-**/__snapshots__/**/*.diff.png
+## BlazorTestPlatform (__baselines__ and __snapshots__/baselines.json ARE committed; run output goes to TestResults/btp)
+.btp/
+# Only the Linux visual baselines are committed: CI gates on them, and scripts/visual-tests.sh renders the same ones.
+# Windows and macOS baselines are written by local runs (BTP_UPDATE_SNAPSHOTS=missing) and stay on that machine.
+**/__snapshots__/**/*.png
+!**/__snapshots__/**/*-linux.png
+!**/__snapshots__/**/*-linux.*.png

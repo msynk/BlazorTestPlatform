@@ -8,7 +8,7 @@ namespace BlazorTestPlatform.Playwright;
 public sealed class BrowserLaunchSettings
 {
     /// <summary>Run headless (default true; set <c>BTP_HEADED=1</c> to watch).</summary>
-    public bool Headless { get; set; } = !string.Equals(Environment.GetEnvironmentVariable("BTP_HEADED"), "1", StringComparison.Ordinal);
+    public bool Headless { get; set; } = !BtpSettings.IsTruthy(Environment.GetEnvironmentVariable("BTP_HEADED"));
 
     /// <summary>Slow every operation down by this many milliseconds (debugging).</summary>
     public float? SlowMo { get; set; }
@@ -20,7 +20,7 @@ public sealed class BrowserLaunchSettings
     public List<string> Args { get; } = [];
 
     /// <summary>Install missing browsers automatically (<c>BTP_INSTALL_BROWSERS=1</c>).</summary>
-    public bool InstallMissingBrowsers { get; set; } = string.Equals(Environment.GetEnvironmentVariable("BTP_INSTALL_BROWSERS"), "1", StringComparison.Ordinal);
+    public bool InstallMissingBrowsers { get; set; } = BtpSettings.IsTruthy(Environment.GetEnvironmentVariable("BTP_INSTALL_BROWSERS"));
 
     /// <summary>Navigation/readiness timeout (WebAssembly downloads can be slow on cold CI agents). Default 60 s.</summary>
     public TimeSpan ReadyTimeout { get; set; } = TimeSpan.FromSeconds(60);
@@ -220,7 +220,7 @@ public sealed class StoryPageOptions
     /// <summary>Record a Playwright trace (screenshots + DOM snapshots per action).</summary>
     public bool Trace { get; set; } = BtpSettings.Current.Diagnostics != DiagnosticsMode.Off;
 
-    /// <summary>Prerender interactive modes (default true, like production).</summary>
+    /// <summary>Prerender interactive modes (default true, like production). Stories that call <c>.Prerender(false)</c> are never prerendered.</summary>
     public bool Prerender { get; set; } = true;
 
     /// <summary>Locale (deterministic default <c>en-US</c>).</summary>
@@ -326,7 +326,7 @@ public sealed class StoryPage : IAsyncDisposable
     public async Task NavigateAsync()
     {
         var timeout = _readyTimeout;
-        var prerender = _options.Prerender;
+        var prerender = _options.Prerender && Cell.Story.Prerender;
         var url = WorkbenchUrls.Frame(Cell.Story.Id, Cell.HostingModel, Cell.Theme.Name, Cell.Viewport.Name, prerender, _options.AutoPlay, _options.Args).TrimStart('/');
         var ms = (float)timeout.TotalMilliseconds;
         // Commit (not Load): streamed responses of stories with never-completing work stay open by design.

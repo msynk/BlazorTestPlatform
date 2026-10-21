@@ -19,7 +19,7 @@ public sealed class BrowserRunOptions
     /// <summary>Run axe-core. Default true.</summary>
     public bool Accessibility { get; set; } = true;
 
-    /// <summary>Fail on console errors, uncaught page errors and the Blazor error UI. Default true.</summary>
+    /// <summary>Fail on console errors and uncaught page errors. Default true. A visible Blazor error UI always fails the run.</summary>
     public bool FailOnConsoleErrors { get; set; } = true;
 
     /// <summary>Console messages containing any of these are ignored.</summary>
@@ -40,7 +40,7 @@ public sealed class BrowserRunOptions
     /// <summary>Per-attempt timeout (default story timeout or 60 s).</summary>
     public TimeSpan? Timeout { get; set; }
 
-    /// <summary>Prerender interactive modes. Default true.</summary>
+    /// <summary>Prerender interactive modes. Default true. Stories that call <c>.Prerender(false)</c> are never prerendered.</summary>
     public bool Prerender { get; set; } = true;
 
     /// <summary>Write JSON results for reports. Default true.</summary>
@@ -100,6 +100,7 @@ public sealed class BrowserStoryRunner
 
         var maxAttempts = 1 + Math.Max(0, _options.Retries ?? _settings.Retries);
         var attemptErrors = new List<string>();
+        var attemptArtifacts = new List<ArtifactReference>();
         var transientRetryUsed = false;
         StoryResult? last = null;
 
@@ -112,6 +113,7 @@ public sealed class BrowserStoryRunner
             }
 
             attemptErrors.Add($"attempt {attempt}: {last.Error}");
+            attemptArtifacts.AddRange(last.Artifacts.Select(a => a with { Description = $"attempt {attempt}: {a.Description ?? a.Kind}" }));
 
             // Machine-level network-stack exhaustion is not a story failure: allow one extra attempt (reported as flaky).
             if (attempt == maxAttempts && !transientRetryUsed && TransientFailures.IsInfrastructureFailure(last))
@@ -127,6 +129,9 @@ public sealed class BrowserStoryRunner
             Outcome = outcome,
             Attempts = Math.Min(maxAttempts, attemptErrors.Count + 1),
             AttemptErrors = outcome == StoryOutcome.Failed ? attemptErrors.Take(attemptErrors.Count - 1).ToArray() : attemptErrors,
+
+            // A flaky run keeps the diagnostics of the attempts that failed: they are what explains the flake.
+            Artifacts = outcome == StoryOutcome.Flaky ? [.. attemptArtifacts, .. last.Artifacts] : last.Artifacts,
             DurationMilliseconds = clock.Elapsed.TotalMilliseconds,
         });
     }
@@ -200,6 +205,7 @@ public sealed class BrowserStoryRunner
             {
                 var policy = _options.AccessibilityPolicy ?? _settings.Accessibility;
                 a11y = await recorder.RunAsync("accessibility (axe-core)", StepKind.Check, () => AxeAccessibilityScanner.ScanAsync(page.Page, policy, story.Accessibility)).ConfigureAwait(false);
+                a11y = a11y with { Waivers = policy.WaiversFor(story.Id, story.Accessibility) };
                 var evaluation = policy.Evaluate(a11y, story.Id, story.Accessibility);
                 a11yFailures = evaluation.Failures.Select(f => f.RuleId).ToArray();
                 if (!evaluation.Passed)

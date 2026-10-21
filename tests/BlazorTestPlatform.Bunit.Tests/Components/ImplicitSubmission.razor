@@ -1,0 +1,24 @@
+@* Implicit submission (Enter in a field) follows the HTML rules for default buttons. *@
+<form @onsubmit="() => single++">
+    <input aria-label="Search" />
+</form>
+<form @onsubmit="() => pair++">
+    <input aria-label="First name" />
+    <input aria-label="Last name" />
+</form>
+<form @onsubmit="() => blocked++">
+    <input aria-label="Code" />
+    <button disabled>Redeem</button>
+</form>
+<form id="external" @onsubmit="() => external++"></form>
+<input aria-label="Outside" form="external" />
+<input aria-label="Standalone" @onchange="e => committed = (string?)e.Value" />
+<p data-testid="counts">single=@single pair=@pair blocked=@blocked external=@external committed=@committed</p>
+
+@code {
+    private int single;
+    private int pair;
+    private int blocked;
+    private int external;
+    private string? committed;
+}

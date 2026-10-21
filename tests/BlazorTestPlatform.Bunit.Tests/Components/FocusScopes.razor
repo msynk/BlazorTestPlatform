@@ -1,0 +1,25 @@
+@* Focus boundaries browsers enforce: disabled fieldsets (except their first legend), inert subtrees, extra summaries. *@
+<button type="button">First</button>
+<fieldset disabled>
+    <legend>Shipping <button type="button">Legend action</button></legend>
+    <input aria-label="Locked field" />
+    <button type="button" @onclick="() => lockedClicks++">Locked</button>
+</fieldset>
+<div tabindex="-1" data-testid="panel" @onclick="() => panelClicks++">
+    <div inert>
+        <button type="button" @onclick="() => inertClicks++">Inert button</button>
+        <span>Inert text</span>
+    </div>
+</div>
+<details>
+    <summary>More</summary>
+    <summary>Extra summary</summary>
+</details>
+<button type="button">Last</button>
+<p data-testid="clicks">locked=@lockedClicks inert=@inertClicks panel=@panelClicks</p>
+
+@code {
+    private int lockedClicks;
+    private int inertClicks;
+    private int panelClicks;
+}

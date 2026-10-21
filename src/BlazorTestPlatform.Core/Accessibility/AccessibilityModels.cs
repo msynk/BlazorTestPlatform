@@ -76,6 +76,41 @@ public sealed record AccessibilityReport
 
     /// <summary>Rules skipped because they were disabled.</summary>
     public IReadOnlyList<string> DisabledRules { get; init; } = [];
+
+    /// <summary>Rules the story is excused from, with the reasons (see <see cref="AccessibilityPolicy.WaiversFor"/>).</summary>
+    public IReadOnlyList<AccessibilityWaiver> Waivers { get; init; } = [];
+}
+
+/// <summary>Where an <see cref="AccessibilityWaiver"/> comes from.</summary>
+public enum AccessibilityWaiverSource
+{
+    /// <summary>The story disabled the rule (<c>DisableAccessibilityRule</c>).</summary>
+    Story,
+
+    /// <summary>The rule is disabled for every story (<c>accessibility.disabledRules</c>).</summary>
+    Policy,
+
+    /// <summary>An active, time-boxed suppression (<c>accessibility.suppressions</c>).</summary>
+    Suppression,
+}
+
+/// <summary>A rule a story does not have to pass, and why. Reports list waivers so accepted debt stays reviewable.</summary>
+public sealed record AccessibilityWaiver
+{
+    /// <summary>Rule id.</summary>
+    public required string RuleId { get; init; }
+
+    /// <summary>Where the waiver is declared.</summary>
+    public AccessibilityWaiverSource Source { get; init; }
+
+    /// <summary>The written justification (none for globally disabled rules).</summary>
+    public string? Justification { get; init; }
+
+    /// <summary>Expiry of a suppression.</summary>
+    public DateOnly? Expires { get; init; }
+
+    /// <summary>A suppression only covers elements whose selector contains this text.</summary>
+    public string? TargetContains { get; init; }
 }
 
 /// <summary>An accepted, time-boxed known issue. Suppressions are explicit and expire, so debt stays visible.</summary>
@@ -166,6 +201,40 @@ public sealed class AccessibilityPolicy
 
     /// <summary>Known, time-boxed issues.</summary>
     public List<AccessibilitySuppression> Suppressions { get; } = [];
+
+    /// <summary>
+    /// The rules a story is excused from: rules the story disabled (with their justifications), rules disabled for every
+    /// story, and suppressions that match the story and have not expired.
+    /// </summary>
+    public IReadOnlyList<AccessibilityWaiver> WaiversFor(string storyId, StoryAccessibilityOptions? storyOptions = null, DateOnly? today = null)
+    {
+        ArgumentNullException.ThrowIfNull(storyId);
+        var now = today ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var waivers = new List<AccessibilityWaiver>();
+        foreach (var rule in (storyOptions?.DisabledRules ?? []).Order(StringComparer.OrdinalIgnoreCase))
+        {
+            waivers.Add(new AccessibilityWaiver { RuleId = rule, Source = AccessibilityWaiverSource.Story, Justification = storyOptions!.Justifications.GetValueOrDefault(rule) });
+        }
+
+        foreach (var rule in DisabledRules.Order(StringComparer.OrdinalIgnoreCase))
+        {
+            waivers.Add(new AccessibilityWaiver { RuleId = rule, Source = AccessibilityWaiverSource.Policy });
+        }
+
+        foreach (var suppression in Suppressions.Where(s => Glob.IsMatch(storyId, s.StoryPattern) && (s.Expires is null || s.Expires >= now)))
+        {
+            waivers.Add(new AccessibilityWaiver
+            {
+                RuleId = suppression.RuleId,
+                Source = AccessibilityWaiverSource.Suppression,
+                Justification = suppression.Justification,
+                Expires = suppression.Expires,
+                TargetContains = suppression.TargetContains,
+            });
+        }
+
+        return waivers;
+    }
 
     /// <summary>Applies the policy (and story-level disabled rules) to a report.</summary>
     public AccessibilityEvaluation Evaluate(AccessibilityReport report, string? storyId = null, StoryAccessibilityOptions? storyOptions = null, DateOnly? today = null)

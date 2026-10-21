@@ -24,6 +24,7 @@ public sealed class ReportingTests
         {
             Engine = "axe-core 4.x",
             Violations = [new AccessibilityViolation { RuleId = "color-contrast", Impact = AccessibilityImpact.Serious, Help = "Elements must meet contrast", HelpUrl = "https://example.org/rule", Nodes = [new AccessibilityNode(".btn", "<button>")] }],
+            Waivers = [new AccessibilityWaiver { RuleId = "image-alt", Source = AccessibilityWaiverSource.Story, Justification = "Decorative logo, tracked in #123" }],
         },
         AccessibilityFailures = outcome == StoryOutcome.Failed ? ["color-contrast"] : [],
     };
@@ -85,6 +86,7 @@ public sealed class ReportingTests
         Assert.DoesNotContain("Expected <b>", html, StringComparison.Ordinal);
         Assert.Contains("color-contrast", html, StringComparison.Ordinal);
         Assert.Contains("data-tags=\"failed visual\"", html, StringComparison.Ordinal);
+        Assert.Contains("Decorative logo, tracked in #123", html, StringComparison.Ordinal);
     }
 
     [Fact]

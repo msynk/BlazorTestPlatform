@@ -34,6 +34,15 @@ public sealed class ElementLocator
     /// <summary>Finds descendants by label.</summary>
     public ElementLocator GetByLabel(string text, bool exact = false) => Locate(By.Label(text, exact));
 
+    /// <summary>Finds descendants by placeholder.</summary>
+    public ElementLocator GetByPlaceholder(string text, bool exact = false) => Locate(By.Placeholder(text, exact));
+
+    /// <summary>Finds descendants by alternative text.</summary>
+    public ElementLocator GetByAltText(string text, bool exact = false) => Locate(By.AltText(text, exact));
+
+    /// <summary>Finds descendants by title.</summary>
+    public ElementLocator GetByTitle(string text, bool exact = false) => Locate(By.Title(text, exact));
+
     /// <summary>Finds descendants by test id.</summary>
     public ElementLocator GetByTestId(string testId) => Locate(By.TestId(testId));
 

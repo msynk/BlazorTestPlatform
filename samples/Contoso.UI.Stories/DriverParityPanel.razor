@@ -1,0 +1,97 @@
+@using Microsoft.AspNetCore.Components.Web
+@namespace Contoso.UI.Stories
+
+@* Markup for the driver parity stories: each section exercises semantics every driver must compute the same way. *@
+@switch (Section)
+{
+    case DriverParitySection.Landmarks:
+        <header><h1>Driver parity</h1></header>
+        <main>
+            <section aria-label="Account">
+                <header>Account header</header>
+                <h2>Up<span>grade</span></h2>
+                <table>
+                    <tbody>
+                        <tr><th scope="row">Plan</th><td>Team</td></tr>
+                    </tbody>
+                </table>
+                <meter min="0" max="10" value="4" aria-label="Storage used">4 of 10</meter>
+                <search>
+                    <span id="parity-search-label">Search people</span>
+                    <input type="search" aria-labelledby="parity-search-label" />
+                </search>
+                <svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"></circle></svg>
+                <button type="button">Save <span hidden>draft</span><span aria-hidden="true">*</span></button>
+                <input type="submit" value="Send" />
+                <input placeholder="Nickname" />
+                <label><input type="checkbox" /> Remember me</label>
+            </section>
+        </main>
+        <footer>Rendered by every driver</footer>
+        break;
+
+    case DriverParitySection.Text:
+        <div data-testid="blocks"><div>Alpha</div><div>Beta</div></div>
+        <p data-testid="lines">One<br />Two</p>
+        <div data-testid="styled">Visible<style>.parity-never-matches { color: red; }</style></div>
+        <ul aria-label="Steps"><li>First</li><li>Second</li></ul>
+        break;
+
+    case DriverParitySection.Keyboard:
+        @* 24px targets: axe's target-size rule runs in every browser, and font metrics differ between them. *@
+        <style>.parity-target { min-height: 24px; margin: 2px; }</style>
+        <button type="button" class="parity-target">Before</button>
+        <button type="button" class="parity-target" aria-disabled="true" @onclick="() => OnArchivedClicked.InvokeAsync()">Archived</button>
+        <fieldset disabled>
+            <legend>Legacy <button type="button">Legend action</button></legend>
+            <button type="button">Inside disabled</button>
+        </fieldset>
+        <div inert><button type="button">Inert</button></div>
+        <details><summary>More</summary><summary>Second summary</summary><p>Details content</p></details>
+        <input id="parity-newsletter" type="checkbox" @bind="newsletter" @bind:after="() => OnNewsletterChanged.InvokeAsync(newsletter)" />
+        <label for="parity-newsletter">Send me the newsletter</label>
+        <button type="button">After</button>
+        <form aria-label="Subscribe" @onsubmit="() => OnSubscribed.InvokeAsync()">
+            <label for="parity-email">Email</label>
+            <input id="parity-email" type="email" />
+            <input id="parity-terms" type="checkbox" />
+            <label for="parity-terms">I accept the terms</label>
+            <button type="submit">Subscribe</button>
+        </form>
+        break;
+
+    default:
+        <button type="button" role="switch" aria-checked="@(darkMode ? "true" : "false")" @onclick="ToggleDarkModeAsync">Dark mode</button>
+        <input id="parity-alerts" type="checkbox" @bind="alerts" />
+        <label for="parity-alerts">Email alerts</label>
+        break;
+}
+
+@code {
+    private bool newsletter;
+    private bool alerts;
+    private bool darkMode;
+
+    /// <summary>The part of the markup to render.</summary>
+    [Parameter] public DriverParitySection Section { get; set; }
+
+    /// <summary>Raised when the newsletter checkbox changes.</summary>
+    [Parameter] public EventCallback<bool> OnNewsletterChanged { get; set; }
+
+    /// <summary>Raised when the aria-disabled button is clicked (aria-disabled does not stop activation).</summary>
+    [Parameter] public EventCallback OnArchivedClicked { get; set; }
+
+    /// <summary>Raised when the form submits.</summary>
+    [Parameter] public EventCallback OnSubscribed { get; set; }
+
+    /// <summary>Raised when the switch changes.</summary>
+    [Parameter] public EventCallback<bool> OnDarkModeChanged { get; set; }
+
+    private async Task ToggleDarkModeAsync()
+    {
+        // The state changes after the handler yields, like any update that waits for a server or a service.
+        await Task.Delay(50);
+        darkMode = !darkMode;
+        await OnDarkModeChanged.InvokeAsync(darkMode);
+    }
+}

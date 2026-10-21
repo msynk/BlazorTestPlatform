@@ -275,6 +275,24 @@ public sealed class SnapshotStoreTests
     }
 
     [Fact]
+    public void Approving_a_changed_screenshot_records_its_renderer()
+    {
+        var old = new RenderEnvironment("chromium", "linux", "1.63.0", "141.0.1");
+        var upgraded = old with { Playwright = "1.64.0", BrowserVersion = "142.0.1" };
+        var (store, root) = NewStore(SnapshotUpdateMode.Missing);
+        store.Compare("story/desktop.light.chromium-linux", Png(10), environment: old);
+
+        var ci = new SnapshotStore(store.BaselineDirectory, Path.Combine(root, "out"), SnapshotUpdateMode.None);
+        var mismatch = ci.Compare("story/desktop.light.chromium-linux", Png(200), environment: upgraded);
+        Assert.Equal(("chromium-linux", "1.64.0", "142.0.1"), (mismatch.RendererKey, mismatch.PlaywrightVersion, mismatch.BrowserVersion));
+
+        SnapshotStore.Approve(mismatch);
+
+        Assert.Equal(upgraded, BaselineManifest.Load(store.BaselineDirectory).Get("chromium-linux"));
+        Assert.Equal(VisualStatus.Matched, ci.Compare("story/desktop.light.chromium-linux", Png(200), environment: upgraded).Status);
+    }
+
+    [Fact]
     public void Manifest_json_is_stable_and_round_trips()
     {
         var manifest = new BaselineManifest();

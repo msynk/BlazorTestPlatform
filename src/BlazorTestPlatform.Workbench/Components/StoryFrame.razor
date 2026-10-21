@@ -21,7 +21,12 @@
 }
 else
 {
-    <StoryHost StoryId="@StoryId" Theme="@theme.Name" Viewport="@viewport.Name" HostingModelToken="@hostingModel.ToToken()" Args="@argsToken" />
+    @if (AutoPlay)
+    {
+        @* Static SSR cannot handle events: report the play run as skipped through the same contract as interactive frames. *@
+        <script suppress-error="BL9992">@((MarkupString)SkippedPlayScript)</script>
+    }
+    <StoryHost StoryId="@StoryId" Theme="@theme.Name" Viewport="@viewport.Name" HostingModelToken="@hostingModel.ToToken()" AutoPlay="@AutoPlay" Args="@argsToken" />
 }
 
 @code {
@@ -79,6 +84,21 @@ else
         {
             var attributes = FrameScripts.ToJsonObject(theme.DocumentAttributes);
             return $"(function(a){{for(var k in a){{document.documentElement.setAttribute(k,a[k]);}}document.documentElement.setAttribute('data-btp-frame','');}})({attributes});";
+        }
+    }
+
+    private string SkippedPlayScript
+    {
+        get
+        {
+            var result = FrameScripts.ToJsonObject(new Dictionary<string, string>
+            {
+                ["status"] = "skipped",
+                ["error"] = "Static SSR cannot handle events, so play functions run only under interactive render modes.",
+                ["renderer"] = "Static",
+                ["storyId"] = StoryId,
+            });
+            return $"(function(r){{r.actions=0;r.steps=[];window.__btpPlayResult=r;if(window.parent&&window.parent!==window){{window.parent.postMessage(Object.assign({{source:'btp',type:'play-result'}},r),'*');}}}})({result});";
         }
     }
 

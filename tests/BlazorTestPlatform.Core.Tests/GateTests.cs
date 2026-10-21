@@ -160,6 +160,25 @@ public sealed class AccessibilityGateTests
     }
 
     [Fact]
+    public void Waivers_list_story_justifications_disabled_rules_and_active_suppressions()
+    {
+        var policy = new AccessibilityPolicy();
+        policy.DisabledRules.Add("region");
+        policy.Suppressions.Add(new AccessibilitySuppression { RuleId = "color-contrast", StoryPattern = "legacy-*", Justification = "Rebrand (#481)", Expires = new DateOnly(2026, 12, 31) });
+        policy.Suppressions.Add(new AccessibilitySuppression { RuleId = "label", StoryPattern = "legacy-*", Justification = "Expired", Expires = new DateOnly(2026, 1, 1) });
+        var options = new StoryAccessibilityOptions();
+        options.DisabledRules.Add("image-alt");
+        options.Justifications["image-alt"] = "Decorative logo (#123)";
+
+        var waivers = policy.WaiversFor("legacy-button--primary", options, new DateOnly(2026, 6, 1));
+
+        Assert.Equal(
+            [("image-alt", AccessibilityWaiverSource.Story, "Decorative logo (#123)"), ("region", AccessibilityWaiverSource.Policy, null), ("color-contrast", AccessibilityWaiverSource.Suppression, "Rebrand (#481)")],
+            waivers.Select(w => (w.RuleId, w.Source, w.Justification)));
+        Assert.DoesNotContain(policy.WaiversFor("inputs-button--primary", null, new DateOnly(2026, 6, 1)), w => w.Source == AccessibilityWaiverSource.Suppression);
+    }
+
+    [Fact]
     public void Wcag_criteria_derive_from_tags() =>
         Assert.Equal(["1.4.3", "4.1.2"], new AccessibilityViolation { RuleId = "x", Tags = ["wcag2aa", "wcag143", "wcag412", "best-practice"] }.WcagCriteria);
 }

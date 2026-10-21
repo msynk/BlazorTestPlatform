@@ -241,7 +241,7 @@ public sealed class MarkupRuleTests
         Assert.Equal(AccessibilityImpact.Critical, violation.Impact);
         Assert.StartsWith("https://dequeuniversity.com/rules/axe/", violation.HelpUrl, StringComparison.Ordinal);
         var node = Assert.Single(violation.Nodes);
-        Assert.Equal("div:nth-child(1) > button:nth-child(1)", node.Target);
+        Assert.Equal("body > div:nth-child(1) > button:nth-child(1)", node.Target);
         Assert.DoesNotContain("blazor:", node.Html, StringComparison.Ordinal);
     }
 

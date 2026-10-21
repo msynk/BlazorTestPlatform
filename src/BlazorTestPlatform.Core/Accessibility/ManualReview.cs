@@ -80,6 +80,15 @@ public sealed record ReviewItem
 
     /// <summary>Notes, evidence or ticket links.</summary>
     public string? Notes { get; init; }
+
+    /// <summary>The check's title, copied into templates for the reviewer (informational).</summary>
+    public string? Title { get; init; }
+
+    /// <summary>The WCAG success criterion, copied into templates for the reviewer (informational).</summary>
+    public string? Criterion { get; init; }
+
+    /// <summary>How to verify the check, copied into templates for the reviewer (informational).</summary>
+    public string? Guidance { get; init; }
 }
 
 /// <summary>
@@ -161,8 +170,44 @@ public sealed class ManualReviewStore
     {
         Component = component,
         Fingerprint = fingerprint,
-        Items = (checklist ?? ManualChecklists.Wcag22AA).Select(c => new ReviewItem { CheckId = c.Id, Status = ReviewStatus.NotReviewed }).ToArray(),
+        Items = (checklist ?? ManualChecklists.Wcag22AA)
+            .Select(c => new ReviewItem { CheckId = c.Id, Status = ReviewStatus.NotReviewed, Title = c.Title, Criterion = $"{c.Criterion} ({c.Level})", Guidance = c.Guidance })
+            .ToArray(),
     };
+}
+
+/// <summary>
+/// The outcome of the last manual-review gate run (<c>{results}/a11y-review-gate.json</c>), written by the gate test so
+/// tools that cannot compute fingerprints themselves (<c>btp a11y status</c>) can still show stale and missing reviews.
+/// </summary>
+public sealed record ReviewGateReport
+{
+    /// <summary>File name inside the results directory.</summary>
+    public const string FileName = "a11y-review-gate.json";
+
+    /// <summary>When the gate ran.</summary>
+    public DateTimeOffset EvaluatedAt { get; init; }
+
+    /// <summary>One entry per component.</summary>
+    public IReadOnlyList<ReviewGateEntry> Entries { get; init; } = [];
+
+    /// <summary>Writes the report into a results directory and returns its path.</summary>
+    public string Save(string resultsDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(resultsDirectory);
+        System.IO.Directory.CreateDirectory(resultsDirectory);
+        var path = Path.Combine(resultsDirectory, FileName);
+        File.WriteAllText(path, BtpJson.Serialize(this));
+        return path;
+    }
+
+    /// <summary>Loads the report of a results directory, or null when the gate has not run there.</summary>
+    public static ReviewGateReport? Load(string resultsDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(resultsDirectory);
+        var path = Path.Combine(resultsDirectory, FileName);
+        return File.Exists(path) ? BtpJson.Deserialize<ReviewGateReport>(File.ReadAllText(path)) : null;
+    }
 }
 
 /// <summary>State of one component in the manual-review gate.</summary>

@@ -1,17 +1,27 @@
-using System.Text.Json;
+using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using BlazorTestPlatform.Drivers;
 using Microsoft.Playwright;
 
 namespace BlazorTestPlatform.Playwright;
 
 /// <summary>
-/// <see cref="IStoryDriver"/> for real browsers. Locators map 1:1 to Playwright locators (so Playwright's actionability
-/// checks apply), and every interaction settles through the story frame's bridge so Server circuits and WebAssembly
-/// runtimes have applied their render batches before the next step.
+/// <see cref="IStoryDriver"/> for real browsers. Locator chains resolve in the page with the workbench's locator engine,
+/// the one the in-app driver uses, so roles, accessible names, text, strictness and the story scope match the bUnit
+/// driver. Actions then go through Playwright on the resolved element, with real input events and Playwright's
+/// actionability checks, and every interaction settles through the story frame's bridge so Server circuits and
+/// WebAssembly runtimes have applied their render batches before the next step.
 /// </summary>
 public sealed class PlaywrightStoryDriver : IStoryDriver
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const string RootSelector = "[data-btp-root]";
+
+    // The workbench renders rejected arg overrides inside the story root; they are not part of the story.
+    private const string StorySelector = ":not([data-btp-arg-errors], [data-btp-arg-errors] *)";
+
+    // Playwright treats a timeout of 0 as "no timeout": an action resolved at the deadline still gets a short chance.
+    private static readonly TimeSpan MinimumActionTimeout = TimeSpan.FromMilliseconds(100);
 
     /// <summary>Creates a driver for a page showing a story frame.</summary>
     public PlaywrightStoryDriver(IPage page, string browserName, HostingModel hostingModel, bool fakeTime)
@@ -39,19 +49,25 @@ public sealed class PlaywrightStoryDriver : IStoryDriver
     /// <inheritdoc />
     public IServiceProvider? Services => null;
 
-    /// <summary>Converts a locator chain to a Playwright locator.</summary>
+    /// <summary>
+    /// Converts a locator chain to a Playwright locator inside the story root, for Playwright APIs such as screenshots or
+    /// web-first assertions. It uses Playwright's own role and text engines, which can differ from the driver's in edge
+    /// cases: the driver resolves chains with the workbench's locator engine.
+    /// </summary>
     public ILocator ToLocator(LocatorChain chain)
     {
         ArgumentNullException.ThrowIfNull(chain);
+        var root = Page.Locator(RootSelector);
+        var story = Page.Locator(StorySelector);
         ILocator? current = null;
         foreach (var step in chain.Steps)
         {
             current = step.Kind switch
             {
-                LocatorStepKind.Find => Find(current, step.Query!),
-                LocatorStepKind.Nth => (current ?? Page.Locator("*")).Nth(step.Index),
-                LocatorStepKind.HasText => (current ?? Page.Locator("*")).Filter(new LocatorFilterOptions { HasText = step.Text }),
-                LocatorStepKind.HasNotText => (current ?? Page.Locator("*")).Filter(new LocatorFilterOptions { HasNotText = step.Text }),
+                LocatorStepKind.Find => current is null ? Find(root, step.Query!).And(story) : Find(current, step.Query!),
+                LocatorStepKind.Nth => (current ?? root.Locator("*").And(story)).Nth(step.Index),
+                LocatorStepKind.HasText => (current ?? root.Locator("*").And(story)).Filter(new LocatorFilterOptions { HasText = step.Text }),
+                LocatorStepKind.HasNotText => (current ?? root.Locator("*").And(story)).Filter(new LocatorFilterOptions { HasNotText = step.Text }),
                 _ => throw new NotSupportedException(step.Kind.ToString()),
             };
         }
@@ -60,86 +76,46 @@ public sealed class PlaywrightStoryDriver : IStoryDriver
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<ElementInfo>> QueryAsync(LocatorChain locator, CancellationToken cancellationToken)
-    {
-        var json = await ToLocator(locator).EvaluateAllAsync<JsonElement>(Scripts.DescribeAll).ConfigureAwait(false);
-        return json.Deserialize<List<ElementInfo>>(JsonOptions) ?? [];
-    }
+    public async Task<IReadOnlyList<ElementInfo>> QueryAsync(LocatorChain locator, CancellationToken cancellationToken) =>
+        DriverJson.Elements(await Page.EvaluateAsync<string?>(Scripts.Query, DriverJson.Steps(locator)).ConfigureAwait(false));
 
     /// <inheritdoc />
     public async Task PerformAsync(LocatorChain locator, ElementAction action, TimeSpan timeout, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(locator);
         ArgumentNullException.ThrowIfNull(action);
-        var target = ToLocator(locator);
-        var ms = (float)timeout.TotalMilliseconds;
-        try
-        {
-            switch (action.Kind)
+        var steps = DriverJson.Steps(locator);
+        var actionJson = DriverJson.Action(action);
+        var clock = Stopwatch.StartNew();
+        var (success, problem) = await Poll.UntilAsync(
+            async _ =>
             {
-                case ElementActionKind.Click:
-                    await target.ClickAsync(new LocatorClickOptions { Timeout = ms, Force = action.Force, Button = Button(action.Button), Modifiers = Modifiers(action.Modifiers) }).ConfigureAwait(false);
-                    break;
-                case ElementActionKind.DoubleClick:
-                    await target.DblClickAsync(new LocatorDblClickOptions { Timeout = ms, Force = action.Force, Modifiers = Modifiers(action.Modifiers) }).ConfigureAwait(false);
-                    break;
-                case ElementActionKind.Hover:
-                    await target.HoverAsync(new LocatorHoverOptions { Timeout = ms, Force = action.Force }).ConfigureAwait(false);
-                    break;
-                case ElementActionKind.Focus:
-                    await target.FocusAsync(new LocatorFocusOptions { Timeout = ms }).ConfigureAwait(false);
-                    break;
-                case ElementActionKind.Blur:
-                    await target.BlurAsync(new LocatorBlurOptions { Timeout = ms }).ConfigureAwait(false);
-                    break;
-                case ElementActionKind.Fill:
-                    await target.FillAsync(action.Text ?? string.Empty, new LocatorFillOptions { Timeout = ms, Force = action.Force }).ConfigureAwait(false);
-                    break;
-                case ElementActionKind.Clear:
-                    await target.ClearAsync(new LocatorClearOptions { Timeout = ms }).ConfigureAwait(false);
-                    break;
-                case ElementActionKind.Type:
-                    await target.PressSequentiallyAsync(action.Text ?? string.Empty, new LocatorPressSequentiallyOptions { Timeout = ms }).ConfigureAwait(false);
-                    break;
-                case ElementActionKind.Press:
-                    await target.PressAsync(ToPlaywrightKey(action.Text!), new LocatorPressOptions { Timeout = ms }).ConfigureAwait(false);
-                    break;
-                case ElementActionKind.Check:
-                    await target.CheckAsync(new LocatorCheckOptions { Timeout = ms, Force = action.Force }).ConfigureAwait(false);
-                    break;
-                case ElementActionKind.Uncheck:
-                    await target.UncheckAsync(new LocatorUncheckOptions { Timeout = ms, Force = action.Force }).ConfigureAwait(false);
-                    break;
-                case ElementActionKind.SelectOption:
-                    await target.SelectOptionAsync(action.Values ?? [], new LocatorSelectOptionOptions { Timeout = ms }).ConfigureAwait(false);
-                    break;
-                case ElementActionKind.PointerDown:
-                    await target.HoverAsync(new LocatorHoverOptions { Timeout = ms }).ConfigureAwait(false);
-                    await Page.Mouse.DownAsync(new MouseDownOptions { Button = Button(action.Button) }).ConfigureAwait(false);
-                    break;
-                case ElementActionKind.PointerUp:
-                    await target.HoverAsync(new LocatorHoverOptions { Timeout = ms, Force = true }).ConfigureAwait(false);
-                    await Page.Mouse.UpAsync(new MouseUpOptions { Button = Button(action.Button) }).ConfigureAwait(false);
-                    break;
-                case ElementActionKind.DragTo:
-                    await target.DragToAsync(ToLocator(action.Target!), new LocatorDragToOptions { Timeout = ms }).ConfigureAwait(false);
-                    break;
-                case ElementActionKind.ScrollIntoView:
-                    await target.ScrollIntoViewIfNeededAsync(new LocatorScrollIntoViewIfNeededOptions { Timeout = ms }).ConfigureAwait(false);
-                    break;
-                default:
-                    throw new NotSupportedException($"Action {action.Kind} is not supported by the Playwright driver.");
-            }
-        }
-        catch (TimeoutException ex)
+                var result = await TryPerformAsync(locator, steps, actionJson, action, Remaining(timeout, clock)).ConfigureAwait(false);
+                return (result is null, result);
+            },
+            timeout,
+            cancellationToken).ConfigureAwait(false);
+
+        if (!success)
         {
-            throw new ElementNotActionableException($"Cannot {action.Describe()} {locator}: {FirstLine(ex.Message)}", ex);
-        }
-        catch (PlaywrightException ex) when (ex.Message.Contains("strict mode violation", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ElementNotActionableException($"Cannot {action.Describe()} {locator}: {FirstLine(ex.Message)}", ex);
+            throw await NotActionableAsync(locator, action, problem, timeout, cancellationToken).ConfigureAwait(false);
         }
 
         await SettleAsync().ConfigureAwait(false);
+
+        if (action.Kind is ElementActionKind.Check or ElementActionKind.Uncheck)
+        {
+            // The click happened once; Server circuits and async handlers update the state later. Wait without clicking again.
+            var shouldBeChecked = action.Kind == ElementActionKind.Check;
+            var (isChecked, _) = await Poll.UntilAsync(
+                async _ => (await Page.EvaluateAsync<string?>(Scripts.TargetChecked, steps).ConfigureAwait(false) == (shouldBeChecked ? "true" : "false"), true),
+                timeout,
+                cancellationToken).ConfigureAwait(false);
+            if (!isChecked)
+            {
+                throw new ElementNotActionableException($"Clicking did not change the checked state of {locator} to {shouldBeChecked}.");
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -166,11 +142,8 @@ public sealed class PlaywrightStoryDriver : IStoryDriver
     }
 
     /// <inheritdoc />
-    public async Task<ElementInfo?> GetFocusedElementAsync(CancellationToken cancellationToken)
-    {
-        var json = await Page.EvaluateAsync<JsonElement?>(Scripts.DescribeFocused).ConfigureAwait(false);
-        return json is { ValueKind: JsonValueKind.Object } element ? element.Deserialize<ElementInfo>(JsonOptions) : null;
-    }
+    public async Task<ElementInfo?> GetFocusedElementAsync(CancellationToken cancellationToken) =>
+        DriverJson.Element(await Page.EvaluateAsync<string?>(Scripts.Focused).ConfigureAwait(false));
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<ActionRecord>> GetActionsAsync(CancellationToken cancellationToken)
@@ -201,7 +174,7 @@ public sealed class PlaywrightStoryDriver : IStoryDriver
     }
 
     /// <inheritdoc />
-    public Task<string> GetMarkupAsync(CancellationToken cancellationToken) => Page.Locator("[data-btp-root]").InnerHTMLAsync();
+    public Task<string> GetMarkupAsync(CancellationToken cancellationToken) => Page.Locator(RootSelector).InnerHTMLAsync();
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<HttpRequestRecord>> GetHttpRequestsAsync(CancellationToken cancellationToken)
@@ -238,20 +211,209 @@ public sealed class PlaywrightStoryDriver : IStoryDriver
         }
     }
 
-    private ILocator Find(ILocator? scope, By query) => query switch
+    /// <summary>One attempt: resolve the single target and act on it. Returns null when done, or the problem to retry on.</summary>
+    private async Task<string?> TryPerformAsync(LocatorChain locator, string steps, string actionJson, ElementAction action, TimeSpan remaining)
     {
-        CssQuery css => scope is null ? Page.Locator(css.Selector) : scope.Locator(css.Selector),
-        RoleQuery role => scope is null
-            ? Page.GetByRole(ParseRole(role.RoleName), new PageGetByRoleOptions { Name = role.Name, Exact = role.Exact })
-            : scope.GetByRole(ParseRole(role.RoleName), new LocatorGetByRoleOptions { Name = role.Name, Exact = role.Exact }),
-        TextQuery text => scope is null ? Page.GetByText(text.Value, new PageGetByTextOptions { Exact = text.Exact }) : scope.GetByText(text.Value, new LocatorGetByTextOptions { Exact = text.Exact }),
-        LabelQuery label => scope is null ? Page.GetByLabel(label.Value, new PageGetByLabelOptions { Exact = label.Exact }) : scope.GetByLabel(label.Value, new LocatorGetByLabelOptions { Exact = label.Exact }),
-        PlaceholderQuery placeholder => scope is null
-            ? Page.GetByPlaceholder(placeholder.Value, new PageGetByPlaceholderOptions { Exact = placeholder.Exact })
-            : scope.GetByPlaceholder(placeholder.Value, new LocatorGetByPlaceholderOptions { Exact = placeholder.Exact }),
-        TestIdQuery testId => scope is null ? Page.GetByTestId(testId.Value) : scope.GetByTestId(testId.Value),
-        AltTextQuery alt => scope is null ? Page.GetByAltText(alt.Value, new PageGetByAltTextOptions { Exact = alt.Exact }) : scope.GetByAltText(alt.Value, new LocatorGetByAltTextOptions { Exact = alt.Exact }),
-        TitleQuery title => scope is null ? Page.GetByTitle(title.Value, new PageGetByTitleOptions { Exact = title.Exact }) : scope.GetByTitle(title.Value, new LocatorGetByTitleOptions { Exact = title.Exact }),
+        IElementHandle? element = null;
+        try
+        {
+            (element, var problem) = await ResolveAsync(steps, actionJson).ConfigureAwait(false);
+            return element is null ? problem : await ActAsync(element, action, remaining).ConfigureAwait(false);
+        }
+        catch (TimeoutException ex)
+        {
+            return CallLogProblem(ex);
+        }
+        catch (PlaywrightException ex) when (IsDetached(ex))
+        {
+            // A re-render replaced the element (or the frame navigated): resolve the locator again.
+            return "element was detached from the DOM";
+        }
+        catch (PlaywrightException ex)
+        {
+            throw new ElementNotActionableException($"Cannot {action.Describe()} {locator}: {FirstLine(ex.Message)}", ex);
+        }
+        finally
+        {
+            if (element is not null)
+            {
+                await DisposeQuietlyAsync(element).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>Resolves the single element an action targets with the workbench's locator engine.</summary>
+    private async Task<(IElementHandle? Element, string? Problem)> ResolveAsync(string steps, string actionJson)
+    {
+        var handle = await Page.EvaluateHandleAsync(Scripts.ActionTarget, new[] { steps, actionJson }).ConfigureAwait(false);
+        if (handle is IElementHandle element)
+        {
+            return (element, null);
+        }
+
+        try
+        {
+            return (null, await handle.JsonValueAsync<string?>().ConfigureAwait(false) ?? "no element matches");
+        }
+        finally
+        {
+            await DisposeQuietlyAsync(handle).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<string?> ActAsync(IElementHandle element, ElementAction action, TimeSpan remaining)
+    {
+        var ms = (float)remaining.TotalMilliseconds;
+        switch (action.Kind)
+        {
+            case ElementActionKind.Click:
+                await element.ClickAsync(new ElementHandleClickOptions { Timeout = ms, Force = action.Force, Button = Button(action.Button), Modifiers = Modifiers(action.Modifiers) }).ConfigureAwait(false);
+                break;
+            case ElementActionKind.DoubleClick:
+                await element.DblClickAsync(new ElementHandleDblClickOptions { Timeout = ms, Force = action.Force, Button = Button(action.Button), Modifiers = Modifiers(action.Modifiers) }).ConfigureAwait(false);
+                break;
+            case ElementActionKind.Hover:
+                await element.HoverAsync(new ElementHandleHoverOptions { Timeout = ms, Force = action.Force }).ConfigureAwait(false);
+                break;
+            case ElementActionKind.Focus:
+                await element.FocusAsync().ConfigureAwait(false);
+                break;
+            case ElementActionKind.Blur:
+                await element.EvaluateAsync("element => element.blur()").ConfigureAwait(false);
+                break;
+            case ElementActionKind.Fill:
+            case ElementActionKind.Clear:
+                await element.FillAsync(action.Kind == ElementActionKind.Clear ? string.Empty : action.Text ?? string.Empty, new ElementHandleFillOptions { Timeout = ms, Force = action.Force }).ConfigureAwait(false);
+                break;
+            case ElementActionKind.Type:
+                await element.FocusAsync().ConfigureAwait(false);
+                await Page.Keyboard.TypeAsync(action.Text ?? string.Empty).ConfigureAwait(false);
+                break;
+            case ElementActionKind.Press:
+                await element.PressAsync(ToPlaywrightKey(action.Text!), new ElementHandlePressOptions { Timeout = ms }).ConfigureAwait(false);
+                break;
+            case ElementActionKind.Check:
+            case ElementActionKind.Uncheck:
+            {
+                // Like the bUnit driver: click once when the state differs, then PerformAsync waits for the new state.
+                var plan = await element.EvaluateAsync<string?>(Scripts.CheckPlan, action.Kind == ElementActionKind.Check).ConfigureAwait(false);
+                if (plan != "click")
+                {
+                    return plan;
+                }
+
+                await element.ClickAsync(new ElementHandleClickOptions { Timeout = ms, Force = action.Force }).ConfigureAwait(false);
+                break;
+            }
+
+            case ElementActionKind.SelectOption:
+                await element.SelectOptionAsync(action.Values ?? [], new ElementHandleSelectOptionOptions { Timeout = ms, Force = action.Force }).ConfigureAwait(false);
+                break;
+            case ElementActionKind.PointerDown:
+                await element.HoverAsync(new ElementHandleHoverOptions { Timeout = ms, Force = action.Force }).ConfigureAwait(false);
+                await Page.Mouse.DownAsync(new MouseDownOptions { Button = Button(action.Button) }).ConfigureAwait(false);
+                break;
+            case ElementActionKind.PointerUp:
+                await element.HoverAsync(new ElementHandleHoverOptions { Timeout = ms, Force = true }).ConfigureAwait(false);
+                await Page.Mouse.UpAsync(new MouseUpOptions { Button = Button(action.Button) }).ConfigureAwait(false);
+                break;
+            case ElementActionKind.DragTo:
+            {
+                // What Playwright's dragTo does: press on the source, move to the target, release.
+                var (target, problem) = await ResolveAsync(DriverJson.Steps(action.Target!), DriverJson.Action(new ElementAction(ElementActionKind.Hover))).ConfigureAwait(false);
+                if (target is null)
+                {
+                    return "drop target: " + problem;
+                }
+
+                try
+                {
+                    await element.HoverAsync(new ElementHandleHoverOptions { Timeout = ms, Force = action.Force }).ConfigureAwait(false);
+                    await Page.Mouse.DownAsync().ConfigureAwait(false);
+                    await target.HoverAsync(new ElementHandleHoverOptions { Timeout = ms }).ConfigureAwait(false);
+                    await Page.Mouse.UpAsync().ConfigureAwait(false);
+                }
+                finally
+                {
+                    await DisposeQuietlyAsync(target).ConfigureAwait(false);
+                }
+
+                break;
+            }
+
+            case ElementActionKind.ScrollIntoView:
+                await element.ScrollIntoViewIfNeededAsync(new ElementHandleScrollIntoViewIfNeededOptions { Timeout = ms }).ConfigureAwait(false);
+                break;
+            default:
+                throw new NotSupportedException($"Action {action.Kind} is not supported by the Playwright driver.");
+        }
+
+        return null;
+    }
+
+    /// <summary>The bUnit driver's failure message: the last problem, then the elements the locator matches.</summary>
+    private async Task<ElementNotActionableException> NotActionableAsync(LocatorChain locator, ElementAction action, string? problem, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<ElementInfo> matches;
+        try
+        {
+            matches = await QueryAsync(locator, cancellationToken).ConfigureAwait(false);
+        }
+        catch (PlaywrightException)
+        {
+            matches = [];
+        }
+
+        var details = string.Join(Environment.NewLine, matches.Take(5).Select(m => "  " + m.Html));
+        return new ElementNotActionableException(
+            $"Cannot {action.Describe()} {locator}: {problem} (waited {timeout.TotalMilliseconds:0} ms).{(details.Length > 0 ? Environment.NewLine + details : string.Empty)}");
+    }
+
+    private static TimeSpan Remaining(TimeSpan timeout, Stopwatch clock)
+    {
+        var remaining = timeout - clock.Elapsed;
+        return remaining < MinimumActionTimeout ? MinimumActionTimeout : remaining;
+    }
+
+    private static bool IsDetached(PlaywrightException ex) =>
+        ex.Message.Contains("not attached to the DOM", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("Execution context was destroyed", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("Cannot find context with specified id", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The most specific reason in a Playwright timeout's call log, e.g. "element is not stable".</summary>
+    private static string CallLogProblem(TimeoutException ex)
+    {
+        var reason = ex.Message.Split('\n')
+            .Select(line => line.Trim().TrimStart('-', ' ').Trim())
+            .LastOrDefault(line => line.Contains("intercepts pointer events", StringComparison.Ordinal)
+                || (line.StartsWith("element is ", StringComparison.Ordinal) && !line.StartsWith("element is visible, enabled and stable", StringComparison.Ordinal)));
+        return reason ?? FirstLine(ex.Message);
+    }
+
+    private static async Task DisposeQuietlyAsync(IJSHandle handle)
+    {
+        try
+        {
+            await handle.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (PlaywrightException)
+        {
+            // The page navigated or closed; the handle is gone already.
+        }
+    }
+
+    private static ILocator Find(ILocator scope, By query) => query switch
+    {
+        CssQuery css => scope.Locator(css.Selector),
+        RoleQuery role => scope.GetByRole(ParseRole(role.RoleName), new LocatorGetByRoleOptions { Name = role.Name, Exact = role.Exact }),
+        TextQuery text => scope.GetByText(text.Value, new LocatorGetByTextOptions { Exact = text.Exact }),
+        LabelQuery label => scope.GetByLabel(label.Value, new LocatorGetByLabelOptions { Exact = label.Exact }),
+        PlaceholderQuery placeholder => scope.GetByPlaceholder(placeholder.Value, new LocatorGetByPlaceholderOptions { Exact = placeholder.Exact }),
+
+        // A CSS attribute selector reads By.TestIdAttribute now, not when Playwright was launched.
+        TestIdQuery testId => scope.Locator($"[{CssIdentifier(By.TestIdAttribute)}=\"{CssString(testId.Value)}\"]"),
+        AltTextQuery alt => scope.GetByAltText(alt.Value, new LocatorGetByAltTextOptions { Exact = alt.Exact }),
+        TitleQuery title => scope.GetByTitle(title.Value, new LocatorGetByTitleOptions { Exact = title.Exact }),
         _ => throw new NotSupportedException($"Query type '{query.GetType().Name}' is not supported."),
     };
 
@@ -259,6 +421,28 @@ public sealed class PlaywrightStoryDriver : IStoryDriver
         Enum.TryParse<AriaRole>(role, ignoreCase: true, out var parsed)
             ? parsed
             : throw new ArgumentException($"Playwright does not support role '{role}'.", nameof(role));
+
+    private static string CssIdentifier(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        for (var i = 0; i < value.Length; i++)
+        {
+            var c = value[i];
+            if (char.IsAsciiLetter(c) || c is '_' || c > 0x7F || (i > 0 && (char.IsAsciiDigit(c) || c is '-')))
+            {
+                builder.Append(c);
+            }
+            else
+            {
+                builder.Append('\\').Append(((int)c).ToString("x", CultureInfo.InvariantCulture)).Append(' ');
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static string CssString(string value) =>
+        value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal).Replace("\n", "\\a ", StringComparison.Ordinal);
 
     private static string ToPlaywrightKey(string chord)
     {

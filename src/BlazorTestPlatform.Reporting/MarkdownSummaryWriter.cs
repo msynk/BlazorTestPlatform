@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using BlazorTestPlatform.Coverage;
 using BlazorTestPlatform.Results;
 
 namespace BlazorTestPlatform.Reporting;
@@ -7,8 +8,11 @@ namespace BlazorTestPlatform.Reporting;
 /// <summary>Writes a compact Markdown summary (for <c>$GITHUB_STEP_SUMMARY</c> or PR comments).</summary>
 public static class MarkdownSummaryWriter
 {
+    /// <summary>HTML comment that marks BlazorTestPlatform's pull-request comment, so it is updated instead of duplicated.</summary>
+    public const string CommentMarker = "<!-- blazor-test-platform:report -->";
+
     /// <summary>Builds the Markdown.</summary>
-    public static string Create(RunSummary summary, FlakeReport? flakes = null, string? reportUrl = null)
+    public static string Create(RunSummary summary, FlakeReport? flakes = null, string? reportUrl = null, StoryCoverageReport? coverage = null)
     {
         ArgumentNullException.ThrowIfNull(summary);
         var md = new StringBuilder();
@@ -52,6 +56,29 @@ public static class MarkdownSummaryWriter
             foreach (var entry in flakes.Entries.Take(10))
             {
                 md.AppendLine(CultureInfo.InvariantCulture, $"| {entry.Key} | {entry.FlakeRate:P0} | {entry.Unstable}/{entry.Runs} |");
+            }
+        }
+
+        if (coverage is not null)
+        {
+            md.AppendLine().AppendLine(CultureInfo.InvariantCulture, $"### Story state coverage: {coverage.Ratio:P0} ({coverage.CoveredStates}/{coverage.TotalStates} states)").AppendLine();
+            var gaps = coverage.Components.Where(c => c.CoveredStates < c.TotalStates).ToArray();
+            if (gaps.Length > 0 || coverage.ComponentsWithoutStories.Count > 0)
+            {
+                md.AppendLine("| Component | States | Not rendered by any story |").AppendLine("|---|---:|---|");
+                foreach (var component in gaps.Take(20))
+                {
+                    md.AppendLine(CultureInfo.InvariantCulture, $"| {Escape(component.Title)} | {component.CoveredStates}/{component.TotalStates} | {Escape(string.Join(", ", component.MissingStates.Take(8)))}{(component.MissingStates.Count() > 8 ? ", …" : string.Empty)} |");
+                }
+
+                foreach (var component in coverage.ComponentsWithoutStories.Take(20))
+                {
+                    md.AppendLine(CultureInfo.InvariantCulture, $"| `{component}` | — | no stories |");
+                }
+            }
+            else
+            {
+                md.AppendLine("Every state of every component's `bool` and enum parameters is rendered by a story.");
             }
         }
 

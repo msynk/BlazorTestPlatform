@@ -132,3 +132,31 @@ public sealed class WeatherStories : Stories<WeatherList>
     protected override void Define(StoryCollectionBuilder<WeatherList> stories) =>
         stories.Add("Seeded", s => s.UseFixture<WeatherFixture>().Seed(42));
 }
+
+public sealed class FocusScopesStories : Stories<FocusScopes>
+{
+    public override string Title => "Tests/Focus scopes";
+
+    protected override void Define(StoryCollectionBuilder<FocusScopes> stories) => stories.Add("Default");
+}
+
+public sealed class KeyboardFormStories : Stories<KeyboardForm>
+{
+    public override string Title => "Tests/Keyboard form";
+
+    protected override void Define(StoryCollectionBuilder<KeyboardForm> stories) => stories.Add("Default");
+}
+
+public sealed class ImplicitSubmissionStories : Stories<ImplicitSubmission>
+{
+    public override string Title => "Tests/Implicit submission";
+
+    protected override void Define(StoryCollectionBuilder<ImplicitSubmission> stories) => stories.Add("Default");
+}
+
+public sealed class FocusEventsStories : Stories<FocusEvents>
+{
+    public override string Title => "Tests/Focus events";
+
+    protected override void Define(StoryCollectionBuilder<FocusEvents> stories) => stories.Add("Default");
+}

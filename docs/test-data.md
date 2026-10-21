@@ -14,7 +14,7 @@ Screenshots, accessibility fingerprints and assertions must not change between r
 s.Arg(t => t.Items, ctx => ctx.Fake.Many(5, (f, i) => new Person(f.FullName(), f.Email())));
 ```
 
-`FakeData` provides names, user names, e-mails on reserved domains, companies, cities, phone numbers in the 555 range, lorem text, prices, dates and GUIDs. To use a richer library, seed it with `ctx.Random.Seed`.
+`FakeData` provides names, user names, e-mails on reserved domains (`example.com`, `example.org`, `example.net` and `mail.example`), companies, cities, phone numbers in the 555-0100 to 555-0199 block reserved for fiction, lorem text, prices, dates and GUIDs. To use a richer library, seed it with `ctx.Random.Seed`.
 
 ## Fixtures
 
@@ -55,7 +55,7 @@ Services that the application registers more than once, or that are resolved as 
 
 This covers your own multi-registered services (notification channels, plug-ins...), authorization handlers (`AuthorizeView` and policies see the story's handlers) and options. For options, `IOptions<T>` and `IOptionsMonitor<T>` resolve per story for every options type a story configures, so a story's `services.Configure<T>(...)` reaches components under Server and WebAssembly. Application singletons keep the application's values, because they're built once at the root.
 
-A few contracts are consumed once when the application or a circuit starts, before any story frame exists: `IHostedService`, `ILoggerProvider`, `IStartupFilter`, `CircuitHandler` and `IHttpMessageHandlerBuilderFilter`. Story registrations of these apply in bUnit only. The workbench flags affected stories: a notice in the shell, a `data-btp-unsupported-overrides` attribute on the frame, and a warning in the browser run's timeline. `WorkbenchOptions.UnwrappableOverrides` lists them, and `UnsupportedOverridesOf(story)` returns a story's.
+A few contracts are consumed once when the application or a circuit starts, before any story frame exists: `IHostedService`, `ILoggerProvider`, `IStartupFilter`, `CircuitHandler` and `IHttpMessageHandlerBuilderFilter`. Story registrations of these apply in bUnit only. The same goes for `IJSRuntime` when a story uses `MockJS` but the application registers no JS runtime to decorate. The workbench flags affected stories: a notice in the shell, a `data-btp-unsupported-overrides` attribute on the frame, and a warning in the browser run's timeline. `WorkbenchOptions.UnwrappableOverrides` lists them, and `UnsupportedOverridesOf(story)` returns a story's.
 
 ## Mocked HTTP
 
@@ -85,12 +85,12 @@ stories.Add("Loading", s => s.MockHttp(http => http.Get("api/people").Never()).P
 | Rule | Meaning |
 |---|---|
 | `Get/Post/Put/Patch/Delete(pattern)`, `Any(pattern)`, `Match(predicate)` | Patterns are relative to `BaseAddress` (default `https://localhost/`) or absolute. `*` is a wildcard, and the query string matters only if the pattern contains `?`. |
-| `RespondJson(value, typeInfo)`, `RespondJsonText`, `RespondText`, `RespondStatus`, `Respond(message)` | Response. The `JsonTypeInfo` overload is safe under trimming. |
-| `Delay(t)` | Delays the response on the story's clock, so with fake time it's instant and deterministic. |
+| `RespondJson(value, typeInfo)`, `RespondJsonText`, `RespondText`, `RespondStatus`, `Respond(request => response)` | Response. The `JsonTypeInfo` overload is safe under trimming. |
+| `Delay(t)` | Delays the response on the story's clock. With fake time the response stays pending until the play script advances the clock past the delay (`ctx.AdvanceTimeAsync`), so loading states are deterministic. |
 | `Never()`, `Fail()` | A request that never completes (loading states), or a network failure. |
 | `Times(n)` | Answers the next *n* requests, then lets earlier rules answer. |
 
-Unmatched requests get a `404` and are still recorded; set `Unmatched = UnmatchedRequestBehavior.Throw` to fail them as network errors instead. Every request appears in the HTML report. Assert on requests in any driver with `ctx.ExpectRequest(method, pattern)`.
+Unmatched requests get a `404` and are still recorded; set `Unmatched = UnmatchedRequestBehavior.Throw` to fail them as network errors instead. Requests appear in the HTML report for bUnit runs and interactive browser runs (static SSR frames have no frame bridge to read them from). Assert on requests in any driver with `ctx.ExpectRequest(method, pattern)`.
 
 To route static assets or third-party scripts (not application API calls), use `BrowserRunOptions.ConfigurePageAsync` and `page.RouteAsync`.
 
@@ -107,7 +107,7 @@ s.MockJS(js => js
 s.MockJS(js => js.Strict = true);                                 // fail on calls without a setup
 ```
 
-In browsers, the workbench decorates the `IJSRuntime` that the story's components inject. Mocked identifiers answer from the setups, and every other call reaches the real JavaScript. In strict mode, every other call fails instead. Blazor's own `Blazor.*` calls and the workbench's internal calls are never intercepted. A mocked module doesn't have to exist in the browser. If its import fails, unmocked calls on it return defaults, as in bUnit's loose mode. Later setups win, as with `MockHttp`.
+In browsers, the workbench decorates the `IJSRuntime` that the story's components inject. With `ApplyInBrowsers()`, mocked identifiers answer from the setups and every other call reaches the real JavaScript; in strict mode, every other call fails instead. Without `ApplyInBrowsers()` the decorator only records calls, so `Strict` has no effect in browsers. Blazor's own `Blazor.*` calls and the workbench's internal calls are never intercepted. A mocked module doesn't have to exist in the browser. If its import fails, unmocked calls on it return defaults, as in bUnit's loose mode. Later setups win, as with `MockHttp`. The two switches are additive: once any `MockJS` call on a story (including its collection and assembly defaults) turns `ApplyInBrowsers` or `Strict` on, a later call can't turn it off.
 
 A story that declares `MockJS` (even an empty `MockJS(_ => { })`) has its JS calls recorded under every driver. Assert on them in play functions:
 

@@ -74,6 +74,15 @@ public sealed record VisualResult
     /// <summary>Why the comparison may have failed for reasons other than the component (e.g. baselines from another browser build).</summary>
     public string? Note { get; init; }
 
+    /// <summary>The <c>{browser}-{platform}</c> that took the screenshot, when known.</summary>
+    public string? RendererKey { get; init; }
+
+    /// <summary>The Microsoft.Playwright version that took the screenshot, when known.</summary>
+    public string? PlaywrightVersion { get; init; }
+
+    /// <summary>The browser build that took the screenshot, when known.</summary>
+    public string? BrowserVersion { get; init; }
+
     /// <summary>True for statuses that fail the build.</summary>
     public bool IsFailure => Status is VisualStatus.Mismatched or VisualStatus.SizeMismatch or VisualStatus.MissingBaseline;
 }
@@ -239,6 +248,9 @@ public sealed class StoryFailedException : StoryAssertionException
     /// <summary>The failed result.</summary>
     public StoryResult Result { get; }
 
+    /// <summary>Most timeline entries a failure message shows (the last ones, where the failure is).</summary>
+    private const int TimelineLines = 15;
+
     private static string Describe(StoryResult result)
     {
         var lines = new List<string> { $"Story '{result.StoryId}' failed ({result.Key}) after {result.Attempts} attempt(s):", result.Error ?? "(no message)" };
@@ -247,6 +259,24 @@ public sealed class StoryFailedException : StoryAssertionException
             lines.Add($"  {artifact.Kind}: {artifact.Path}");
         }
 
+        var timeline = new List<string>();
+        Flatten(result.Steps, depth: 0, timeline);
+        if (timeline.Count > 0)
+        {
+            lines.Add(timeline.Count > TimelineLines ? $"Timeline (last {TimelineLines} of {timeline.Count} steps):" : "Timeline:");
+            lines.AddRange(timeline.Skip(Math.Max(0, timeline.Count - TimelineLines)));
+        }
+
         return string.Join(Environment.NewLine, lines);
+    }
+
+    private static void Flatten(IEnumerable<StepRecord> steps, int depth, List<string> lines)
+    {
+        foreach (var step in steps)
+        {
+            var title = step.Title.ReplaceLineEndings(" ");
+            lines.Add(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"  {step.StartMilliseconds,7:0} ms {new string(' ', depth * 2)}{(step.Failed ? "✗" : "✓")} {(title.Length > 120 ? title[..120] + "…" : title)}"));
+            Flatten(step.Children, depth + 1, lines);
+        }
     }
 }

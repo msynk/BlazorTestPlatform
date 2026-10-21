@@ -1,8 +1,9 @@
 name: Regenerate visual baselines
 
 # Run this on a branch after upgrading Microsoft.Playwright (e.g. on the Dependabot PR branch): it renders every story
-# in the Playwright image that matches the new package, rewrites the chromium-linux baselines that changed, records the
-# new renderer in __snapshots__/baselines.json and pushes one commit, so the PR shows exactly which screenshots moved.
+# in the Playwright image that matches the new package, rewrites the Linux baselines (Chromium, Firefox and WebKit) that
+# changed, records the new renderers in __snapshots__/baselines.json and pushes one commit, so the PR shows exactly
+# which screenshots moved.
 
 on:
   workflow_dispatch:
@@ -62,7 +63,7 @@ jobs:
           BTP_UPDATE_SNAPSHOTS: ${{ inputs.mode }}
         run: >
           dotnet test --project samples/Contoso.UI.Tests -c Release --
-          --filter-class '*CrossHostingTests' --filter-class '*VisualTests' --filter-class '*InAppPlayTests'
+          --filter-class '*CrossHostingTests' --filter-class '*VisualTests' --filter-class '*CrossBrowserTests' --filter-class '*InAppPlayTests'
 
       - name: Commit regenerated baselines
         run: |
@@ -75,7 +76,7 @@ jobs:
             exit 0
           fi
           git diff --cached --stat
-          git commit -m "Regenerate chromium-linux baselines for Playwright ${{ needs.versions.outputs.playwright }}"
+          git commit -m "Regenerate Linux baselines for Playwright ${{ needs.versions.outputs.playwright }}"
           git push
 
       - name: Upload report

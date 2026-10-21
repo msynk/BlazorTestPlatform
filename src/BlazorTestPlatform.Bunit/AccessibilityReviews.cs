@@ -50,6 +50,7 @@ public static class AccessibilityReviews
                 : existing with { Fingerprint = entry.CurrentFingerprint, Reviewer = null, ReviewedAt = null });
         }
 
+        new ReviewGateReport { EvaluatedAt = DateTimeOffset.UtcNow, Entries = entries }.Save(settings.ResultsDirectoryPath);
         ManualReviewGate.ThrowIfFailing(entries, gate);
         return entries;
     }

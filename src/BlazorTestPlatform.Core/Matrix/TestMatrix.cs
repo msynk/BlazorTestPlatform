@@ -34,7 +34,7 @@ public sealed record MatrixCase(Story Story, Viewport Viewport, ThemeDefinition 
 /// </summary>
 public sealed class TestMatrix
 {
-    /// <summary>Viewports (default: desktop, mobile).</summary>
+    /// <summary>Viewports (default: desktop).</summary>
     public List<Viewport> Viewports { get; } = [];
 
     /// <summary>Themes (default: light).</summary>

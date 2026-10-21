@@ -1,0 +1,19 @@
+@* Keyboard activation as browsers do it: Enter submits from checkboxes and radios instead of toggling them. *@
+<form @onsubmit="() => submits++">
+    <input aria-label="Name" />
+    <label><input type="checkbox" @bind="agree" /> Agree</label>
+    <label><input type="radio" name="plan" value="basic" checked="@(plan == "basic")" @onchange="e => plan = (string?)e.Value" /> Basic</label>
+    <button type="submit" @onclick="() => defaultClicks++">Send</button>
+</form>
+<a href="#top" @onclick="() => linkClicks++" @onclick:preventDefault>Top</a>
+<button type="button" @onclick="() => buttonClicks++">Plain</button>
+<p data-testid="state">submits=@submits default=@defaultClicks agree=@agree plan=@(plan ?? "none") link=@linkClicks button=@buttonClicks</p>
+
+@code {
+    private bool agree;
+    private string? plan;
+    private int submits;
+    private int defaultClicks;
+    private int linkClicks;
+    private int buttonClicks;
+}

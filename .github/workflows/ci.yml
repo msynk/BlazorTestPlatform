@@ -34,7 +34,10 @@ jobs:
     needs: versions
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    # Same image as scripts/visual-tests.sh: screenshots match the committed chromium-linux baselines exactly.
+    permissions:
+      contents: read
+      pull-requests: write   # btp report --pr-comment (pull requests from forks get a read-only token; the step then only warns)
+    # Same image as scripts/visual-tests.sh: screenshots match the committed Linux baselines (chromium, firefox and webkit) exactly.
     container:
       image: mcr.microsoft.com/playwright/dotnet:v${{ needs.versions.outputs.playwright }}-noble
       options: --ipc=host
@@ -55,24 +58,39 @@ jobs:
           done
 
       - name: Restore flake history
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: .btp/history.json
           key: btp-history-${{ github.run_id }}
           restore-keys: btp-history-
 
-      # CI never writes baselines: missing or changed screenshots fail the build (BtpSettings defaults on CI). After a
-      # Playwright upgrade, BaselineProvenanceTests fail first and point to the "Regenerate visual baselines" workflow.
+      # After a Playwright upgrade this fails with one message that points to the "Regenerate visual baselines"
+      # workflow, instead of a wall of screenshot mismatches.
+      - name: Baselines match the pinned Playwright version
+        run: dotnet test --project samples/Contoso.UI.Tests -c Release --no-build -- --filter-class '*BaselineProvenanceTests'
+
+      # CI never writes baselines: missing or changed screenshots fail the build (BtpSettings defaults on CI).
       - name: End-to-end (bUnit, cross-hosting matrix, visual, axe, in-app play)
         run: dotnet test --project samples/Contoso.UI.Tests -c Release --no-build
 
       - name: Report
         if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: >
           dotnet run --project src/BlazorTestPlatform.Cli -c Release --
           report -p samples/Contoso.UI.Tests
           --junit samples/Contoso.UI.Tests/TestResults/btp/junit.xml
           --github-summary --history .btp/history.json
+          ${{ github.event_name == 'pull_request' && '--pr-comment' || '' }}
+
+      # Saved even when tests fail: failed runs are what the flake history needs to see.
+      - name: Save flake history
+        if: always() && hashFiles('.btp/history.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .btp/history.json
+          key: btp-history-${{ github.run_id }}
 
       - name: Upload report
         if: always()

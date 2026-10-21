@@ -105,9 +105,9 @@ public sealed class LocatorAssertions
             0 => (false, "element not found"),
             1 => evaluate(all[0]),
             _ => (false, $"strict mode violation: {all.Count} elements match"),
-        }, timeout, describeFocus);
+        }, timeout, describeFocus, single: true);
 
-    private Task CheckAsync(string description, Func<IReadOnlyList<ElementInfo>, (bool Pass, string Actual)> evaluate, TimeSpan? timeout, bool describeFocus = false)
+    private Task CheckAsync(string description, Func<IReadOnlyList<ElementInfo>, (bool Pass, string Actual)> evaluate, TimeSpan? timeout, bool describeFocus = false, bool single = false)
     {
         var effectiveTimeout = timeout ?? _context.DefaultTimeout;
         var title = $"expect {_locator} {(_negate ? "not " : string.Empty)}{description}";
@@ -121,7 +121,7 @@ public sealed class LocatorAssertions
                     var ok = pass != _negate;
 
                     // A negated single-element assertion must not pass merely because the element is missing or ambiguous.
-                    if (_negate && all.Count != 1 && description.StartsWith("to have", StringComparison.Ordinal))
+                    if (_negate && single && all.Count != 1 && description.StartsWith("to have", StringComparison.Ordinal))
                     {
                         ok = false;
                     }

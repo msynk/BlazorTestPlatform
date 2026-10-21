@@ -28,7 +28,7 @@ public enum DiagnosticsMode
     /// <summary>Never collect.</summary>
     Off,
 
-    /// <summary>Collect for every run, keep only for failed or flaky runs (default).</summary>
+    /// <summary>Collect for every run, keep only for failed runs and the failed attempts of flaky runs (default).</summary>
     RetainOnFailure,
 
     /// <summary>Always keep.</summary>
@@ -143,6 +143,11 @@ public sealed class BtpSettings
                 policy.Tags.UnionWith(tags);
             }
 
+            if (a11y.IncludeBestPractices is { } bestPractices)
+            {
+                policy.IncludeBestPractices = bestPractices;
+            }
+
             policy.DisabledRules.UnionWith(a11y.DisabledRules ?? []);
             policy.Suppressions.AddRange(a11y.Suppressions ?? []);
         }
@@ -212,7 +217,8 @@ public sealed class BtpSettings
 
     private string Resolve(string path) => Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(ProjectDirectory, path));
 
-    private static bool IsTruthy(string? value) => value is not null && (value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase) || value.Equals("yes", StringComparison.OrdinalIgnoreCase));
+    /// <summary>True for the values that switch a <c>BTP_*</c> flag on: <c>1</c>, <c>true</c> or <c>yes</c> (case-insensitive).</summary>
+    public static bool IsTruthy(string? value) => value is not null && (value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase) || value.Equals("yes", StringComparison.OrdinalIgnoreCase));
 
     private static SnapshotUpdateMode? ParseUpdateMode(string? value) => value?.Trim().ToLowerInvariant() switch
     {
@@ -282,6 +288,8 @@ public sealed class BtpSettings
         public AccessibilityImpact? FailOn { get; init; }
 
         public List<string>? Tags { get; init; }
+
+        public bool? IncludeBestPractices { get; init; }
 
         public List<string>? DisabledRules { get; init; }
 

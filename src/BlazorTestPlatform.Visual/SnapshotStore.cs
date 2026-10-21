@@ -75,7 +75,12 @@ public sealed class SnapshotStore
         var baselinePath = BaselinePathFor(snapshotName);
         var actual = RgbaImage.FromPng(actualPng);
         var output = Path.Combine(OutputDirectory, Normalize(snapshotName));
+        var result = Compare(snapshotName, actualPng, actual, baselinePath, output, options, maxDiffPixels, maxDiffRatio, environment);
+        return environment is null ? result : result with { RendererKey = environment.Key, PlaywrightVersion = environment.Playwright, BrowserVersion = environment.BrowserVersion };
+    }
 
+    private VisualResult Compare(string snapshotName, byte[] actualPng, RgbaImage actual, string baselinePath, string output, ImageCompareOptions? options, int maxDiffPixels, double maxDiffRatio, RenderEnvironment? environment)
+    {
         lock (_gate)
         {
             if (!File.Exists(baselinePath))
@@ -170,7 +175,11 @@ public sealed class SnapshotStore
             + "text rendering and anti-aliasing, so regenerate them (scripts/visual-tests.sh --update=changed, or BTP_UPDATE_SNAPSHOTS=changed) and review the diffs.";
     }
 
-    /// <summary>Accepts an actual image as the new baseline (used by <c>btp approve</c>).</summary>
+    /// <summary>
+    /// Accepts an actual image as the new baseline (used by <c>btp approve</c>). Approving a changed screenshot also
+    /// records its renderer in <see cref="BaselineManifest"/>, so baselines approved after a browser upgrade are
+    /// attributed to the new build.
+    /// </summary>
     public static void Approve(VisualResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
@@ -181,6 +190,22 @@ public sealed class SnapshotStore
 
         Directory.CreateDirectory(Path.GetDirectoryName(result.BaselinePath)!);
         File.Copy(result.ActualPath, result.BaselinePath, overwrite: true);
+
+        var relative = Normalize(result.SnapshotName) + ".png";
+        if (result is not { RendererKey: { } key, PlaywrightVersion: { } playwright } || key.LastIndexOf('-') is not (> 0 and var dash)
+            || !Path.GetFullPath(result.BaselinePath).EndsWith(relative, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        // Like Record: a reviewed change proves the new renderer, a filled-in missing baseline only claims an empty slot.
+        var baselineDirectory = Path.GetFullPath(result.BaselinePath)[..^relative.Length];
+        var manifest = BaselineManifest.Load(baselineDirectory);
+        if ((result.Status is VisualStatus.Mismatched or VisualStatus.SizeMismatch || manifest.Get(key) is null)
+            && manifest.Set(new RenderEnvironment(key[..dash], key[(dash + 1)..], playwright, result.BrowserVersion)))
+        {
+            manifest.Save(baselineDirectory);
+        }
     }
 
     private static VisualResult Result(

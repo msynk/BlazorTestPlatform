@@ -8,6 +8,22 @@
     "chromium-win32": {
       "playwright": "1.63.0",
       "browserVersion": "153.0.8010.12"
+    },
+    "firefox-linux": {
+      "playwright": "1.63.0",
+      "browserVersion": "155.0"
+    },
+    "firefox-win32": {
+      "playwright": "1.63.0",
+      "browserVersion": "155.0"
+    },
+    "webkit-linux": {
+      "playwright": "1.63.0",
+      "browserVersion": "26.6"
+    },
+    "webkit-win32": {
+      "playwright": "1.63.0",
+      "browserVersion": "26.6"
     }
   }
 }

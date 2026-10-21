@@ -1,6 +1,6 @@
 # Writing stories
 
-A **story** is one named state of a component. A **collection** (`Stories<TComponent>`) declares the stories of one component. `StoryCatalog` discovers collections by reflection, or you can list them explicitly with `FromCollections` (for trimming/AOT).
+A **story** is one named state of a component. A **collection** (`Stories<TComponent>`) declares the stories of one component. `StoryCatalog.FromAssemblies` (or `FromAssemblyOf<T>`) discovers the collections of an assembly through a source-generated provider, so discovery needs no reflection and works in trimmed apps; assemblies built without the generator are scanned with reflection. `FromCollections` takes an explicit list, for example of collections nested in private classes, which discovery skips.
 
 ## Identity
 
@@ -28,21 +28,21 @@ Expressions are validated: `Arg(b => b.NotAParameter, ...)` throws, with a messa
 
 ### Live controls
 
-The workbench's **Controls** panel edits a story's parameters without touching its code. Every `[Parameter]` of a supported type gets a control: text for `string`, `char`, `Guid`, `Uri`, `TimeSpan`, `DateTimeOffset` and `[Flags]` enums; a checkbox for `bool`; a number input for the numeric types; a drop-down for enums and `bool?`; and date, date-time and time inputs for `DateOnly`, `DateTime` and `TimeOnly`. Nullable variants are supported too. Each control starts from the story's value (or the component's own default) and says which one it is. Callbacks, fragments, cascading parameters, `CaptureUnmatchedValues` and other types aren't editable; they're listed under **Other args**.
+The workbench's **Controls** panel edits a story's parameters without touching its code. Every `[Parameter]` of a supported type gets a control: text for `string`, `char`, `Guid`, `Uri`, `TimeSpan`, `DateTimeOffset` and `[Flags]` enums; a checkbox for `bool`; a number input for the numeric types; a drop-down for enums and `bool?`; and date, date-time and time inputs for `DateOnly`, `DateTime` and `TimeOnly`. Nullable variants are supported too. Each control starts from the story's value (or the component's own default) and says which one it is. Callbacks, fragments, cascading parameters, `CaptureUnmatchedValues` and other types aren't editable. The ones the story sets, including its automatic actions, are listed under **Other args**.
 
 Interactive frames (Server, WebAssembly, Auto) re-render in place through the frame bridge, so component state such as focus or an open menu survives an edit. Static SSR frames reload. Two-way bound values take the edited value, and the component can keep changing them.
 
-The edits live in the URL as `?arg.Variant=Danger&arg.Disabled=true`, so a link reproduces exactly what you see. Values equal to the story's own are dropped, `!null` stands for null, and an empty field for a parameter without a default leaves it alone. Values that arrive through a link can't contain `<`, so a shared link can't inject markup into a component that renders a parameter as HTML. Typing such a value into a control still works. The form also works without JavaScript (**Apply**).
+The edits live in the URL as `?arg.Variant=Danger&arg.Disabled=true`, so a link reproduces exactly what you see. Values equal to the story's own are dropped, `!null` stands for null, and an empty field for a parameter without a default leaves it alone. Values that arrive through a link can't contain `<`, so a shared link can't inject markup into a component that renders a parameter as HTML. Typing such a value into a control of an interactive frame still works, because it reaches the frame through the bridge rather than a URL. Static SSR frames and the form without JavaScript (**Apply**) go through the URL, so they reject it too.
 
 Tests use the same text and the same conversion:
 
 ```csharp
 var options = new BunitStoryOptions();
-options.Args["Variant"] = "Danger";                            // invalid values throw ArgumentException
+options.Args["Variant"] = "Danger";                            // invalid values throw ArgumentException; '<' is allowed
 await using var session = await BunitStoryRunner.RenderAsync(story, options);
 
 var page = new StoryPageOptions();
-page.Args["Variant"] = "Danger";                               // rejected values are listed in [data-btp-arg-errors]
+page.Args["Variant"] = "Danger";                               // travels in the frame URL: rejected values (and '<') are listed in [data-btp-arg-errors]
 await using var frame = await browser.OpenAsync(cell, page);
 
 await session.RenderContext.SetArgOverridesAsync(new Dictionary<string, object?> { ["Max"] = 4 }); // live, typed
@@ -98,7 +98,7 @@ This adds six stories, named like `Variant=Primary, Size=Small`.
 ## Defaults
 
 * **Collection defaults:** `stories.Defaults(s => ...)` applies to every story in the collection, before the story's own configuration.
-* **Assembly defaults:** implement `IStoryConfiguration`. Implementations are discovered next to the stories and applied first.
+* **Assembly defaults:** implement `IStoryConfiguration`. Implementations are discovered with the stories and applied first, to every story in the catalog: one `FromAssemblies` call over several assemblies applies all their configurations to all their stories. `FromCollections` and `WorkbenchOptions.Collections` apply only the configurations you pass them.
 
 ```csharp
 public sealed class Defaults : IStoryConfiguration
@@ -120,8 +120,8 @@ s.Visual(v => { v.Masks.Add(".timestamp"); v.Threshold = 0.2; v.FullPage = true;
  .Performance(p => { p.MaxRootRenders = 2; p.MaxAllocatedBytes = 50_000; })
  .OnlyHostingModels(HostingModel.InteractiveServer)
  .ExcludeHostingModels(HostingModel.StaticServer)
- .Prerender(false)          // for stories whose first render never completes (pending loads)
- .Timeout(TimeSpan.FromSeconds(10))
+ .Prerender(false)          // for stories whose first render never completes (pending loads); honoured by every browser run
+ .Timeout(TimeSpan.FromSeconds(10))  // whole-run limit; BunitStoryOptions.Timeout and BrowserRunOptions.Timeout override it
  .Skip("Waiting for API v2");
 ```
 
@@ -151,11 +151,15 @@ public sealed class CheckoutStories : Stories<Composition>
 }
 ```
 
-Stories written in `.razor` files can use Razor template syntax for fragments:
+Keep story collections in `.cs` files: the catalog generator only sees C# sources, and a collection declared in a `.razor` file would be missing from the generated catalog. To write fragments with Razor template syntax, put them in a small `.razor` component and use it from the story:
 
 ```razor
+@* Fragments.razor, next to the stories *@
 @code {
-    // inside a .razor stories file
-    RenderFragment content = @<p>Hello <strong>world</strong></p>;
+    public static RenderFragment Greeting = @<p>Hello <strong>world</strong></p>;
 }
+```
+
+```csharp
+stories.Add("Rich content", s => s.ChildContent(Fragments.Greeting));
 ```

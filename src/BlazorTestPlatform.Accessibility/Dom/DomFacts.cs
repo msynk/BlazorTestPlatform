@@ -40,7 +40,7 @@ public static class DomFacts
                 return true;
             }
 
-            if (current.LocalName == "details" && !current.HasAttribute("open") && previous is not null && previous.LocalName != "summary")
+            if (current.LocalName == "details" && !current.HasAttribute("open") && previous is not null && !IsDetailsSummary(previous))
             {
                 return true;
             }
@@ -77,28 +77,57 @@ public static class DomFacts
     public static bool IsDisabled(IElement element)
     {
         ArgumentNullException.ThrowIfNull(element);
-        if (string.Equals(element.GetAttribute("aria-disabled"), "true", StringComparison.OrdinalIgnoreCase))
+        return string.Equals(element.GetAttribute("aria-disabled"), "true", StringComparison.OrdinalIgnoreCase) || IsNativelyDisabled(element);
+    }
+
+    /// <summary>
+    /// True when HTML itself disables the element (what <c>:disabled</c> matches): its own <c>disabled</c> attribute, a
+    /// disabled parent <c>optgroup</c> for options, or a disabled ancestor <c>fieldset</c> unless the element is inside
+    /// that fieldset's first <c>legend</c>. Unlike <c>aria-disabled</c>, this removes the element from focus and stops activation.
+    /// </summary>
+    public static bool IsNativelyDisabled(IElement element)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        if (!Disableable.Contains(element.LocalName))
+        {
+            return false;
+        }
+
+        if (element.HasAttribute("disabled"))
         {
             return true;
         }
 
-        if (Disableable.Contains(element.LocalName) && element.HasAttribute("disabled"))
+        if (element.LocalName is "option" or "optgroup")
         {
-            return true;
+            return element.LocalName == "option" && element.ParentElement is { LocalName: "optgroup" } group && group.HasAttribute("disabled");
         }
 
-        if (element.LocalName is "button" or "input" or "select" or "textarea")
+        // Form controls, nested fieldsets included, inherit every disabled ancestor fieldset.
+        for (var parent = element.ParentElement; parent is not null; parent = parent.ParentElement)
         {
-            for (var parent = element.ParentElement; parent is not null; parent = parent.ParentElement)
+            if (parent.LocalName == "fieldset" && parent.HasAttribute("disabled"))
             {
-                if (parent.LocalName == "fieldset" && parent.HasAttribute("disabled"))
+                var firstLegend = parent.Children.FirstOrDefault(c => c.LocalName == "legend");
+                if (firstLegend is null || !firstLegend.Contains(element))
                 {
-                    var firstLegend = parent.Children.FirstOrDefault(c => c.LocalName == "legend");
-                    if (firstLegend is null || !firstLegend.Contains(element))
-                    {
-                        return true;
-                    }
+                    return true;
                 }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>True when the element or an ancestor has <c>inert</c>: it cannot be focused, clicked or hovered.</summary>
+    public static bool IsInert(IElement element)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        for (var current = element; current is not null; current = current.ParentElement)
+        {
+            if (current.HasAttribute("inert"))
+            {
+                return true;
             }
         }
 
@@ -109,7 +138,7 @@ public static class DomFacts
     public static bool IsFocusable(IElement element, DomScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(element);
-        if (IsHidden(element, scope) || element.HasAttribute("inert") || (Disableable.Contains(element.LocalName) && IsDisabledNatively(element)))
+        if (IsHidden(element, scope) || IsInert(element) || IsNativelyDisabled(element))
         {
             return false;
         }
@@ -174,10 +203,22 @@ public static class DomFacts
         "a" or "area" => element.HasAttribute("href"),
         "button" or "select" or "textarea" or "iframe" or "embed" or "object" => true,
         "input" => !string.Equals(element.GetAttribute("type"), "hidden", StringComparison.OrdinalIgnoreCase),
-        "summary" => element.ParentElement?.LocalName == "details",
+        "summary" => IsDetailsSummary(element),
         "audio" or "video" => element.HasAttribute("controls"),
         _ => IsContentEditable(element),
     };
+
+    /// <summary>
+    /// True for the <c>summary</c> that toggles its <c>details</c>: the first <c>summary</c> child. Later ones are ordinary
+    /// content (not focusable, hidden while the details are closed).
+    /// </summary>
+    public static bool IsDetailsSummary(IElement element)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        return element.LocalName == "summary"
+            && element.ParentElement is { LocalName: "details" } details
+            && ReferenceEquals(details.Children.FirstOrDefault(c => c.LocalName == "summary"), element);
+    }
 
     /// <summary>True for <c>contenteditable</c> elements.</summary>
     public static bool IsContentEditable(IElement element)
@@ -248,9 +289,16 @@ public static class DomFacts
                 index++;
             }
 
-            segments.Add(current.ParentElement is null || current.ParentElement.LocalName is "body"
-                ? $"{current.LocalName}:nth-child({index.ToString(CultureInfo.InvariantCulture)})"
-                : $"{current.LocalName}:nth-child({index.ToString(CultureInfo.InvariantCulture)})");
+            // Selectors match against the whole ancestry, so a top-level segment is anchored to the container the roots
+            // sit in (bUnit and parsed fragments both use a body): otherwise "div:nth-child(2) > a:nth-child(1)" can also
+            // match a deeper element that comes first. A detached root has no parent for :nth-child to count against.
+            var nth = $"{current.LocalName}:nth-child({index.ToString(CultureInfo.InvariantCulture)})";
+            segments.Add(current.ParentElement switch
+            {
+                null => current.LocalName,
+                { LocalName: "body" } => "body > " + nth,
+                _ => nth,
+            });
         }
 
         segments.Reverse();
@@ -286,8 +334,6 @@ public static class DomFacts
 
         return false;
     }
-
-    private static bool IsDisabledNatively(IElement element) => element.HasAttribute("disabled");
 
     private static bool IsSimpleIdentifier(string id) => id.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_') && !char.IsAsciiDigit(id[0]);
 

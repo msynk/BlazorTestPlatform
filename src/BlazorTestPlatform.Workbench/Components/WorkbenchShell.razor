@@ -69,6 +69,7 @@
                     <div><dt>Components</dt><dd>@Catalog.Groups.Count</dd></div>
                     <div><dt>With play scripts</dt><dd>@Catalog.Stories.Count(s => s.HasPlay)</dd></div>
                     <div><dt>Performance budgets</dt><dd>@Catalog.Stories.Count(s => s.Performance is not null)</dd></div>
+                    <div><dt>States covered</dt><dd title="bool and enum parameter values rendered by at least one story">@CatalogCoverage.Ratio.ToString("P0", System.Globalization.CultureInfo.InvariantCulture)</dd></div>
                 </dl>
             </section>
         }
@@ -260,6 +261,8 @@
                         <dd>@PerformanceSummary(selected)</dd>
                         <dt>Matrix</dt>
                         <dd>@MatrixSummary(selected)</dd>
+                        <dt>State coverage</dt>
+                        <dd>@CoverageSummary(selected)</dd>
                     </dl>
                 </section>
 
@@ -278,7 +281,7 @@
                             @foreach (var item in review.Items)
                             {
                                 var check = ManualChecklists.Wcag22AA.FirstOrDefault(c => c.Id == item.CheckId);
-                                <li data-status="@item.Status">
+                                <li data-status="@item.Status" title="@check?.Guidance">
                                     <span class="btp-status">@item.Status</span>
                                     <span>@(check?.Title ?? item.CheckId) @(check is null ? null : $"({check.Criterion})")</span>
                                     @if (!string.IsNullOrWhiteSpace(item.Notes))
@@ -413,6 +416,21 @@
         HostingModel.InteractiveAuto => "Auto",
         _ => model.ToString(),
     };
+
+    private BlazorTestPlatform.Coverage.StoryCoverageReport? catalogCoverage;
+
+    private BlazorTestPlatform.Coverage.StoryCoverageReport CatalogCoverage => catalogCoverage ??= BlazorTestPlatform.Coverage.StoryCoverage.Analyze(Catalog);
+
+    private string CoverageSummary(Story story)
+    {
+        if (CatalogCoverage.Components.FirstOrDefault(c => c.Title == story.Title) is not { TotalStates: > 0 } component)
+        {
+            return "no bool or enum parameters";
+        }
+
+        var missing = component.MissingStates.ToArray();
+        return $"{component.CoveredStates}/{component.TotalStates} states of {story.Title}" + (missing.Length == 0 ? string.Empty : " · no story for " + string.Join(", ", missing));
+    }
 
     private static string PerformanceSummary(Story story)
     {

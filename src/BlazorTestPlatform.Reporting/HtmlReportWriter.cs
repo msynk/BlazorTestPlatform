@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Net;
 using System.Text;
+using BlazorTestPlatform.Accessibility;
+using BlazorTestPlatform.Coverage;
 using BlazorTestPlatform.Results;
 
 namespace BlazorTestPlatform.Reporting;
@@ -13,6 +15,9 @@ public sealed class HtmlReportOptions
 
     /// <summary>Flake history analysis to show.</summary>
     public FlakeReport? Flakes { get; set; }
+
+    /// <summary>Story state coverage to show.</summary>
+    public StoryCoverageReport? Coverage { get; set; }
 
     /// <summary>Copy images next to the report (default true) so the folder is portable as a CI artifact.</summary>
     public bool CopyAssets { get; set; } = true;
@@ -71,6 +76,11 @@ public static class HtmlReportWriter
             h.Append("</tbody></table></section>");
         }
 
+        if (options.Coverage is { } coverage)
+        {
+            RenderCoverage(h, coverage);
+        }
+
         h.Append("<nav class=\"filters\" aria-label=\"Filter results\">");
         foreach (var (value, label) in new[] { ("all", "All"), ("failed", "Failed"), ("flaky", "Flaky"), ("visual", "Visual changes"), ("passed", "Passed"), ("skipped", "Skipped") })
         {
@@ -93,6 +103,28 @@ public static class HtmlReportWriter
 
         h.Append("</main><script>").Append(Script).Append("</script></body></html>");
         return h.ToString();
+    }
+
+    private static void RenderCoverage(StringBuilder h, StoryCoverageReport coverage)
+    {
+        h.Append("<section class=\"panel\"><h2>Story state coverage · ").Append(coverage.Ratio.ToString("P0", CultureInfo.InvariantCulture))
+            .Append(" (").Append(coverage.CoveredStates).Append('/').Append(coverage.TotalStates).Append(" states)</h2>")
+            .Append("<table><thead><tr><th>Component</th><th class=\"num\">Stories</th><th class=\"num\">States</th><th>Not rendered by any story</th></tr></thead><tbody>");
+        foreach (var component in coverage.Components)
+        {
+            var missing = component.MissingStates.ToArray();
+            h.Append("<tr class=\"").Append(missing.Length > 0 ? "row-warn" : string.Empty).Append("\"><td>").Append(E(component.Title)).Append("</td><td class=\"num\">").Append(component.Stories)
+                .Append("</td><td class=\"num\">").Append(component.CoveredStates).Append('/').Append(component.TotalStates).Append("</td><td>");
+            h.Append(missing.Length == 0 ? "—" : string.Join(" ", missing.Select(m => "<code>" + E(m) + "</code>")));
+            h.Append("</td></tr>");
+        }
+
+        foreach (var component in coverage.ComponentsWithoutStories)
+        {
+            h.Append("<tr class=\"row-bad\"><td><code>").Append(E(component)).Append("</code></td><td class=\"num\">0</td><td class=\"num\">—</td><td>No stories</td></tr>");
+        }
+
+        h.Append("</tbody></table></section>");
     }
 
     private static void RenderResult(StringBuilder h, StoryResult r, AssetCopier assets)
@@ -181,6 +213,24 @@ public static class HtmlReportWriter
                 }
 
                 h.Append("</td></tr>");
+            }
+
+            h.Append("</tbody></table>");
+        }
+
+        if (r.Accessibility is { Waivers.Count: > 0 } waived)
+        {
+            h.Append("<h3>Waived accessibility rules</h3><table><thead><tr><th>Rule</th><th>Source</th><th>Justification</th><th>Expires</th></tr></thead><tbody>");
+            foreach (var waiver in waived.Waivers)
+            {
+                var source = waiver.Source switch
+                {
+                    AccessibilityWaiverSource.Story => "story",
+                    AccessibilityWaiverSource.Policy => "disabled for all stories",
+                    _ => waiver.TargetContains is null ? "suppression" : $"suppression ({waiver.TargetContains})",
+                };
+                h.Append("<tr><td><code>").Append(E(waiver.RuleId)).Append("</code></td><td>").Append(E(source)).Append("</td><td>").Append(E(waiver.Justification ?? "—"))
+                    .Append("</td><td>").Append(waiver.Expires?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "—").Append("</td></tr>");
             }
 
             h.Append("</tbody></table>");
@@ -430,7 +480,7 @@ public static class HtmlReportWriter
         .chip{font-size:12px;padding:1px 8px;border-radius:999px;border:1px solid var(--border);color:var(--muted)}.chip-bad{color:var(--bad);border-color:var(--bad)}.chip-warn{color:var(--warn);border-color:var(--warn)}
         pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;max-height:420px;overflow:auto}pre.error{border-left:4px solid var(--bad)}
         table{width:100%;border-collapse:collapse;margin:6px 0}th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--border);vertical-align:top}th{color:var(--muted);font-weight:500;font-size:12px}.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-        .row-bad td{color:var(--bad)}.row-good td{color:var(--ok)}
+        .row-bad td{color:var(--bad)}.row-good td{color:var(--ok)}.row-warn td:last-child{color:var(--warn)}
         .compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}.shot{margin:0;background:repeating-conic-gradient(#8881 0 25%,transparent 0 50%) 0/16px 16px;border:1px solid var(--border);border-radius:8px;padding:6px}
         .shot img{max-width:100%;display:block;margin:auto}.shot figcaption{font-size:12px;color:var(--muted);text-align:center;padding-top:4px}
         .slider{position:relative;display:inline-block;max-width:100%;margin-top:12px;border:1px solid var(--border);border-radius:8px;overflow:hidden}.slider img{display:block;max-width:100%}

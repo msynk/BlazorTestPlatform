@@ -3,6 +3,7 @@ using System.Globalization;
 using BlazorTestPlatform;
 using BlazorTestPlatform.Accessibility;
 using BlazorTestPlatform.Configuration;
+using BlazorTestPlatform.Coverage;
 using BlazorTestPlatform.Performance;
 using BlazorTestPlatform.Reporting;
 using BlazorTestPlatform.Results;
@@ -12,8 +13,8 @@ Console.OutputEncoding = System.Text.Encoding.UTF8;
 
 var project = new Option<string>("--project", "-p")
 {
-    Description = "Test project directory (contains the .csproj and btp.json). Defaults to the current directory.",
-    DefaultValueFactory = _ => Environment.CurrentDirectory,
+    Description = "Test project directory (contains the .csproj and btp.json). Defaults to BTP_PROJECT_DIR, else the current directory.",
+    DefaultValueFactory = _ => Environment.GetEnvironmentVariable("BTP_PROJECT_DIR") is { Length: > 0 } projectDirectory ? projectDirectory : Environment.CurrentDirectory,
     Recursive = true,
 };
 
@@ -33,11 +34,15 @@ var githubSummary = new Option<bool>("--github-summary") { Description = "Append
 var history = new Option<string?>("--history") { Description = "Flake history file to update and analyse." };
 var runId = new Option<string?>("--run-id") { Description = "Identifier of this run in the history (default: CI run id or timestamp)." };
 var failOnFailures = new Option<bool>("--fail-on-failures") { Description = "Exit with code 1 when any story failed." };
-var report = new Command("report", "Aggregate results into an HTML report (plus optional JUnit, Markdown and flake history).")
+var prComment = new Option<bool>("--pr-comment") { Description = "Post the Markdown summary on the GitHub pull request, or update the comment an earlier run posted (needs GITHUB_TOKEN with pull-requests: write)." };
+var pullRequest = new Option<int?>("--pr") { Description = "Pull request number for --pr-comment (default: from the GitHub Actions event)." };
+var repository = new Option<string?>("--repository") { Description = "Repository (owner/name) for --pr-comment (default: GITHUB_REPOSITORY)." };
+var reportUrl = new Option<string?>("--report-url") { Description = "Link to the published HTML report, added to the Markdown summary (default: the GitHub Actions run)." };
+var report = new Command("report", "Aggregate results into an HTML report (plus optional JUnit, Markdown, flake history and a pull-request comment).")
 {
-    results, output, junit, markdown, githubSummary, history, runId, failOnFailures,
+    results, output, junit, markdown, githubSummary, history, runId, failOnFailures, prComment, pullRequest, repository, reportUrl,
 };
-report.SetAction(parse =>
+report.SetAction(async (parse, cancellationToken) =>
 {
     var settings = Settings(parse);
     var directories = ResultDirectories(parse, settings);
@@ -57,8 +62,9 @@ report.SetAction(parse =>
         flakes = flakeHistory.Analyze();
     }
 
+    var coverage = directories.Select(StoryCoverageReport.Load).OfType<StoryCoverageReport>().FirstOrDefault();
     var reportDirectory = parse.GetValue(output) ?? Path.Combine(directories[0], "report");
-    var path = HtmlReportWriter.Write(summary, reportDirectory, new HtmlReportOptions { Flakes = flakes });
+    var path = HtmlReportWriter.Write(summary, reportDirectory, new HtmlReportOptions { Flakes = flakes, Coverage = coverage });
     Console.WriteLine($"HTML report: {path}");
 
     if (parse.GetValue(junit) is { } junitPath)
@@ -67,7 +73,8 @@ report.SetAction(parse =>
         Console.WriteLine($"JUnit XML:   {Path.GetFullPath(junitPath)}");
     }
 
-    var md = MarkdownSummaryWriter.Create(summary, flakes);
+    var link = parse.GetValue(reportUrl) ?? GitHubRunUrl();
+    var md = MarkdownSummaryWriter.Create(summary, flakes, link, coverage);
     if (parse.GetValue(markdown) is { } markdownPath)
     {
         File.WriteAllText(markdownPath, md);
@@ -77,6 +84,33 @@ report.SetAction(parse =>
     if (parse.GetValue(githubSummary) && Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY") is { Length: > 0 } stepSummary)
     {
         File.AppendAllText(stepSummary, md + Environment.NewLine);
+    }
+
+    if (parse.GetValue(prComment))
+    {
+        // A missing token or a read-only one (pull requests from forks) must not fail the build: the report is still there.
+        using var http = new HttpClient();
+        var comment = GitHubPullRequestComment.FromEnvironment(http, out var problem, parse.GetValue(pullRequest), parse.GetValue(repository));
+        if (comment is null)
+        {
+            Console.WriteLine($"PR comment:  skipped. {problem}");
+        }
+        else
+        {
+            try
+            {
+                var posted = await comment.UpsertAsync(md, cancellationToken);
+                Console.WriteLine($"PR comment:  {(posted.Created ? "posted" : "updated")} {posted.Url}");
+            }
+            catch (HttpRequestException ex)
+            {
+                Console.WriteLine($"PR comment:  skipped. {ex.Message}");
+                if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") is { Length: > 0 })
+                {
+                    Console.WriteLine($"::warning title=BlazorTestPlatform::Could not comment on the pull request. {ex.Message.ReplaceLineEndings(" ")}");
+                }
+            }
+        }
     }
 
     PrintSummary(summary);
@@ -144,24 +178,38 @@ var perf = new Command("perf", "Render-performance baselines.") { perfApprove };
 root.Add(perf);
 
 // btp a11y status | init
-var a11yStatus = new Command("status", "Show the state of manual accessibility reviews.");
+var a11yStatus = new Command("status", "Show the state of manual accessibility reviews (and the gate states of the last review gate run).") { results };
 a11yStatus.SetAction(parse =>
 {
     var settings = Settings(parse);
     var store = new ManualReviewStore(settings.ReviewsDirectoryPath);
-    var reviews = store.LoadAll();
-    if (reviews.Count == 0)
+    var reviews = store.LoadAll().ToDictionary(r => r.Component, StringComparer.Ordinal);
+
+    // Fingerprints need the components rendered, so gate states come from the last run of the review gate test.
+    var gate = ResultDirectories(parse, settings).Select(ReviewGateReport.Load).OfType<ReviewGateReport>().MaxBy(g => g.EvaluatedAt);
+    var states = gate?.Entries.ToDictionary(e => e.Component, StringComparer.Ordinal) ?? [];
+    if (reviews.Count == 0 && states.Count == 0)
     {
         Console.WriteLine($"No reviews in {store.Directory}. Run the review gate test, then 'btp a11y init'.");
         return 0;
     }
 
-    foreach (var review in reviews.OrderBy(r => r.Component, StringComparer.Ordinal))
+    foreach (var component in reviews.Keys.Union(states.Keys).Order(StringComparer.Ordinal))
     {
+        var state = states.TryGetValue(component, out var entry) ? entry.State.ToString() : "?";
+        if (!reviews.TryGetValue(component, out var review))
+        {
+            Console.WriteLine($"{state,-10} {component,-40} no review file");
+            continue;
+        }
+
         var counts = review.Items.GroupBy(i => i.Status).ToDictionary(g => g.Key, g => g.Count());
-        Console.WriteLine($"{review.Component,-40} pass {counts.GetValueOrDefault(ReviewStatus.Pass),2}  fail {counts.GetValueOrDefault(ReviewStatus.Fail),2}  n/a {counts.GetValueOrDefault(ReviewStatus.NotApplicable),2}  pending {counts.GetValueOrDefault(ReviewStatus.NotReviewed),2}  {review.Reviewer ?? "-"} {review.ReviewedAt:yyyy-MM-dd}");
+        Console.WriteLine($"{state,-10} {review.Component,-40} pass {counts.GetValueOrDefault(ReviewStatus.Pass),2}  fail {counts.GetValueOrDefault(ReviewStatus.Fail),2}  n/a {counts.GetValueOrDefault(ReviewStatus.NotApplicable),2}  pending {counts.GetValueOrDefault(ReviewStatus.NotReviewed),2}  {review.Reviewer ?? "-"} {review.ReviewedAt:yyyy-MM-dd}");
     }
 
+    Console.WriteLine(gate is null
+        ? "Gate states are unknown ('?'): run the review gate test (AccessibilityReviews.VerifyAsync) to compare fingerprints."
+        : $"Gate states from the review gate run at {gate.EvaluatedAt:yyyy-MM-dd HH:mm} UTC.");
     return 0;
 });
 var force = new Option<bool>("--force") { Description = "Overwrite existing review files (stale reviews)." };
@@ -225,6 +273,13 @@ BtpSettings Settings(ParseResult parse) => BtpSettings.Load(Path.GetFullPath(par
 
 string[] ResultDirectories(ParseResult parse, BtpSettings settings) =>
     parse.GetValue(results) is { Length: > 0 } explicitDirectories ? explicitDirectories.Select(Path.GetFullPath).ToArray() : [settings.ResultsDirectoryPath];
+
+string? GitHubRunUrl() =>
+    Environment.GetEnvironmentVariable("GITHUB_SERVER_URL") is { Length: > 0 } server
+    && Environment.GetEnvironmentVariable("GITHUB_REPOSITORY") is { Length: > 0 } repo
+    && Environment.GetEnvironmentVariable("GITHUB_RUN_ID") is { Length: > 0 } run
+        ? $"{server}/{repo}/actions/runs/{run}"
+        : null;
 
 IReadOnlyList<StoryResult> Read(IEnumerable<string> directories) => directories.SelectMany(d => new ResultsStore(d).ReadAll()).ToArray();
 

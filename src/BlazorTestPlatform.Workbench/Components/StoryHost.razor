@@ -16,6 +16,7 @@
      data-btp-layout="@layoutToken"
      data-btp-unsupported-overrides="@unsupportedOverrides"
      data-btp-args="@argsState"
+     data-btp-play-status="@staticPlayStatus"
      class="btp-story-root @themeDefinition?.CssClass">
     @if (problem is not null)
     {
@@ -52,6 +53,7 @@
     private string? unsupportedOverrides;
     private IReadOnlyList<string>? argErrors;
     private string? argsState;
+    private string? staticPlayStatus;
     private string? problem;
     private bool bridgeReady;
     private DotNetObjectReference<StoryHost>? selfReference;
@@ -96,6 +98,9 @@
         }
 
         var hostingModel = HostingModelExtensions.TryParse(HostingModelToken, out var parsed) ? parsed : Options.DefaultHostingModel;
+
+        // Interactive frames publish their outcome from btp-driver.js; a static frame never runs play, so it says so up front.
+        staticPlayStatus = AutoPlay && !hostingModel.IsInteractive() ? "skipped" : null;
         themeDefinition = Options.ResolveTheme(Theme);
         layoutToken = story.Layout.ToString().ToLowerInvariant();
         var unsupported = Options.UnsupportedOverridesOf(story);
@@ -158,12 +163,20 @@
         }
         else
         {
+            // Same whole-run limit as the browser runner; assertions keep the default 5 s auto-wait.
+            var limit = story.Timeout ?? TimeSpan.FromSeconds(60);
+            using var timeout = new CancellationTokenSource(limit);
             var driver = new InAppStoryDriver(driverModule, renderContext, ServiceScope, RendererInfo.Name);
-            var context = new StoryContext(story, driver, TimeSpan.FromSeconds(5), recorder);
+            var context = new StoryContext(story, driver, TimeSpan.FromSeconds(5), recorder, timeout.Token);
             try
             {
                 await recorder.RunAsync("play", BlazorTestPlatform.Results.StepKind.Step, () => play(context));
                 status = "passed";
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+            {
+                status = "failed";
+                error = $"Story timed out after {limit.TotalSeconds:0.#} s.";
             }
             catch (StorySkippedException ex)
             {

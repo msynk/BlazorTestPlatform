@@ -47,6 +47,7 @@ public sealed class InAppStoryDriver : IStoryDriver
     /// <inheritdoc />
     public async Task PerformAsync(LocatorChain locator, ElementAction action, TimeSpan timeout, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(action);
         var steps = DriverJson.Steps(locator);
         var actionJson = DriverJson.Action(action);
         var (success, problem) = await Poll.UntilAsync(
@@ -60,10 +61,24 @@ public sealed class InAppStoryDriver : IStoryDriver
 
         if (!success)
         {
-            throw new ElementNotActionableException($"Cannot {action.Describe()} {locator}: {problem} (waited {timeout.TotalMilliseconds:0} ms).");
+            throw await NotActionableAsync(locator, action, problem, timeout, steps, cancellationToken);
         }
 
         await SettleAsync(cancellationToken);
+
+        if (action.Kind is ElementActionKind.Check or ElementActionKind.Uncheck)
+        {
+            // The click happened once; Server circuits and async handlers update the state later. Wait without clicking again.
+            var shouldBeChecked = action.Kind == ElementActionKind.Check;
+            var (isChecked, _) = await Poll.UntilAsync(
+                async ct => (await _module.InvokeAsync<string?>("targetCheckedJson", ct, steps) == (shouldBeChecked ? "true" : "false"), true),
+                timeout,
+                cancellationToken);
+            if (!isChecked)
+            {
+                throw new ElementNotActionableException($"Clicking did not change the checked state of {locator} to {shouldBeChecked}.");
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -117,6 +132,15 @@ public sealed class InAppStoryDriver : IStoryDriver
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    /// <summary>The bUnit driver's failure message: the last problem, then the elements the locator matches.</summary>
+    private async Task<ElementNotActionableException> NotActionableAsync(LocatorChain locator, ElementAction action, string? problem, TimeSpan timeout, string steps, CancellationToken cancellationToken)
+    {
+        var matches = DriverJson.Elements(await _module.InvokeAsync<string?>("queryJson", cancellationToken, steps));
+        var details = string.Join(Environment.NewLine, matches.Take(5).Select(m => "  " + m.Html));
+        return new ElementNotActionableException(
+            $"Cannot {action.Describe()} {locator}: {problem} (waited {timeout.TotalMilliseconds:0} ms).{(details.Length > 0 ? Environment.NewLine + details : string.Empty)}");
+    }
 
     private async Task SettleAsync(CancellationToken cancellationToken)
     {

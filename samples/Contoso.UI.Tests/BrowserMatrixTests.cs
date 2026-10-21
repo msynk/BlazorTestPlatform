@@ -42,6 +42,29 @@ public sealed class VisualTests(WorkbenchFixture workbench)
 }
 
 /// <summary>
+/// Firefox and WebKit: every story's play script, visual snapshot and axe-core scan on desktop/light under Interactive
+/// Server, against <c>firefox-*</c> and <c>webkit-*</c> baselines. CI gates on the Linux ones, rendered in the same
+/// Playwright container as Chromium's.
+/// </summary>
+public sealed class CrossBrowserTests(WorkbenchFixture workbench)
+{
+    public static readonly TestMatrix Matrix = new TestMatrix()
+        .WithViewports(Viewport.Desktop)
+        .WithThemes(ThemeDefinition.Light)
+        .WithHostingModels(HostingModel.InteractiveServer)
+        .WithBrowsers(Browsers.Firefox, Browsers.WebKit);
+
+    public static TheoryData<string> Cases => new(Matrix
+        .Expand(ComponentStoryTests.Catalog.Where(s => !s.HasTag("visual-matrix") || s.Name.Contains("Primary", StringComparison.Ordinal)))
+        .Select(c => c.Key));
+
+    [Theory]
+    [MemberData(nameof(Cases))]
+    public Task Story_passes_in_every_browser(string key) =>
+        workbench.Environment.VerifyAsync(Matrix.Resolve(ComponentStoryTests.Catalog, key), TestContext.Current.CancellationToken);
+}
+
+/// <summary>
 /// The workbench's "Run interactions" button runs play functions inside the frame (the in-app driver). Every play script
 /// must pass there too, under Server and WebAssembly: a third driver held to the same semantics as bUnit and Playwright.
 /// </summary>
@@ -60,7 +83,7 @@ public sealed class InAppPlayTests(WorkbenchFixture workbench)
     public async Task Play_runs_inside_the_frame(string key)
     {
         var cell = Matrix.Resolve(ComponentStoryTests.Catalog, key);
-        await using var page = await workbench.Environment.Browser.OpenAsync(cell, new BlazorTestPlatform.Playwright.StoryPageOptions { AutoPlay = true, Prerender = cell.Story.Prerender });
+        await using var page = await workbench.Environment.Browser.OpenAsync(cell, new BlazorTestPlatform.Playwright.StoryPageOptions { AutoPlay = true });
 
         var result = await page.WaitForInAppPlayAsync();
 

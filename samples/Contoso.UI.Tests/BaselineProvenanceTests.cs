@@ -5,8 +5,9 @@ using BlazorTestPlatform.Visual;
 namespace Contoso.UI.Tests;
 
 /// <summary>
-/// CI compares against chromium-linux baselines. When Microsoft.Playwright is upgraded, the browser build changes and so
-/// do screenshots; this fails fast, before any browser starts, and says how to regenerate them.
+/// CI compares against Linux baselines. When Microsoft.Playwright is upgraded, the browser build changes and so do
+/// screenshots; this fails with one clear message that says how to regenerate them (CI runs it as its own step before
+/// the browser suites).
 /// </summary>
 public sealed class BaselineProvenanceTests
 {
@@ -15,15 +16,17 @@ public sealed class BaselineProvenanceTests
     {
         var settings = BtpSettings.Current;
         var manifest = BaselineManifest.Load(settings.SnapshotDirectoryPath);
-        if (manifest.Get("chromium-linux") is not { } recorded)
+        var linux = manifest.Entries.Values.Where(e => e.Platform == "linux").ToArray();
+        if (linux.Length == 0)
         {
-            Assert.Skip("No chromium-linux baselines are recorded yet (run scripts/visual-tests.sh --update).");
+            Assert.Skip("No Linux baselines are recorded yet (run scripts/visual-tests.sh --update).");
             return;
         }
 
+        var outdated = linux.Where(e => e.Playwright != BrowserStoryRunner.PlaywrightVersion).Select(e => $"{e.Key} (Playwright {e.Playwright})").ToArray();
         Assert.True(
-            recorded.Playwright == BrowserStoryRunner.PlaywrightVersion,
-            $"The chromium-linux baselines were recorded with Playwright {recorded.Playwright}, but the tests now use {BrowserStoryRunner.PlaywrightVersion}. "
+            outdated.Length == 0,
+            $"Baselines were recorded with another Playwright version than the {BrowserStoryRunner.PlaywrightVersion} the tests now use: {string.Join(", ", outdated)}. "
             + "Regenerate them: run the \"Regenerate visual baselines\" workflow on this branch, or scripts/visual-tests.sh --update=changed, and review the diffs.");
     }
 

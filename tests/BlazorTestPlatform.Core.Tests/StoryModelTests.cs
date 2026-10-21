@@ -130,6 +130,20 @@ public sealed class StoryModelTests
         Assert.Equal("Ada", context.Authentication!.User.Name);
     }
 
+    [Fact]
+    public void Disabling_an_accessibility_rule_requires_a_justification()
+    {
+        var error = Assert.Throws<InvalidOperationException>(() => StoryCatalog.FromCollections([new UnjustifiedStories()]));
+
+        Assert.Contains("'image-alt' without a justification", error.Message, StringComparison.Ordinal);
+    }
+
+    private sealed class UnjustifiedStories : Stories<Greeter>
+    {
+        protected override void Define(StoryCollectionBuilder<Greeter> stories) =>
+            stories.Add("Unjustified", s => s.Accessibility(a => a.DisabledRules.Add("image-alt")));
+    }
+
     // These stories are wrong on purpose: they check the run-time errors that BTP001/BTP002 report at compile time.
 #pragma warning disable BTP001, BTP002
     private sealed class BadStories : Stories<Greeter>

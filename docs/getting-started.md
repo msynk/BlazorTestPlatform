@@ -25,7 +25,7 @@ Why stories get their own project:
 | Stories | `BlazorTestPlatform.Core`, `BlazorTestPlatform.Workbench` (for the shared `WorkbenchSetup`) |
 | Workbench host + client | project reference to Stories (brings the workbench) |
 | Tests | `BlazorTestPlatform.Bunit`, `BlazorTestPlatform.Playwright`, `Microsoft.AspNetCore.Mvc.Testing`, your test framework |
-| Tooling | `dotnet tool install -g BlazorTestPlatform.Cli` |
+| Tooling | `dotnet tool install -g BlazorTestPlatform.Cli --prerelease` |
 
 The stories project must be browser-compatible:
 
@@ -166,4 +166,4 @@ dotnet test
 btp report
 ```
 
-The first browser run writes visual baselines to `__snapshots__/`, and the first performance run writes `__baselines__/performance.json`. Review both and commit them. On CI, missing baselines fail the build instead of being created.
+Run `btp report` from the test project directory (or pass `-p`). The first browser run writes visual baselines to `__snapshots__/`, and the first performance run writes `__baselines__/performance.json`. Review both and commit them; for visual baselines, commit only those of the platform CI renders on (the platform is part of the file name, see [What to commit](configuration.md#what-to-commit)). On CI, missing visual baselines fail the build instead of being created; missing performance baselines are not recorded and are reported as missing.

@@ -16,6 +16,8 @@ namespace BlazorTestPlatform.Results;
 [JsonSerializable(typeof(PerformanceBaselineStore.PerformanceBaselineDocument))]
 [JsonSerializable(typeof(BtpSettings.SettingsFile))]
 [JsonSerializable(typeof(ComponentReview))]
+[JsonSerializable(typeof(ReviewGateReport))]
+[JsonSerializable(typeof(Coverage.StoryCoverageReport))]
 [JsonSerializable(typeof(List<StepRecord>))]
 internal sealed partial class BtpJsonContext : JsonSerializerContext;
 

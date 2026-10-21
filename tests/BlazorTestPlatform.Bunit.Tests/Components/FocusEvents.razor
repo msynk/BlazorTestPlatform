@@ -1,0 +1,49 @@
+@* Components moving focus with ElementReference.FocusAsync(): browsers fire change/blur on the old element and focus on the new one. *@
+<input aria-label="Field"
+       value="@text"
+       @oninput="e => text = (string?)e.Value ?? string.Empty"
+       @onchange="@(e => Log($"field change {e.Value}"))"
+       @onblur="@(() => Log("field blur"))"
+       @onfocusout="@(() => Log("field focusout"))"
+       @onkeydown="OnKeyDownAsync" />
+<button type="button" @ref="target" @onfocus="@(() => Log("target focus"))" @onfocusin="@(() => Log("target focusin"))" @onkeyup="@(() => Log("target keyup"))">Target</button>
+<button type="button" @ref="redirect" @onfocus="RedirectAsync">Redirect</button>
+<button type="button" @ref="ping" @onfocus="async () => await pong.FocusAsync()">Ping</button>
+<button type="button" @ref="pong" @onfocus="async () => await ping.FocusAsync()">Pong</button>
+<button type="button" disabled @ref="disabledTarget">Disabled target</button>
+<p data-testid="log">@string.Join(", ", log)</p>
+
+@code {
+    private readonly List<string> log = [];
+    private string text = string.Empty;
+    private ElementReference target;
+    private ElementReference redirect;
+    private ElementReference ping;
+    private ElementReference pong;
+    private ElementReference disabledTarget;
+
+    private void Log(string entry) => log.Add(entry);
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        ElementReference? next = e.Key switch
+        {
+            "ArrowDown" => target,
+            "ArrowUp" => disabledTarget,
+            "PageDown" => redirect,
+            "End" => ping,
+            _ => null,
+        };
+
+        if (next is { } reference)
+        {
+            await reference.FocusAsync();
+        }
+    }
+
+    private async Task RedirectAsync()
+    {
+        Log("redirect focus");
+        await target.FocusAsync();
+    }
+}

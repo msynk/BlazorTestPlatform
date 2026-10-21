@@ -1,6 +1,6 @@
 # Windows wrapper for scripts/visual-tests.sh (runs the browser suites in the Playwright Linux image that matches the
 # pinned Microsoft.Playwright package).
-#   pwsh scripts/visual-tests.ps1                    # compare against committed chromium-linux baselines
+#   pwsh scripts/visual-tests.ps1                    # compare against committed Linux baselines
 #   pwsh scripts/visual-tests.ps1 -Update            # write missing baselines, then review and commit them
 #   pwsh scripts/visual-tests.ps1 -Update -Mode changed   # after a Playwright upgrade
 #   pwsh scripts/visual-tests.ps1 -PrintImage        # print the image tag and exit
@@ -21,11 +21,12 @@ Write-Output "Playwright $version, image $image, BTP_UPDATE_SNAPSHOTS=$snapshots
 
 $script = @'
 set -e
-if [ ! -x /opt/dotnet10/dotnet ]; then
+# Install into the cached volume on first use, and again when global.json needs a newer SDK than the cached one.
+if ! /opt/dotnet10/dotnet --version > /dev/null 2>&1; then
   curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --install-dir /opt/dotnet10
 fi
 export PATH=/opt/dotnet10:$PATH DOTNET_ROOT=/opt/dotnet10
-dotnet test --project samples/Contoso.UI.Tests --artifacts-path /tmp/btp-artifacts -- --filter-class '*CrossHostingTests' --filter-class '*VisualTests' --filter-class '*InAppPlayTests'
+dotnet test --project samples/Contoso.UI.Tests --artifacts-path /tmp/btp-artifacts -- --filter-class '*CrossHostingTests' --filter-class '*VisualTests' --filter-class '*CrossBrowserTests' --filter-class '*InAppPlayTests' --filter-class '*BaselineProvenanceTests'
 '@
 
 docker run --rm --init --ipc=host `

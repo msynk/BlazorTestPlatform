@@ -68,6 +68,7 @@ public static class BunitStoryRunner
                 {
                     var policy = options.AccessibilityPolicy ?? settings.Accessibility;
                     a11y = await recorder.RunAsync("accessibility (markup rules)", StepKind.Check, () => Task.FromResult(session.AnalyzeAccessibility(policy))).ConfigureAwait(false);
+                    a11y = a11y with { Waivers = policy.WaiversFor(story.Id, story.Accessibility) };
                     var evaluation = policy.Evaluate(a11y, story.Id, story.Accessibility);
                     a11yFailures = evaluation.Failures.Select(f => f.RuleId).ToArray();
                     if (!evaluation.Passed)

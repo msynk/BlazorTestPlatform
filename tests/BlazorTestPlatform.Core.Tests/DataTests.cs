@@ -79,7 +79,8 @@ public sealed class DataTests
         Assert.Equal(a.FullName(), b.FullName());
         Assert.Equal(a.Email(), b.Email());
         Assert.EndsWith(".", a.Sentence(), StringComparison.Ordinal);
-        Assert.Matches("^[a-z.]+[0-9]{2}@example\\.(com|org|net)$|^[a-z.]+[0-9]{2}@test\\.dev$", new FakeData(5).Email());
+        Assert.All(Enumerable.Range(0, 50).Select(seed => new FakeData(seed).Email()), email => Assert.Matches("^[a-z.]+[0-9]{2}@(example\\.(com|org|net)|mail\\.example)$", email));
+        Assert.All(Enumerable.Range(0, 50).Select(seed => new FakeData(seed).Phone()), phone => Assert.Matches("^\\+1-[2-9][0-9]{2}-555-01[0-9]{2}$", phone));
         Assert.Equal(3, a.Many(3, (f, i) => f.Word()).Count);
     }
 

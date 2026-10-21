@@ -27,9 +27,10 @@ public sealed record RenderEnvironment(string Browser, string Platform, string P
 
 /// <summary>
 /// <c>{snapshots}/baselines.json</c>: which renderer the committed baselines of each <c>{browser}-{platform}</c> come
-/// from. Written when baselines are created or revalidated (<c>BTP_UPDATE_SNAPSHOTS=changed|all</c>), so a mismatch
-/// after a Playwright upgrade says so instead of looking like a regression, and CI can tell that the pinned
-/// Playwright version and the committed baselines disagree before running a single browser.
+/// from. Written when the first baselines of a <c>{browser}-{platform}</c> are created, when baselines are revalidated
+/// (<c>BTP_UPDATE_SNAPSHOTS=changed|all</c>) and when changed screenshots are approved; never when the update mode is
+/// <c>none</c> (the default on CI). A mismatch after a Playwright upgrade says so instead of looking like a regression,
+/// and CI can tell that the pinned Playwright version and the committed baselines disagree without comparing a screenshot.
 /// </summary>
 public sealed class BaselineManifest
 {

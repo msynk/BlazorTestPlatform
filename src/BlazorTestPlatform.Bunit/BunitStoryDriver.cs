@@ -18,6 +18,9 @@ public sealed class BunitStoryDriver : IStoryDriver
 {
     private const string FocusIdentifier = "Blazor._internal.domWrapper.focus";
 
+    // Rounds of FocusAsync calls made by focus/blur handlers themselves; caps focus ping-pong between two handlers.
+    private const int MaxFocusRounds = 16;
+
     private readonly BunitContext _context;
     private readonly IRenderedComponent<StoryRoot> _root;
     private readonly StoryRenderContext _renderContext;
@@ -25,6 +28,7 @@ public sealed class BunitStoryDriver : IStoryDriver
     private string? _valueAtFocus;
     private string? _hoveredPath;
     private int _processedFocusCalls;
+    private bool _syncingFocus;
     private int _renderVersion;
     private readonly Dictionary<string, string> _referencePaths = new(StringComparer.Ordinal);
     private readonly CssVisibility? _styles;
@@ -62,15 +66,14 @@ public sealed class BunitStoryDriver : IStoryDriver
     public int RenderVersion => Volatile.Read(ref _renderVersion);
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<ElementInfo>> QueryAsync(LocatorChain locator, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<ElementInfo>> QueryAsync(LocatorChain locator, CancellationToken cancellationToken)
     {
+        await SyncProgrammaticFocusAsync().ConfigureAwait(false);
         var scope = Scope();
-        SyncProgrammaticFocus(scope);
         var focused = ResolvePath(scope, _focusedPath);
-        IReadOnlyList<ElementInfo> result = DomQueries.Resolve(scope, locator)
+        return DomQueries.Resolve(scope, locator)
             .Select(e => DomQueries.Describe(e, scope, ReferenceEquals(e, focused)))
             .ToArray();
-        return Task.FromResult(result);
     }
 
     /// <inheritdoc />
@@ -78,7 +81,22 @@ public sealed class BunitStoryDriver : IStoryDriver
     {
         ArgumentNullException.ThrowIfNull(locator);
         ArgumentNullException.ThrowIfNull(action);
+
+        // Focus calls made since the last step happened before this action; apply them first so they can't undo it.
+        await SyncProgrammaticFocusAsync().ConfigureAwait(false);
         var path = await WaitForActionableAsync(locator, action, timeout, cancellationToken).ConfigureAwait(false);
+
+        if (action.Kind is ElementActionKind.Click or ElementActionKind.DoubleClick or ElementActionKind.Hover or ElementActionKind.PointerDown or ElementActionKind.PointerUp)
+        {
+            // Only forced actions reach inert content, and the pointer passes through it.
+            if (HitTargetPath(path) is not { } hit)
+            {
+                await SettleAsync().ConfigureAwait(false);
+                return;
+            }
+
+            path = hit;
+        }
 
         switch (action.Kind)
         {
@@ -94,7 +112,7 @@ public sealed class BunitStoryDriver : IStoryDriver
                 await HoverAsync(path).ConfigureAwait(false);
                 break;
             case ElementActionKind.Focus:
-                await SetFocusAsync(path).ConfigureAwait(false);
+                await FocusIfFocusableAsync(path).ConfigureAwait(false);
                 break;
             case ElementActionKind.Blur:
                 if (_focusedPath == path)
@@ -108,7 +126,7 @@ public sealed class BunitStoryDriver : IStoryDriver
                 await FillAsync(path, action.Kind == ElementActionKind.Clear ? string.Empty : action.Text ?? string.Empty).ConfigureAwait(false);
                 break;
             case ElementActionKind.Type:
-                await SetFocusAsync(path).ConfigureAwait(false);
+                await FocusIfFocusableAsync(path).ConfigureAwait(false);
                 foreach (var ch in action.Text ?? string.Empty)
                 {
                     await PressOnFocusedAsync(ch.ToString(), KeyModifiers.None).ConfigureAwait(false);
@@ -117,7 +135,7 @@ public sealed class BunitStoryDriver : IStoryDriver
                 break;
             case ElementActionKind.Press:
             {
-                await SetFocusAsync(path).ConfigureAwait(false);
+                await FocusIfFocusableAsync(path).ConfigureAwait(false);
                 var (modifiers, key) = Keys.Parse(action.Text ?? throw new ArgumentException("Press requires a key."));
                 await PressOnFocusedAsync(key, modifiers).ConfigureAwait(false);
                 break;
@@ -154,7 +172,7 @@ public sealed class BunitStoryDriver : IStoryDriver
     public async Task KeyboardAsync(KeyboardAction action, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(action);
-        SyncProgrammaticFocus(Scope());
+        await SyncProgrammaticFocusAsync().ConfigureAwait(false);
         switch (action.Kind)
         {
             case KeyboardActionKind.Press:
@@ -190,12 +208,12 @@ public sealed class BunitStoryDriver : IStoryDriver
     }
 
     /// <inheritdoc />
-    public Task<ElementInfo?> GetFocusedElementAsync(CancellationToken cancellationToken)
+    public async Task<ElementInfo?> GetFocusedElementAsync(CancellationToken cancellationToken)
     {
+        await SyncProgrammaticFocusAsync().ConfigureAwait(false);
         var scope = Scope();
-        SyncProgrammaticFocus(scope);
         var focused = ResolvePath(scope, _focusedPath);
-        return Task.FromResult(focused is null ? null : DomQueries.Describe(focused, scope, isFocused: true));
+        return focused is null ? null : DomQueries.Describe(focused, scope, isFocused: true);
     }
 
     /// <inheritdoc />
@@ -257,6 +275,9 @@ public sealed class BunitStoryDriver : IStoryDriver
             or ElementActionKind.Type or ElementActionKind.Check or ElementActionKind.Uncheck or ElementActionKind.SelectOption;
         var requiresEditable = action.Kind is ElementActionKind.Fill or ElementActionKind.Clear;
 
+        // Inert content takes neither the pointer nor focus; only focus/blur/scroll make sense on it (as no-ops).
+        var requiresInteractive = action.Kind is not (ElementActionKind.Focus or ElementActionKind.Blur or ElementActionKind.ScrollIntoView);
+
         var (success, state) = await Poll.UntilAsync(
             ct =>
             {
@@ -272,6 +293,10 @@ public sealed class BunitStoryDriver : IStoryDriver
                 if (!action.Force && DomFacts.IsHidden(element, scope))
                 {
                     problem = "element is not visible";
+                }
+                else if (!action.Force && requiresInteractive && DomFacts.IsInert(element))
+                {
+                    problem = "element is inert";
                 }
                 else if (!action.Force && requiresEnabled && DomFacts.IsDisabled(element))
                 {
@@ -337,7 +362,9 @@ public sealed class BunitStoryDriver : IStoryDriver
     {
         var scope = Scope();
         var element = ResolvePath(scope, path);
-        if (element is null || DomFacts.IsDisabled(element))
+
+        // Disabled form controls never get click; aria-disabled is semantics only, so browsers still click those.
+        if (element is null || DomFacts.IsNativelyDisabled(element))
         {
             return;
         }
@@ -369,10 +396,10 @@ public sealed class BunitStoryDriver : IStoryDriver
             {
                 var labelScope = Scope();
                 var control = LabelledControl(label, labelScope);
-                if (control is not null && !DomFacts.IsDisabled(control))
+                if (control is not null && !DomFacts.IsNativelyDisabled(control))
                 {
                     var controlPath = DomFacts.CssPath(control, labelScope);
-                    await SetFocusAsync(controlPath).ConfigureAwait(false);
+                    await FocusIfFocusableAsync(controlPath).ConfigureAwait(false);
                     await ActivateAsync(controlPath, click).ConfigureAwait(false);
                     return;
                 }
@@ -444,6 +471,16 @@ public sealed class BunitStoryDriver : IStoryDriver
         await DispatchAsync(path, "onfocusin", new FocusEventArgs { Type = "focusin" }).ConfigureAwait(false);
     }
 
+    /// <summary><c>element.focus()</c>: moves focus only when the element can take it (not hidden, disabled or inert).</summary>
+    private async Task FocusIfFocusableAsync(string path)
+    {
+        var scope = Scope();
+        if (ResolvePath(scope, path) is { } element && DomFacts.IsFocusable(element, scope))
+        {
+            await SetFocusAsync(DomFacts.CssPath(element, scope)).ConfigureAwait(false);
+        }
+    }
+
     private async Task FillAsync(string path, string value)
     {
         var element = ResolvePath(Scope(), path) ?? throw new ElementNotActionableException($"Element {path} disappeared.");
@@ -466,11 +503,14 @@ public sealed class BunitStoryDriver : IStoryDriver
 
     private async Task PressOnFocusedAsync(string key, KeyModifiers modifiers)
     {
-        var path = _focusedPath;
+        var pressedPath = _focusedPath;
         var keydown = Keyboard("keydown", key, modifiers);
-        var prevented = path is not null && HasPreventDefault(ResolvePath(Scope(), path), "onkeydown");
+        var prevented = pressedPath is not null && HasPreventDefault(ResolvePath(Scope(), pressedPath), "onkeydown");
         await DispatchToFocusedAsync("onkeydown", keydown).ConfigureAwait(false);
 
+        // A keydown handler that moves focus (roving tabindex, dialogs) redirects the rest of the key press, as in a browser.
+        await SyncProgrammaticFocusAsync().ConfigureAwait(false);
+        var path = _focusedPath;
         var element = path is null ? null : ResolvePath(Scope(), path);
         var printable = Keys.IsPrintable(key) && (modifiers & (KeyModifiers.Control | KeyModifiers.Meta | KeyModifiers.Alt)) == 0;
 
@@ -486,10 +526,11 @@ public sealed class BunitStoryDriver : IStoryDriver
 
         await DispatchToFocusedAsync("onkeyup", Keyboard("keyup", key, modifiers)).ConfigureAwait(false);
 
-        // Space activates buttons on keyup.
-        if (!prevented && key is Keys.Space or " " && path is not null && ResolvePath(Scope(), path) is { } focusedNow && IsButtonLike(focusedNow))
+        // Space activates buttons and checks checkboxes and radios on keyup, if the pressed element kept focus. Not links.
+        if (!prevented && key is Keys.Space or " " && pressedPath is not null && _focusedPath == pressedPath
+            && ResolvePath(Scope(), pressedPath) is { } pressed && (IsKeyboardClickable(pressed) || IsCheckable(pressed)))
         {
-            await ActivateAsync(path, Mouse("click", KeyModifiers.None, MouseButton.Left, 0)).ConfigureAwait(false);
+            await ActivateAsync(pressedPath, Mouse("click", KeyModifiers.None, MouseButton.Left, 0)).ConfigureAwait(false);
         }
     }
 
@@ -508,21 +549,15 @@ public sealed class BunitStoryDriver : IStoryDriver
 
         if (key == Keys.Enter)
         {
-            if (IsButtonLike(element) || (element.LocalName == "a" && element.HasAttribute("href")))
+            // Enter clicks buttons and follows links; in any other input (checkboxes and radios included: they don't
+            // toggle on Enter) it submits the form implicitly.
+            if (IsKeyboardClickable(element) || (element.LocalName is "a" or "area" && element.HasAttribute("href")))
             {
                 await ActivateAsync(path, Mouse("click", KeyModifiers.None, MouseButton.Left, 0)).ConfigureAwait(false);
             }
-            else if (element.LocalName == "input" && DomFacts.IsEditable(element) && element.Closest("form") is { } form)
+            else if (element.LocalName == "input")
             {
-                // Implicit submission: commit the value (change) then submit.
-                var current = DomQueries.ValueOf(element);
-                if (_valueAtFocus is not null && current != _valueAtFocus)
-                {
-                    await DispatchAsync(path, "onchange", new ChangeEventArgs { Value = current }).ConfigureAwait(false);
-                    _valueAtFocus = current;
-                }
-
-                await DispatchAsync(DomFacts.CssPath(form, Scope()), "onsubmit", EventArgs.Empty).ConfigureAwait(false);
+                await SubmitImplicitlyAsync(path, element).ConfigureAwait(false);
             }
 
             return;
@@ -548,6 +583,41 @@ public sealed class BunitStoryDriver : IStoryDriver
         {
             element.SetAttribute("value", next);
             await DispatchAsync(path, "oninput", new ChangeEventArgs { Value = next }).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Enter in a form field. The edit is committed (change) first; then the form's default button (its first submit
+    /// button) is clicked unless it is disabled. A form without one submits only when the field is its single text-like field.
+    /// </summary>
+    private async Task SubmitImplicitlyAsync(string path, IElement field)
+    {
+        var current = DomQueries.ValueOf(field);
+        if (IsTextLike(field) && _valueAtFocus is not null && current != _valueAtFocus)
+        {
+            await DispatchAsync(path, "onchange", new ChangeEventArgs { Value = current }).ConfigureAwait(false);
+            _valueAtFocus = current;
+        }
+
+        var scope = Scope();
+        if (ResolvePath(scope, path) is not { } input || FormOwner(input, scope) is not { } form)
+        {
+            return;
+        }
+
+        if (scope.Elements().FirstOrDefault(e => IsSubmitButton(e) && ReferenceEquals(FormOwner(e, scope), form)) is { } defaultButton)
+        {
+            if (!DomFacts.IsNativelyDisabled(defaultButton))
+            {
+                await ActivateAsync(DomFacts.CssPath(defaultButton, scope), Mouse("click", KeyModifiers.None, MouseButton.Left, 0)).ConfigureAwait(false);
+            }
+
+            return;
+        }
+
+        if (BlocksImplicitSubmission(input) && scope.Elements().Count(e => BlocksImplicitSubmission(e) && ReferenceEquals(FormOwner(e, scope), form)) == 1)
+        {
+            await DispatchAsync(DomFacts.CssPath(form, scope), "onsubmit", EventArgs.Empty).ConfigureAwait(false);
         }
     }
 
@@ -613,7 +683,11 @@ public sealed class BunitStoryDriver : IStoryDriver
             throw new ElementNotActionableException("Cannot uncheck a radio button.");
         }
 
-        await ClickAsync(path, KeyModifiers.None, MouseButton.Left, 1).ConfigureAwait(false);
+        if (HitTargetPath(path) is { } hit)
+        {
+            await ClickAsync(hit, KeyModifiers.None, MouseButton.Left, 1).ConfigureAwait(false);
+        }
+
         await SettleAsync().ConfigureAwait(false);
 
         var (ok, _) = await Poll.UntilAsync(
@@ -697,34 +771,83 @@ public sealed class BunitStoryDriver : IStoryDriver
     private async Task SettleAsync()
     {
         await _root.InvokeAsync(() => { }).ConfigureAwait(false);
-        SyncProgrammaticFocus(Scope());
+        await SyncProgrammaticFocusAsync().ConfigureAwait(false);
     }
 
-    /// <summary>Applies <c>ElementReference.FocusAsync()</c> calls captured from JS interop to the focus model.</summary>
-    private void SyncProgrammaticFocus(DomScope scope)
+    /// <summary>
+    /// Applies <c>ElementReference.FocusAsync()</c> calls captured from JS interop, in call order, through the same path as
+    /// user focus movement: change (for an edited field), blur and focusout on the old element, focus and focusin on the
+    /// new one. Calls made by those handlers are applied in the next round; the rounds are capped so handlers that keep
+    /// moving focus back and forth cannot loop forever.
+    /// </summary>
+    private async Task SyncProgrammaticFocusAsync()
     {
-        var invocations = _context.JSInterop.Invocations[FocusIdentifier];
-        if (invocations.Count <= _processedFocusCalls)
+        if (_syncingFocus)
         {
             return;
         }
 
-        var last = invocations[^1];
-        _processedFocusCalls = invocations.Count;
-        if (last.Arguments.Count > 0 && last.Arguments[0] is ElementReference reference)
+        _syncingFocus = true;
+        try
         {
-            string? path;
-            lock (_referenceGate)
+            for (var round = 0; round < MaxFocusRounds; round++)
             {
-                path = _referencePaths.GetValueOrDefault(reference.Id);
+                var invocations = _context.JSInterop.Invocations[FocusIdentifier];
+                var count = invocations.Count;
+                if (count <= _processedFocusCalls)
+                {
+                    return;
+                }
+
+                var first = _processedFocusCalls;
+                _processedFocusCalls = count;
+                for (var i = first; i < count; i++)
+                {
+                    if (invocations[i].Arguments.Count > 0 && invocations[i].Arguments[0] is ElementReference reference)
+                    {
+                        string? path;
+                        lock (_referenceGate)
+                        {
+                            path = _referencePaths.GetValueOrDefault(reference.Id);
+                        }
+
+                        if (path is not null)
+                        {
+                            await FocusIfFocusableAsync(path).ConfigureAwait(false);
+                        }
+                    }
+                }
             }
 
-            if (path is not null && ResolvePath(scope, path) is { } element)
-            {
-                _focusedPath = DomFacts.CssPath(element, scope);
-                _valueAtFocus = DomQueries.ValueOf(element);
-            }
+            // Still moving after the last round: drop the remaining calls rather than loop forever.
+            _processedFocusCalls = _context.JSInterop.Invocations[FocusIdentifier].Count;
         }
+        finally
+        {
+            _syncingFocus = false;
+        }
+    }
+
+    /// <summary>
+    /// Where a pointer aimed at <paramref name="path"/> lands. Hit testing skips inert content, so it reaches the nearest
+    /// ancestor outside the inert subtree, or nothing in the story.
+    /// </summary>
+    private string? HitTargetPath(string path)
+    {
+        var scope = Scope();
+        var element = ResolvePath(scope, path);
+        if (element is null || !DomFacts.IsInert(element))
+        {
+            return path;
+        }
+
+        var target = element.ParentElement;
+        while (target is not null && DomFacts.IsInert(target))
+        {
+            target = target.ParentElement;
+        }
+
+        return target is null || target.LocalName is "body" or "html" ? null : DomFacts.CssPath(target, scope);
     }
 
     /// <summary>
@@ -813,10 +936,33 @@ public sealed class BunitStoryDriver : IStoryDriver
     private static bool IsInteractive(IElement element) =>
         element.LocalName is "input" or "select" or "textarea" or "button" || (element.LocalName == "a" && element.HasAttribute("href"));
 
-    private static bool IsButtonLike(IElement element) =>
+    /// <summary>Elements both Enter and Space click: buttons, button-like inputs and the summary of a details element.</summary>
+    private static bool IsKeyboardClickable(IElement element) =>
         element.LocalName == "button"
-        || (element.LocalName == "input" && (element.GetAttribute("type") ?? string.Empty).ToLowerInvariant() is "button" or "submit" or "reset" or "checkbox" or "radio" or "image")
-        || element.LocalName == "summary";
+        || (element.LocalName == "input" && (element.GetAttribute("type") ?? string.Empty).ToLowerInvariant() is "button" or "submit" or "reset" or "image" or "file" or "color")
+        || DomFacts.IsDetailsSummary(element);
+
+    /// <summary>Checkboxes and radios: Space toggles them, Enter does not.</summary>
+    private static bool IsCheckable(IElement element) =>
+        element.LocalName == "input" && (element.GetAttribute("type") ?? string.Empty).ToLowerInvariant() is "checkbox" or "radio";
+
+    private static bool IsSubmitButton(IElement element) => element.LocalName switch
+    {
+        "button" => (element.GetAttribute("type") ?? "submit").ToLowerInvariant() is not ("button" or "reset"),
+        "input" => (element.GetAttribute("type") ?? string.Empty).ToLowerInvariant() is "submit" or "image",
+        _ => false,
+    };
+
+    /// <summary>Text-like inputs: a form with one of them and no submit button submits on Enter.</summary>
+    private static bool BlocksImplicitSubmission(IElement element) =>
+        element.LocalName == "input"
+        && (element.GetAttribute("type") ?? "text").ToLowerInvariant() is not ("hidden" or "checkbox" or "radio" or "range" or "color" or "file" or "button" or "submit" or "reset" or "image");
+
+    /// <summary>The form a control belongs to: the one its <c>form</c> attribute names, otherwise its form ancestor.</summary>
+    private static IElement? FormOwner(IElement element, DomScope scope) =>
+        element.GetAttribute("form") is { } formId
+            ? scope.GetElementById(formId) is { LocalName: "form" } owner ? owner : null
+            : element.Closest("form");
 
     private static bool IsTextLike(IElement element) =>
         element.LocalName == "textarea" || DomFacts.IsContentEditable(element)

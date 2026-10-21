@@ -504,6 +504,12 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
         }
 
         var id = StoryId.Create(title, Name);
+        if (_accessibility.DisabledRules.FirstOrDefault(r => string.IsNullOrWhiteSpace(_accessibility.Justifications.GetValueOrDefault(r))) is { } unjustified)
+        {
+            throw new InvalidOperationException(
+                $"Story '{title}/{Name}' disables the accessibility rule '{unjustified}' without a justification. Use DisableAccessibilityRule(\"{unjustified}\", \"why, and where it is tracked\").");
+        }
+
         return new Story(new StoryData
         {
             Title = title,

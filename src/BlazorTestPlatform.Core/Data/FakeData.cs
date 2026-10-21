@@ -41,7 +41,8 @@ public sealed class FakeData
         "quis", "nostrud", "exercitation", "ullamco", "laboris", "nisi", "aliquip", "commodo", "consequat",
     ];
 
-    private static readonly string[] Domains = ["example.com", "example.org", "example.net", "test.dev"];
+    // RFC 2606 / RFC 6761 names that can never belong to anyone.
+    private static readonly string[] Domains = ["example.com", "example.org", "example.net", "mail.example"];
 
     /// <summary>Creates a generator for the given seed.</summary>
     public FakeData(int seed)
@@ -83,8 +84,8 @@ public sealed class FakeData
     /// <summary>A city name.</summary>
     public string City() => Random.Pick(Cities);
 
-    /// <summary>A phone number in the reserved 555 range.</summary>
-    public string Phone() => string.Create(CultureInfo.InvariantCulture, $"+1-555-{Random.Next(100, 1000)}-{Random.Next(1000, 10000)}");
+    /// <summary>A North American phone number in the 555-0100 to 555-0199 block reserved for fiction, e.g. <c>+1-415-555-0142</c>.</summary>
+    public string Phone() => string.Create(CultureInfo.InvariantCulture, $"+1-{Random.Next(201, 1000)}-555-01{Random.Next(0, 100):00}");
 
     /// <summary>A single lorem-ipsum word.</summary>
     public string Word() => Random.Pick(Words);
