@@ -1,0 +1,17 @@
+@* Controlled component: Value/ValueChanged for two-way binding. *@
+<div role="radiogroup" aria-label="Rating">
+    @for (var i = 1; i <= Max; i++)
+    {
+        var star = i;
+        <button role="radio" aria-checked="@(Value == star ? "true" : "false")" aria-label="@star stars" @onclick="() => ValueChanged.InvokeAsync(star)">★</button>
+    }
+</div>
+<output>@Value of @Max</output>
+
+@code {
+    [Parameter] public int Value { get; set; }
+
+    [Parameter] public EventCallback<int> ValueChanged { get; set; }
+
+    [Parameter] public int Max { get; set; } = 5;
+}

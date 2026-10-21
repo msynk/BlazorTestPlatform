@@ -1,0 +1,87 @@
+name: Regenerate visual baselines
+
+# Run this on a branch after upgrading Microsoft.Playwright (e.g. on the Dependabot PR branch): it renders every story
+# in the Playwright image that matches the new package, rewrites the chromium-linux baselines that changed, records the
+# new renderer in __snapshots__/baselines.json and pushes one commit, so the PR shows exactly which screenshots moved.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Baselines to rewrite (changed = only those that differ; all = every baseline)
+        type: choice
+        options: [changed, all, missing]
+        default: changed
+
+permissions:
+  contents: write
+
+concurrency:
+  group: baselines-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  versions:
+    runs-on: ubuntu-latest
+    outputs:
+      playwright: ${{ steps.read.outputs.playwright }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: Directory.Packages.props
+          sparse-checkout-cone-mode: false
+      - id: read
+        run: |
+          version=$(sed -n 's/.*Include="Microsoft\.Playwright" Version="\([^"]*\)".*/\1/p' Directory.Packages.props | head -n 1)
+          test -n "$version"
+          echo "playwright=$version" >> "$GITHUB_OUTPUT"
+
+  regenerate:
+    needs: versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    container:
+      image: mcr.microsoft.com/playwright/dotnet:v${{ needs.versions.outputs.playwright }}-noble
+      options: --ipc=host
+    steps:
+      - name: Install git
+        run: command -v git || (apt-get update && apt-get install -y --no-install-recommends git)
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Render stories and rewrite baselines
+        env:
+          BTP_UPDATE_SNAPSHOTS: ${{ inputs.mode }}
+        run: >
+          dotnet test --project samples/Contoso.UI.Tests -c Release --
+          --filter-class '*CrossHostingTests' --filter-class '*VisualTests' --filter-class '*InAppPlayTests'
+
+      - name: Commit regenerated baselines
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add samples/Contoso.UI.Tests/__snapshots__
+          if git diff --cached --quiet; then
+            echo "Baselines already match Playwright ${{ needs.versions.outputs.playwright }}."
+            exit 0
+          fi
+          git diff --cached --stat
+          git commit -m "Regenerate chromium-linux baselines for Playwright ${{ needs.versions.outputs.playwright }}"
+          git push
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btp-baselines-report
+          path: samples/Contoso.UI.Tests/TestResults/btp
+          retention-days: 14

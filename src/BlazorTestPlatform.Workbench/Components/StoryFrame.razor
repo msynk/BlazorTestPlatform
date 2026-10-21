@@ -1,0 +1,96 @@
+@page "/_workbench/frame/{StoryId}"
+@layout WorkbenchFrameLayout
+@* Streaming lets loading states (pending tasks, authorizing users) render under static SSR and prerendering. *@
+@attribute [StreamRendering]
+@inject WorkbenchOptions Options
+@inject NavigationManager Navigation
+
+<PageTitle>@StoryId</PageTitle>
+
+<HeadContent>
+    <meta name="color-scheme" content="@ColorSchemeToken" />
+    <meta name="btp-story" content="@StoryId" />
+    <link rel="stylesheet" href="_content/BlazorTestPlatform.Workbench/btp-frame.css" />
+</HeadContent>
+
+<script suppress-error="BL9992">@((MarkupString)DocumentScript)</script>
+
+@if (InteractiveRenderMode is { } renderMode)
+{
+    <StoryHost StoryId="@StoryId" Theme="@theme.Name" Viewport="@viewport.Name" HostingModelToken="@hostingModel.ToToken()" AutoPlay="@AutoPlay" Args="@argsToken" @rendermode="renderMode" />
+}
+else
+{
+    <StoryHost StoryId="@StoryId" Theme="@theme.Name" Viewport="@viewport.Name" HostingModelToken="@hostingModel.ToToken()" Args="@argsToken" />
+}
+
+@code {
+    private ThemeDefinition theme = ThemeDefinition.Light;
+    private Viewport viewport = BlazorTestPlatform.Viewport.Desktop;
+    private HostingModel hostingModel;
+    private string? argsToken;
+
+    /// <summary>Story id.</summary>
+    [Parameter]
+    public string StoryId { get; set; } = string.Empty;
+
+    /// <summary>Hosting model token.</summary>
+    [SupplyParameterFromQuery(Name = "mode")]
+    public string? Mode { get; set; }
+
+    /// <summary>Theme name.</summary>
+    [SupplyParameterFromQuery(Name = "theme")]
+    public string? ThemeName { get; set; }
+
+    /// <summary>Viewport name.</summary>
+    [SupplyParameterFromQuery(Name = "viewport")]
+    public string? ViewportName { get; set; }
+
+    /// <summary>Set to <c>1</c> to run the story's play function in the frame (interactive modes).</summary>
+    [SupplyParameterFromQuery(Name = "play")]
+    public string? Play { get; set; }
+
+    private bool AutoPlay => Play is "1" or "true";
+
+    /// <summary>Set to <c>false</c> to disable prerendering of interactive modes.</summary>
+    [SupplyParameterFromQuery(Name = "prerender")]
+    public string? Prerender { get; set; }
+
+    private bool PrerenderEnabled => !string.Equals(Prerender, "false", StringComparison.OrdinalIgnoreCase);
+
+    private IComponentRenderMode? InteractiveRenderMode => hostingModel switch
+    {
+        HostingModel.InteractiveServer => new InteractiveServerRenderMode(PrerenderEnabled),
+        HostingModel.InteractiveWebAssembly => new InteractiveWebAssemblyRenderMode(PrerenderEnabled),
+        HostingModel.InteractiveAuto => new InteractiveAutoRenderMode(PrerenderEnabled),
+        _ => null,
+    };
+
+    private string ColorSchemeToken => theme.ColorScheme switch
+    {
+        ColorScheme.Dark => "dark",
+        ColorScheme.Light => "light",
+        _ => "light dark",
+    };
+
+    private string DocumentScript
+    {
+        get
+        {
+            var attributes = FrameScripts.ToJsonObject(theme.DocumentAttributes);
+            return $"(function(a){{for(var k in a){{document.documentElement.setAttribute(k,a[k]);}}document.documentElement.setAttribute('data-btp-frame','');}})({attributes});";
+        }
+    }
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        theme = Options.ResolveTheme(ThemeName);
+        viewport = Options.ResolveViewport(ViewportName);
+        hostingModel = HostingModelExtensions.TryParse(Mode, out var parsed) && parsed != HostingModel.InMemory ? parsed : Options.DefaultHostingModel;
+
+        // arg.Name=value pairs travel to StoryHost as one string parameter (serializable under every render mode).
+        var args = StoryArgs.FromQuery(new Uri(Navigation.Uri).Query);
+        argsToken = args.Count == 0 ? null : StoryArgs.Encode(args);
+    }
+}

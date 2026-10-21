@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Referenced as a library (not only as an analyzer) so tests can run StoryAnalyzer against sample sources. -->
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.Generators\BlazorTestPlatform.Generators.csproj" />
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.Core\BlazorTestPlatform.Core.csproj" />
+  </ItemGroup>
+
+</Project>

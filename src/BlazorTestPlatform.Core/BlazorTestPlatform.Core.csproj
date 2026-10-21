@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>BlazorTestPlatform</RootNamespace>
+    <AssemblyName>BlazorTestPlatform.Core</AssemblyName>
+    <Description>Core story, scenario, test-data, matrix, accessibility and performance model for BlazorTestPlatform. Driver-agnostic: the same stories run in bUnit, real browsers and the component workbench.</Description>
+    <IsTrimmable>true</IsTrimmable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+  </ItemGroup>
+
+  <!-- The story-catalog source generator ships inside this package (analyzers/), so every consumer gets
+       reflection-free, trimming-safe story discovery automatically. -->
+  <ItemGroup>
+    <ProjectReference Include="..\BlazorTestPlatform.Generators\BlazorTestPlatform.Generators.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <None Include="..\BlazorTestPlatform.Generators\bin\$(Configuration)\netstandard2.0\BlazorTestPlatform.Generators.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BlazorTestPlatform.Bunit" />
+    <InternalsVisibleTo Include="BlazorTestPlatform.Playwright" />
+    <InternalsVisibleTo Include="BlazorTestPlatform.Workbench" />
+    <InternalsVisibleTo Include="BlazorTestPlatform.Core.Tests" />
+  </ItemGroup>
+
+</Project>

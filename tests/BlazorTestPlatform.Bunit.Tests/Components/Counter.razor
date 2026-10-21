@@ -1,0 +1,16 @@
+<p role="status">Current count: @count</p>
+<button class="btn" @onclick="IncrementAsync">Increment</button>
+
+@code {
+    private int count;
+
+    [Parameter] public int IncrementAmount { get; set; } = 1;
+
+    [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+
+    private async Task IncrementAsync()
+    {
+        count += IncrementAmount;
+        await OnCountChanged.InvokeAsync(count);
+    }
+}

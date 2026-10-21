@@ -1,0 +1,22 @@
+@inject TimeProvider Time
+
+@if (loaded)
+{
+    <p>Loaded @Time.GetUtcNow().ToString("yyyy-MM-dd")</p>
+}
+else
+{
+    <p aria-busy="true">Loading…</p>
+}
+
+@code {
+    private bool loaded;
+
+    [Parameter] public TimeSpan Delay { get; set; } = TimeSpan.FromSeconds(5);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.Delay(Delay, Time);
+        loaded = true;
+    }
+}

@@ -1,0 +1,41 @@
+@implements IDisposable
+@inject TimeProvider Time
+
+<p class="c-timer" role="timer" aria-live="off">
+    @if (remaining > TimeSpan.Zero)
+    {
+        <span>Session expires in @remaining.ToString(@"m\:ss")</span>
+    }
+    else
+    {
+        <span>Session expired</span>
+    }
+</p>
+
+@code {
+    private ITimer? timer;
+    private TimeSpan remaining;
+    private DateTimeOffset expiresAt;
+
+    [Parameter] public TimeSpan Duration { get; set; } = TimeSpan.FromMinutes(2);
+
+    protected override void OnInitialized()
+    {
+        expiresAt = Time.GetUtcNow() + Duration;
+        remaining = Duration;
+        timer = Time.CreateTimer(_ => InvokeAsync(Tick), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    private void Tick()
+    {
+        remaining = expiresAt - Time.GetUtcNow();
+        if (remaining < TimeSpan.Zero)
+        {
+            remaining = TimeSpan.Zero;
+        }
+
+        StateHasChanged();
+    }
+
+    public void Dispose() => timer?.Dispose();
+}

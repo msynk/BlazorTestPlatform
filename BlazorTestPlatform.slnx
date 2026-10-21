@@ -1,0 +1,29 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/Contoso.UI.Stories/Contoso.UI.Stories.csproj" />
+    <Project Path="samples/Contoso.UI.Tests/Contoso.UI.Tests.csproj" />
+    <Project Path="samples/Contoso.UI/Contoso.UI.csproj" />
+    <Project Path="samples/Contoso.Workbench.Client/Contoso.Workbench.Client.csproj" />
+    <Project Path="samples/Contoso.Workbench/Contoso.Workbench.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/BlazorTestPlatform.Accessibility/BlazorTestPlatform.Accessibility.csproj" />
+    <Project Path="src/BlazorTestPlatform.Bunit/BlazorTestPlatform.Bunit.csproj" />
+    <Project Path="src/BlazorTestPlatform.Cli/BlazorTestPlatform.Cli.csproj" />
+    <Project Path="src/BlazorTestPlatform.Core/BlazorTestPlatform.Core.csproj" />
+    <Project Path="src/BlazorTestPlatform.Generators/BlazorTestPlatform.Generators.csproj" />
+    <Project Path="src/BlazorTestPlatform.Playwright/BlazorTestPlatform.Playwright.csproj" />
+    <Project Path="src/BlazorTestPlatform.Reporting/BlazorTestPlatform.Reporting.csproj" />
+    <Project Path="src/BlazorTestPlatform.Visual/BlazorTestPlatform.Visual.csproj" />
+    <Project Path="src/BlazorTestPlatform.Workbench/BlazorTestPlatform.Workbench.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BlazorTestPlatform.Accessibility.Tests/BlazorTestPlatform.Accessibility.Tests.csproj" />
+    <Project Path="tests/BlazorTestPlatform.Bunit.Tests/BlazorTestPlatform.Bunit.Tests.csproj" />
+    <Project Path="tests/BlazorTestPlatform.Core.Tests/BlazorTestPlatform.Core.Tests.csproj" />
+    <Project Path="tests/BlazorTestPlatform.Generators.Tests/BlazorTestPlatform.Generators.Tests.csproj" />
+    <Project Path="tests/BlazorTestPlatform.Reporting.Tests/BlazorTestPlatform.Reporting.Tests.csproj" />
+    <Project Path="tests/BlazorTestPlatform.Visual.Tests/BlazorTestPlatform.Visual.Tests.csproj" />
+    <Project Path="tests/BlazorTestPlatform.Workbench.Tests/BlazorTestPlatform.Workbench.Tests.csproj" />
+  </Folder>
+</Solution>

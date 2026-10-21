@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>BlazorTestPlatform.Visual</RootNamespace>
+    <Description>Dependency-free visual regression engine for BlazorTestPlatform: PNG codec, perceptual (YIQ) image diff with anti-aliasing detection, masks and a baseline store with approval workflow.</Description>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlazorTestPlatform.Core\BlazorTestPlatform.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BlazorTestPlatform.Visual.Tests" />
+  </ItemGroup>
+
+</Project>

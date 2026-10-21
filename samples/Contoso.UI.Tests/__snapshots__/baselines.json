@@ -1,0 +1,13 @@
+{
+  "$comment": "Renderer that produced the committed baselines, per browser-platform. Maintained by BlazorTestPlatform; regenerate baselines instead of editing it.",
+  "renderers": {
+    "chromium-linux": {
+      "playwright": "1.63.0",
+      "browserVersion": "153.0.8010.12"
+    },
+    "chromium-win32": {
+      "playwright": "1.63.0",
+      "browserVersion": "153.0.8010.12"
+    }
+  }
+}

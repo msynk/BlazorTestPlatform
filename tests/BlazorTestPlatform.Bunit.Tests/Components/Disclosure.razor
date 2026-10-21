@@ -1,0 +1,9 @@
+@* Visibility is controlled purely by CSS classes, as in many design systems. *@
+<button aria-expanded="@(open ? "true" : "false")" aria-controls="details-panel" @onclick="() => open = !open">Details</button>
+<div id="details-panel" class="disclosure-panel @(open ? "is-open" : null)">
+    <a href="/more">Read more</a>
+</div>
+
+@code {
+    private bool open;
+}

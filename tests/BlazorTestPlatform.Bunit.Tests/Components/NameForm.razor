@@ -1,0 +1,21 @@
+<form @onsubmit="Submit">
+    <label for="name">Name</label>
+    <input id="name" @bind="name" />
+    <label><input type="checkbox" @bind="subscribe" /> Subscribe</label>
+    <button type="submit">Save</button>
+</form>
+<p data-testid="result">@result</p>
+<p data-testid="submits">@submits</p>
+
+@code {
+    private string name = string.Empty;
+    private bool subscribe;
+    private string result = string.Empty;
+    private int submits;
+
+    private void Submit()
+    {
+        submits++;
+        result = $"Saved {name} (subscribe: {subscribe})";
+    }
+}

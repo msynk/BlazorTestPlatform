@@ -1,0 +1,64 @@
+@inject ITodoService Todos
+
+<section class="c-todo" aria-labelledby="todo-title">
+    <h2 id="todo-title" class="c-todo__title">@Title</h2>
+
+    @if (items is null)
+    {
+        <p class="c-todo__loading" role="status">Loading tasks…</p>
+    }
+    else
+    {
+        <form class="c-todo__form" @onsubmit="AddAsync">
+            <label class="c-visually-hidden" for="todo-new">New task</label>
+            <input id="todo-new" class="c-field__input" placeholder="What needs doing?" @bind="draft" @bind:event="oninput" />
+            <Button Type="submit" Disabled="@string.IsNullOrWhiteSpace(draft)">Add</Button>
+        </form>
+
+        @if (items.Count == 0)
+        {
+            <p class="c-todo__empty">Nothing to do. Enjoy your day!</p>
+        }
+        else
+        {
+            <ul class="c-todo__items">
+                @foreach (var item in items)
+                {
+                    <li class="c-todo__item @(item.Done ? "c-todo__item--done" : null)">
+                        <label>
+                            <input type="checkbox" checked="@item.Done" @onchange="() => ToggleAsync(item)" />
+                            <span>@item.Title</span>
+                        </label>
+                    </li>
+                }
+            </ul>
+        }
+        <p class="c-todo__summary" role="status">@items.Count(i => !i.Done) of @items.Count remaining</p>
+    }
+</section>
+
+@code {
+    private List<TodoItem>? items;
+    private string? draft;
+
+    [Parameter] public string Title { get; set; } = "Tasks";
+
+    protected override async Task OnInitializedAsync() => items = [.. await Todos.GetAllAsync()];
+
+    private async Task AddAsync()
+    {
+        if (string.IsNullOrWhiteSpace(draft))
+        {
+            return;
+        }
+
+        items!.Add(await Todos.AddAsync(draft.Trim()));
+        draft = null;
+    }
+
+    private async Task ToggleAsync(TodoItem item)
+    {
+        var updated = await Todos.SetDoneAsync(item.Id, !item.Done);
+        items![items.IndexOf(item)] = updated;
+    }
+}

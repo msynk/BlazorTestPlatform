@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <Description>Stories for Contoso.UI: one definition per component state, shared by the workbench, bUnit and browser tests.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Contoso.UI\Contoso.UI.csproj" />
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.Core\BlazorTestPlatform.Core.csproj" />
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.Workbench\BlazorTestPlatform.Workbench.csproj" />
+  </ItemGroup>
+
+</Project>

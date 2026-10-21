@@ -1,0 +1,69 @@
+<div class="c-field @(Error is null ? null : "c-field--invalid")">
+    <label class="c-field__label" for="@FieldId">
+        @Label
+        @if (Required)
+        {
+            <span class="c-field__required" aria-hidden="true">*</span>
+        }
+    </label>
+    <input id="@FieldId"
+           class="c-field__input"
+           type="@Type"
+           value="@Value"
+           placeholder="@Placeholder"
+           required="@Required"
+           aria-invalid="@(Error is null ? null : "true")"
+           aria-describedby="@DescribedBy"
+           @oninput="OnInputAsync" />
+    @if (Hint is not null)
+    {
+        <p class="c-field__hint" id="@(FieldId)-hint">@Hint</p>
+    }
+    @if (Error is not null)
+    {
+        <p class="c-field__error" id="@(FieldId)-error">@Error</p>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    [Parameter] public string? Value { get; set; }
+
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    [Parameter] public string Type { get; set; } = "text";
+
+    [Parameter] public string? Placeholder { get; set; }
+
+    [Parameter] public string? Hint { get; set; }
+
+    [Parameter] public string? Error { get; set; }
+
+    [Parameter] public bool Required { get; set; }
+
+    [Parameter] public string? Id { get; set; }
+
+    private string FieldId => Id ?? "field-" + new string(Label.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+
+    private string? DescribedBy
+    {
+        get
+        {
+            var ids = new List<string>();
+            if (Hint is not null)
+            {
+                ids.Add(FieldId + "-hint");
+            }
+
+            if (Error is not null)
+            {
+                ids.Add(FieldId + "-error");
+            }
+
+            return ids.Count == 0 ? null : string.Join(' ', ids);
+        }
+    }
+
+    private Task OnInputAsync(ChangeEventArgs e) => ValueChanged.InvokeAsync(e.Value?.ToString());
+}

@@ -1,0 +1,36 @@
+@if (!dismissed)
+{
+    <div class="c-alert c-alert--@Severity.ToString().ToLowerInvariant()" role="@(Severity is AlertSeverity.Error or AlertSeverity.Warning ? "alert" : "status")">
+        <div class="c-alert__body">
+            @if (Title is not null)
+            {
+                <p class="c-alert__title">@Title</p>
+            }
+            <div>@ChildContent</div>
+        </div>
+        @if (Dismissible)
+        {
+            <button type="button" class="c-alert__close" aria-label="Dismiss" @onclick="DismissAsync">×</button>
+        }
+    </div>
+}
+
+@code {
+    private bool dismissed;
+
+    [Parameter] public AlertSeverity Severity { get; set; } = AlertSeverity.Info;
+
+    [Parameter] public string? Title { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    [Parameter] public bool Dismissible { get; set; }
+
+    [Parameter] public EventCallback OnDismiss { get; set; }
+
+    private async Task DismissAsync()
+    {
+        dismissed = true;
+        await OnDismiss.InvokeAsync();
+    }
+}

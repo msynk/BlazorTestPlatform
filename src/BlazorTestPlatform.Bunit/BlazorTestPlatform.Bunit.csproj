@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <RootNamespace>BlazorTestPlatform.Bunit</RootNamespace>
+    <Description>Runs BlazorTestPlatform stories in-memory with bUnit: browser-faithful keyboard, pointer and focus emulation, static accessibility checks, render-count/allocation regression tracking and rich failure timelines.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlazorTestPlatform.Core\BlazorTestPlatform.Core.csproj" />
+    <ProjectReference Include="..\BlazorTestPlatform.Accessibility\BlazorTestPlatform.Accessibility.csproj" />
+    <PackageReference Include="bunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BlazorTestPlatform.Bunit.Tests" />
+  </ItemGroup>
+
+</Project>

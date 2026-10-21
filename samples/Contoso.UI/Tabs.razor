@@ -1,0 +1,63 @@
+@* WAI-ARIA Tabs pattern: roving tabindex, Arrow/Home/End keys, automatic activation. *@
+<div class="c-tabs">
+    <div role="tablist" aria-label="@Label" class="c-tabs__list">
+        @for (var i = 0; i < Items.Count; i++)
+        {
+            var index = i;
+            <button role="tab"
+                    id="@($"{IdPrefix}-tab-{index}")"
+                    class="c-tabs__tab"
+                    aria-selected="@(SelectedIndex == index ? "true" : "false")"
+                    aria-controls="@($"{IdPrefix}-panel-{index}")"
+                    tabindex="@(SelectedIndex == index ? 0 : -1)"
+                    @ref="tabs[index]"
+                    @onclick="() => SelectAsync(index, focus: false)"
+                    @onkeydown="e => OnKeyDownAsync(e, index)">@Items[index].Label</button>
+        }
+    </div>
+    @for (var i = 0; i < Items.Count; i++)
+    {
+        <div role="tabpanel"
+             id="@($"{IdPrefix}-panel-{i}")"
+             class="c-tabs__panel"
+             aria-labelledby="@($"{IdPrefix}-tab-{i}")"
+             tabindex="0"
+             hidden="@(SelectedIndex != i)">@Items[i].Content</div>
+    }
+</div>
+
+@code {
+    private readonly Dictionary<int, ElementReference> tabs = new();
+
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public IReadOnlyList<TabItem> Items { get; set; } = [];
+
+    [Parameter] public int SelectedIndex { get; set; }
+
+    [Parameter] public EventCallback<int> SelectedIndexChanged { get; set; }
+
+    [Parameter] public string IdPrefix { get; set; } = "tabs";
+
+    private async Task SelectAsync(int index, bool focus)
+    {
+        SelectedIndex = index;
+        await SelectedIndexChanged.InvokeAsync(index);
+        if (focus)
+        {
+            StateHasChanged();
+            await tabs[index].FocusAsync();
+        }
+    }
+
+    private Task OnKeyDownAsync(KeyboardEventArgs e, int index) => e.Key switch
+    {
+        "ArrowRight" => SelectAsync((index + 1) % Items.Count, focus: true),
+        "ArrowLeft" => SelectAsync((index - 1 + Items.Count) % Items.Count, focus: true),
+        "Home" => SelectAsync(0, focus: true),
+        "End" => SelectAsync(Items.Count - 1, focus: true),
+        _ => Task.CompletedTask,
+    };
+
+    public sealed record TabItem(string Label, RenderFragment Content);
+}

@@ -1,0 +1,90 @@
+{
+  "component": "Inputs/Button",
+  "fingerprint": "c9165975334a2870",
+  "items": [
+    {
+      "checkId": "keyboard",
+      "status": "pass"
+    },
+    {
+      "checkId": "no-keyboard-trap",
+      "status": "pass"
+    },
+    {
+      "checkId": "focus-order",
+      "status": "pass"
+    },
+    {
+      "checkId": "focus-visible",
+      "status": "pass"
+    },
+    {
+      "checkId": "focus-not-obscured",
+      "status": "pass"
+    },
+    {
+      "checkId": "meaningful-sequence",
+      "status": "notApplicable"
+    },
+    {
+      "checkId": "sensory-characteristics",
+      "status": "notApplicable"
+    },
+    {
+      "checkId": "use-of-color",
+      "status": "pass"
+    },
+    {
+      "checkId": "non-text-contrast",
+      "status": "pass"
+    },
+    {
+      "checkId": "reflow",
+      "status": "notApplicable"
+    },
+    {
+      "checkId": "text-spacing",
+      "status": "notApplicable"
+    },
+    {
+      "checkId": "content-on-hover-focus",
+      "status": "notApplicable"
+    },
+    {
+      "checkId": "pointer-cancellation",
+      "status": "pass"
+    },
+    {
+      "checkId": "label-in-name",
+      "status": "pass"
+    },
+    {
+      "checkId": "dragging",
+      "status": "notApplicable"
+    },
+    {
+      "checkId": "target-size",
+      "status": "pass"
+    },
+    {
+      "checkId": "on-focus-input",
+      "status": "notApplicable"
+    },
+    {
+      "checkId": "error-identification",
+      "status": "notApplicable"
+    },
+    {
+      "checkId": "status-messages",
+      "status": "notApplicable"
+    },
+    {
+      "checkId": "screen-reader",
+      "status": "pass"
+    }
+  ],
+  "reviewer": "Sample reviewer (example data shipped with the sample)",
+  "reviewedAt": "2026-10-20T00:00:00+00:00",
+  "assistiveTechnology": "NVDA + Firefox, VoiceOver + Safari",
+  "notes": "Example of a completed review. Replace with your own team's audit."
+}

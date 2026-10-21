@@ -1,0 +1,26 @@
+@inject IWeatherService Weather
+
+@if (forecasts is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <ul>
+        @foreach (var forecast in forecasts)
+        {
+            <li>@forecast</li>
+        }
+    </ul>
+}
+
+@code {
+    private IReadOnlyList<string>? forecasts;
+
+    protected override async Task OnInitializedAsync() => forecasts = await Weather.GetAsync();
+
+    public interface IWeatherService
+    {
+        Task<IReadOnlyList<string>> GetAsync();
+    }
+}

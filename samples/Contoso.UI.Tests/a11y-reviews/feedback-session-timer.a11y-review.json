@@ -1,0 +1,86 @@
+{
+  "component": "Feedback/Session timer",
+  "fingerprint": "9bbc62ac6fa10994",
+  "items": [
+    {
+      "checkId": "keyboard",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "no-keyboard-trap",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "focus-order",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "focus-visible",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "focus-not-obscured",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "meaningful-sequence",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "sensory-characteristics",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "use-of-color",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "non-text-contrast",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "reflow",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "text-spacing",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "content-on-hover-focus",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "pointer-cancellation",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "label-in-name",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "dragging",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "target-size",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "on-focus-input",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "error-identification",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "status-messages",
+      "status": "notReviewed"
+    },
+    {
+      "checkId": "screen-reader",
+      "status": "notReviewed"
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+@inject PeopleClient People
+
+<section class="c-people" aria-labelledby="people-title">
+    <div class="c-people__header">
+        <h2 id="people-title" class="c-todo__title">Team directory</h2>
+        <label class="c-visually-hidden" for="people-team">Team</label>
+        <select id="people-team" class="c-field__input" @bind="team" @bind:after="LoadAsync">
+            <option value="">All teams</option>
+            @foreach (var name in Teams)
+            {
+                <option value="@name">@name</option>
+            }
+        </select>
+    </div>
+
+    @switch (state)
+    {
+        case LoadState.Loading:
+            <p class="c-todo__loading" role="status">Loading people…</p>
+            break;
+        case LoadState.Failed:
+            <Alert Severity="AlertSeverity.Error" Title="Couldn't load the directory">
+                <p>@error</p>
+                <Button Variant="ButtonVariant.Secondary" Size="ButtonSize.Small" OnClick="LoadAsync">Retry</Button>
+            </Alert>
+            break;
+        case LoadState.Loaded when people.Count == 0:
+            <p class="c-todo__empty">No people in this team yet.</p>
+            break;
+        default:
+            <ul class="c-people__list">
+                @foreach (var person in people)
+                {
+                    <li class="c-people__item">
+                        <span class="c-user__avatar" aria-hidden="true">@Initials(person.Name)</span>
+                        <span><strong>@person.Name</strong><br /><span class="c-people__meta">@person.Email · @person.Team</span></span>
+                    </li>
+                }
+            </ul>
+            break;
+    }
+</section>
+
+@code {
+    private static readonly string[] Teams = ["Design", "Engineering", "Support"];
+    private IReadOnlyList<Person> people = [];
+    private LoadState state = LoadState.Loading;
+    private string team = string.Empty;
+    private string? error;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        state = LoadState.Loading;
+        try
+        {
+            people = await People.GetAsync(team);
+            state = LoadState.Loaded;
+        }
+        catch (HttpRequestException ex)
+        {
+            error = ex.StatusCode is { } status ? $"The server answered {(int)status}." : "The server could not be reached.";
+            state = LoadState.Failed;
+        }
+    }
+
+    private static string Initials(string name) =>
+        string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
+
+    private enum LoadState
+    {
+        Loading,
+        Loaded,
+        Failed,
+    }
+}

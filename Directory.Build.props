@@ -1,0 +1,41 @@
+<Project>
+
+  <PropertyGroup>
+    <BtpTargetFramework>net10.0</BtpTargetFramework>
+    <TargetFramework>$(BtpTargetFramework)</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <IsPackable>false</IsPackable>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <RepoRoot>$(MSBuildThisFileDirectory)</RepoRoot>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(CI)' == 'true' OR '$(GITHUB_ACTIONS)' == 'true' OR '$(TF_BUILD)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <!-- Package metadata shared by every shipped library. -->
+  <PropertyGroup>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionSuffix>preview.2</VersionSuffix>
+    <Authors>BlazorTestPlatform contributors</Authors>
+    <Company>BlazorTestPlatform</Company>
+    <Product>BlazorTestPlatform</Product>
+    <Copyright>Copyright (c) BlazorTestPlatform contributors</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/blazor-test-platform/BlazorTestPlatform</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/blazor-test-platform/BlazorTestPlatform</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>blazor;testing;bunit;playwright;visual-regression;accessibility;axe;workbench;storybook</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+</Project>

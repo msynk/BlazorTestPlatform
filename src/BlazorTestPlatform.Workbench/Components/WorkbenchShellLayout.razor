@@ -1,0 +1,11 @@
+@inherits LayoutComponentBase
+
+<HeadContent>
+    <link rel="stylesheet" href="_content/BlazorTestPlatform.Workbench/workbench.css" />
+</HeadContent>
+
+@* Full page loads keep the shell's tiny script simple and the frames isolated. *@
+<div class="btp-app" data-enhance-nav="false">
+    @Body
+</div>
+<script suppress-error="BL9992" type="module" src="_content/BlazorTestPlatform.Workbench/workbench.js"></script>

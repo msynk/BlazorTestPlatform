@@ -1,0 +1,24 @@
+## Build output
+bin/
+obj/
+artifacts/
+*.nupkg
+*.snupkg
+
+## IDE
+.vs/
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.user
+*.suo
+
+## Test output
+TestResults/
+coverage*/
+*.trx
+
+## BlazorTestPlatform run output (baselines in __snapshots__ ARE committed)
+btp-results/
+**/__snapshots__/**/*.actual.png
+**/__snapshots__/**/*.diff.png

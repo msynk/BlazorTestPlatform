@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>BlazorTestPlatform.Reporting</RootNamespace>
+    <Description>Reports for BlazorTestPlatform runs: a self-contained HTML report with visual-diff viewer, accessibility and performance details and failure timelines; JUnit XML; GitHub step summaries; and cross-run flake history.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlazorTestPlatform.Core\BlazorTestPlatform.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,67 @@
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+
+@* Reads and stores the visitor's decision in localStorage, so it can only decide once interactive. *@
+@switch (state)
+{
+    case ConsentState.Unknown:
+        <p class="c-consent c-consent--pending" aria-busy="true">Checking your cookie preferences…</p>
+        break;
+    case ConsentState.Pending:
+        <section class="c-consent" aria-label="Cookie consent">
+            <p class="c-consent__text">
+                <strong>We use cookies</strong> to remember your preferences.
+                <span class="c-consent__detail">Analytics cookies are only set if you accept.</span>
+            </p>
+            <div class="c-consent__actions">
+                <Button Variant="ButtonVariant.Secondary" OnClick="() => DecideAsync(accepted: false)">Decline</Button>
+                <Button OnClick="() => DecideAsync(accepted: true)">Accept</Button>
+            </div>
+        </section>
+        break;
+    default:
+        <p class="c-consent c-consent--saved" role="status">Cookie preferences saved: @(state == ConsentState.Accepted ? "accepted" : "declined").</p>
+        break;
+}
+
+@code {
+    /// <summary>localStorage key holding the decision.</summary>
+    public const string StorageKey = "contoso-cookie-consent";
+
+    private ConsentState state;
+
+    /// <summary>Raised with true when the visitor accepts, false when they decline.</summary>
+    [Parameter] public EventCallback<bool> OnDecision { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        var saved = await JS.InvokeAsync<string?>("localStorage.getItem", StorageKey);
+        state = saved switch
+        {
+            "accepted" => ConsentState.Accepted,
+            "declined" => ConsentState.Declined,
+            _ => ConsentState.Pending,
+        };
+        StateHasChanged();
+    }
+
+    private async Task DecideAsync(bool accepted)
+    {
+        await JS.InvokeVoidAsync("localStorage.setItem", StorageKey, accepted ? "accepted" : "declined");
+        state = accepted ? ConsentState.Accepted : ConsentState.Declined;
+        await OnDecision.InvokeAsync(accepted);
+    }
+
+    private enum ConsentState
+    {
+        Unknown,
+        Pending,
+        Accepted,
+        Declined,
+    }
+}

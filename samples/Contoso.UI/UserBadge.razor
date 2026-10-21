@@ -1,0 +1,22 @@
+<AuthorizeView>
+    <Authorized>
+        <div class="c-user">
+            <span class="c-user__avatar" aria-hidden="true">@Initials(context.User.Identity?.Name)</span>
+            <span class="c-user__name">@context.User.Identity?.Name</span>
+            <AuthorizeView Roles="Admin" Context="admin">
+                <Authorized><span class="c-user__role">Admin</span></Authorized>
+            </AuthorizeView>
+        </div>
+    </Authorized>
+    <Authorizing>
+        <span class="c-user c-user--pending" role="status">Signing in…</span>
+    </Authorizing>
+    <NotAuthorized>
+        <a class="c-button c-button--secondary c-button--small" href="login">Sign in</a>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private static string Initials(string? name) =>
+        string.Concat((name ?? "?").Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
+}

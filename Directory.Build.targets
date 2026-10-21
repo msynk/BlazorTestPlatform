@@ -1,0 +1,14 @@
+<Project>
+
+  <!--
+    In-repo consumers get the story-catalog source generator the same way NuGet consumers do (it ships inside the
+    BlazorTestPlatform.Core package under analyzers/). It only emits code for assemblies that declare stories.
+  -->
+  <ItemGroup Condition="'$(MSBuildProjectName)' != 'BlazorTestPlatform.Generators' AND '$(MSBuildProjectName)' != 'BlazorTestPlatform.Core'">
+    <ProjectReference Include="$(MSBuildThisFileDirectory)src\BlazorTestPlatform.Generators\BlazorTestPlatform.Generators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

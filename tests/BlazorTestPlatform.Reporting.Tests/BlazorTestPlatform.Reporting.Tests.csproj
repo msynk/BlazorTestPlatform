@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.Reporting\BlazorTestPlatform.Reporting.csproj" />
+  </ItemGroup>
+
+</Project>

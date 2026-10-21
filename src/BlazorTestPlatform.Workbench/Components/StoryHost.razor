@@ -1,0 +1,260 @@
+@using Microsoft.Extensions.DependencyInjection
+@implements IAsyncDisposable
+@inject StoryCatalog Catalog
+@inject WorkbenchOptions Options
+@inject StoryServiceScope ServiceScope
+@inject IServiceProvider Services
+
+@* The root element carries the signals browser runners wait for:
+   data-btp-status   loading | ready | error
+   data-btp-interactive  true once event handlers are live (hydration finished) *@
+<div data-btp-root
+     data-btp-story="@StoryId"
+     data-btp-status="@status"
+     data-btp-renderer="@RendererInfo.Name"
+     data-btp-interactive="@(bridgeReady ? "true" : "false")"
+     data-btp-layout="@layoutToken"
+     data-btp-unsupported-overrides="@unsupportedOverrides"
+     data-btp-args="@argsState"
+     class="btp-story-root @themeDefinition?.CssClass">
+    @if (problem is not null)
+    {
+        <pre data-btp-error>@problem</pre>
+    }
+    else if (renderContext is not null)
+    {
+        @if (argErrors is { Count: > 0 })
+        {
+            @* Rejected overrides; the story renders with its own values for those parameters. *@
+            <ul class="btp-arg-errors" data-btp-arg-errors role="alert">
+                @foreach (var argError in argErrors)
+                {
+                    <li>@argError</li>
+                }
+            </ul>
+        }
+        <ErrorBoundary>
+            <ChildContent>
+                <StoryRoot Context="renderContext" />
+            </ChildContent>
+            <ErrorContent Context="exception">
+                <pre data-btp-error>@exception.GetType().Name: @exception.Message</pre>
+            </ErrorContent>
+        </ErrorBoundary>
+    }
+</div>
+
+@code {
+    private StoryRenderContext? renderContext;
+    private ThemeDefinition? themeDefinition;
+    private string status = "loading";
+    private string layoutToken = "padded";
+    private string? unsupportedOverrides;
+    private IReadOnlyList<string>? argErrors;
+    private string? argsState;
+    private string? problem;
+    private bool bridgeReady;
+    private DotNetObjectReference<StoryHost>? selfReference;
+    private IJSObjectReference? module;
+
+    // The workbench's own calls bypass the story's JS-mock decorator.
+    private IJSRuntime JS => jsRuntime ??= WorkbenchServiceCollectionExtensions.RealJSRuntime(Services);
+    private IJSRuntime? jsRuntime;
+
+    /// <summary>Story id.</summary>
+    [Parameter, EditorRequired]
+    public string StoryId { get; set; } = string.Empty;
+
+    /// <summary>Theme name.</summary>
+    [Parameter]
+    public string? Theme { get; set; }
+
+    /// <summary>Viewport name.</summary>
+    [Parameter]
+    public string? Viewport { get; set; }
+
+    /// <summary>Hosting model token (memory, ssr, server, wasm, auto).</summary>
+    [Parameter]
+    public string? HostingModelToken { get; set; }
+
+    /// <summary>Runs the story's play function in the frame once it is interactive (workbench "Run interactions").</summary>
+    [Parameter]
+    public bool AutoPlay { get; set; }
+
+    /// <summary>Arg overrides from the frame URL, encoded with <see cref="StoryArgs.Encode"/>.</summary>
+    [Parameter]
+    public string? Args { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Catalog.TryGet(StoryId, out var story))
+        {
+            problem = $"Story '{StoryId}' was not found in the workbench catalog.";
+            status = "error";
+            return;
+        }
+
+        var hostingModel = HostingModelExtensions.TryParse(HostingModelToken, out var parsed) ? parsed : Options.DefaultHostingModel;
+        themeDefinition = Options.ResolveTheme(Theme);
+        layoutToken = story.Layout.ToString().ToLowerInvariant();
+        var unsupported = Options.UnsupportedOverridesOf(story);
+        unsupportedOverrides = unsupported.Count == 0 ? null : string.Join(", ", unsupported.Select(t => t.FullName));
+        var args = StoryArgs.Resolve(story, StoryArgs.Decode(Args), fromLink: true);
+        ShowArgs(args);
+        var context = new StoryRenderContext(story, Services, hostingModel)
+        {
+            Theme = themeDefinition,
+            Viewport = Options.ResolveViewport(Viewport),
+            ArgOverrides = args.Values,
+        };
+
+        try
+        {
+            await ServiceScope.ActivateAsync(story, hostingModel, context.Authentication);
+        }
+        catch (Exception ex)
+        {
+            problem = $"Story fixtures failed: {ex.GetType().Name}: {ex.Message}";
+            status = "error";
+            return;
+        }
+
+        renderContext = context;
+        status = "ready";
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !RendererInfo.IsInteractive || renderContext is null)
+        {
+            return;
+        }
+
+        selfReference = DotNetObjectReference.Create(this);
+        module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/BlazorTestPlatform.Workbench/btp-frame.js");
+        await module.InvokeVoidAsync("register", selfReference, StoryId, RendererInfo.Name);
+        bridgeReady = true;
+        StateHasChanged();
+
+        if (AutoPlay)
+        {
+            _ = RunPlayAsync();
+        }
+    }
+
+    private async Task RunPlayAsync()
+    {
+        var story = renderContext!.Story;
+        var driverModule = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/BlazorTestPlatform.Workbench/btp-driver.js");
+        var recorder = new BlazorTestPlatform.Results.StepRecorder();
+        string status;
+        string? error = null;
+        if (story.Play is not { } play)
+        {
+            status = "skipped";
+            error = "The story has no play function.";
+        }
+        else
+        {
+            var driver = new InAppStoryDriver(driverModule, renderContext, ServiceScope, RendererInfo.Name);
+            var context = new StoryContext(story, driver, TimeSpan.FromSeconds(5), recorder);
+            try
+            {
+                await recorder.RunAsync("play", BlazorTestPlatform.Results.StepKind.Step, () => play(context));
+                status = "passed";
+            }
+            catch (StorySkippedException ex)
+            {
+                status = "skipped";
+                error = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                status = "failed";
+                error = ex.Message;
+            }
+        }
+
+        var result = PlayResult.ToJson(status, error, recorder.Steps, renderContext.Actions.Records.Count, RendererInfo.Name);
+        await driverModule.InvokeVoidAsync("publishResultJson", StoryId, result);
+    }
+
+    /// <summary>Returns the action log as JSON (called by browser test runners).</summary>
+    [JSInvokable]
+    public string GetActions() => renderContext?.Actions.ToJson() ?? "[]";
+
+    /// <summary>Returns requests answered by the story's mocked HTTP backend as JSON.</summary>
+    [JSInvokable]
+    public string GetHttpRequests() => ServiceScope.Overrides?.GetService<HttpMock>()?.RequestsToJson() ?? "[]";
+
+    /// <summary>
+    /// Replaces the story's arg overrides without reloading the frame (workbench controls). Returns the rejected
+    /// overrides, one per line, or an empty string.
+    /// </summary>
+    [JSInvokable]
+    public async Task<string> SetArgs(string? token)
+    {
+        if (renderContext is null)
+        {
+            return "The story is not rendered.";
+        }
+
+        // Typed in the workbench's own controls, not followed from a link.
+        var args = StoryArgs.Resolve(renderContext.Story, StoryArgs.Decode(token), fromLink: false);
+        await InvokeAsync(async () =>
+        {
+            ShowArgs(args);
+            await renderContext.SetArgOverridesAsync(args.Values);
+            StateHasChanged();
+        });
+        return string.Join("\n", args.Errors);
+    }
+
+    /// <summary>Returns the JavaScript-interop calls recorded for the story as JSON.</summary>
+    [JSInvokable]
+    public string GetJSCalls() => ServiceScope.JSCalls.ToJson();
+
+    /// <summary>True when the story uses fake time.</summary>
+    [JSInvokable]
+    public bool HasFakeTime() => ServiceScope.Overrides?.GetService<Microsoft.Extensions.Time.Testing.FakeTimeProvider>() is not null;
+
+    /// <summary>Advances the story's fake clock.</summary>
+    [JSInvokable]
+    public async Task AdvanceTime(double milliseconds)
+    {
+        var time = ServiceScope.Overrides?.GetService<Microsoft.Extensions.Time.Testing.FakeTimeProvider>()
+            ?? throw new InvalidOperationException("The story does not use fake time. Call UseFakeTime(...) on the story.");
+        await InvokeAsync(() => time.Advance(TimeSpan.FromMilliseconds(milliseconds)));
+        await Task.Yield();
+    }
+
+    /// <summary>Completes after pending renders were flushed.</summary>
+    [JSInvokable]
+    public Task WaitForIdle() => InvokeAsync(() => Task.Delay(1));
+
+    private void ShowArgs(ResolvedArgs args)
+    {
+        argErrors = args.Errors;
+        argsState = args.Values.Count == 0 ? null : StoryArgs.Encode(args.Values.Select(v => new KeyValuePair<string, string?>(v.Key, StoryArgs.Format(v.Value))));
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        if (module is not null)
+        {
+            try
+            {
+                await module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone.
+            }
+        }
+
+        selfReference?.Dispose();
+    }
+}

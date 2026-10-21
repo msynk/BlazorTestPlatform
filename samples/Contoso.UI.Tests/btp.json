@@ -1,0 +1,11 @@
+{
+  "accessibility": {
+    "failOn": "serious"
+  },
+  "visual": {
+    "threshold": 0.1
+  },
+  "bunit": {
+    "stylesheets": ["../Contoso.UI/wwwroot/contoso.css"]
+  }
+}

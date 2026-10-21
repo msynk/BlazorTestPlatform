@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>BlazorTestPlatform.Playwright</RootNamespace>
+    <Description>Runs BlazorTestPlatform stories in real browsers with Playwright across the cross-hosting matrix (Static SSR, Server, WebAssembly, Auto) x viewports x themes x browsers: hydration-aware interactions, visual regression, axe-core accessibility scans and flaky-test diagnostics (traces, console, network, timelines).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\BlazorTestPlatform.Core\BlazorTestPlatform.Core.csproj" />
+    <ProjectReference Include="..\BlazorTestPlatform.Visual\BlazorTestPlatform.Visual.csproj" />
+    <ProjectReference Include="..\BlazorTestPlatform.Workbench\BlazorTestPlatform.Workbench.csproj" />
+    <PackageReference Include="Microsoft.Playwright" />
+    <PackageReference Include="Deque.AxeCore.Commons" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+  </ItemGroup>
+
+</Project>

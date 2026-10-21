@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>BlazorTestPlatform.Accessibility</RootNamespace>
+    <Description>Browser-free accessibility engine for BlazorTestPlatform: ARIA role and accessible-name computation, Testing-Library-style queries, axe-compatible markup rules, accessibility fingerprints and manual-review gates.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlazorTestPlatform.Core\BlazorTestPlatform.Core.csproj" />
+    <PackageReference Include="AngleSharp" />
+    <PackageReference Include="AngleSharp.Css" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BlazorTestPlatform.Accessibility.Tests" />
+    <InternalsVisibleTo Include="BlazorTestPlatform.Bunit" />
+  </ItemGroup>
+
+</Project>

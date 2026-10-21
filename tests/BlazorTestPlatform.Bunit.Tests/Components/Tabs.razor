@@ -1,0 +1,52 @@
+@* WAI-ARIA tabs with roving tabindex and arrow-key navigation. *@
+<div role="tablist" aria-label="Sections">
+    @for (var i = 0; i < Labels.Count; i++)
+    {
+        var index = i;
+        <button role="tab"
+                id="tab-@index"
+                aria-selected="@(selected == index ? "true" : "false")"
+                aria-controls="panel-@index"
+                tabindex="@(selected == index ? 0 : -1)"
+                @ref="refs[index]"
+                @onclick="() => SelectAsync(index)"
+                @onkeydown="e => OnKeyDownAsync(e, index)">@Labels[index]</button>
+    }
+</div>
+@for (var i = 0; i < Labels.Count; i++)
+{
+    <div role="tabpanel" id="panel-@i" aria-labelledby="tab-@i" hidden="@(selected != i)">Panel @Labels[i]</div>
+}
+<a href="#after">After tabs</a>
+
+@code {
+    private readonly Dictionary<int, ElementReference> refs = new();
+    private int selected;
+
+    [Parameter] public IReadOnlyList<string> Labels { get; set; } = ["One", "Two", "Three"];
+
+    private async Task SelectAsync(int index)
+    {
+        selected = index;
+        await Task.Yield();
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e, int index)
+    {
+        var next = e.Key switch
+        {
+            "ArrowRight" => (index + 1) % Labels.Count,
+            "ArrowLeft" => (index - 1 + Labels.Count) % Labels.Count,
+            "Home" => 0,
+            "End" => Labels.Count - 1,
+            _ => -1,
+        };
+
+        if (next >= 0)
+        {
+            selected = next;
+            StateHasChanged();
+            await refs[next].FocusAsync();
+        }
+    }
+}

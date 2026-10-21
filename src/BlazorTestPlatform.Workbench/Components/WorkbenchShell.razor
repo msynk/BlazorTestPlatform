@@ -1,0 +1,474 @@
+@page "/_workbench"
+@layout WorkbenchShellLayout
+@using BlazorTestPlatform.Accessibility
+@inject StoryCatalog Catalog
+@inject WorkbenchOptions Options
+@inject NavigationManager Navigation
+
+<PageTitle>@(selected is null ? Options.Title : $"{selected.Path} · {Options.Title}")</PageTitle>
+
+<header class="btp-header">
+    <a class="btp-brand" href="@WorkbenchUrls.Shell()">
+        <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24"><path fill="currentColor" d="M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 3.5a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0"/></svg>
+        <span>@Options.Title</span>
+    </a>
+    <form class="btp-search" method="get" action="@WorkbenchOptions.RoutePrefix" role="search">
+        <label class="btp-visually-hidden" for="btp-search">Search stories</label>
+        <input id="btp-search" name="q" type="search" value="@Query" placeholder="Search stories…" autocomplete="off" />
+        @if (selected is not null)
+        {
+            <input type="hidden" name="story" value="@selected.Id" />
+        }
+    </form>
+    <span class="btp-count">@Catalog.Count stories · @Catalog.Groups.Count components</span>
+</header>
+
+<div class="btp-body">
+    <nav class="btp-sidebar" aria-label="Stories">
+        @foreach (var category in Categories)
+        {
+            <section class="btp-category">
+                <h2>@category.Key</h2>
+                @foreach (var group in category)
+                {
+                    var open = selected is not null && selected.Title == group.Title || !string.IsNullOrWhiteSpace(Query);
+                    <details open="@open">
+                        <summary>@ComponentLabel(group)</summary>
+                        <ul>
+                            @foreach (var story in group.Stories.Where(Matches))
+                            {
+                                <li>
+                                    <a href="@WorkbenchUrls.Shell(story.Id, ThemeName, ViewportName, mode)" aria-current="@(story == selected ? "page" : null)">
+                                        @story.Name
+                                        @if (story.HasPlay)
+                                        {
+                                            <span class="btp-badge" title="Has an interaction script">play</span>
+                                        }
+                                    </a>
+                                </li>
+                            }
+                        </ul>
+                    </details>
+                }
+            </section>
+        }
+        @if (!Categories.Any())
+        {
+            <p class="btp-muted">No stories match “@Query”.</p>
+        }
+    </nav>
+
+    <main class="btp-main" id="main">
+        @if (selected is null)
+        {
+            <section class="btp-welcome">
+                <h1>@Options.Title</h1>
+                <p>Pick a story to preview it across themes, viewports and render modes. Every story here is also a bUnit test, a real-browser interaction test, a visual snapshot and an accessibility check.</p>
+                <dl class="btp-stats">
+                    <div><dt>Stories</dt><dd>@Catalog.Count</dd></div>
+                    <div><dt>Components</dt><dd>@Catalog.Groups.Count</dd></div>
+                    <div><dt>With play scripts</dt><dd>@Catalog.Stories.Count(s => s.HasPlay)</dd></div>
+                    <div><dt>Performance budgets</dt><dd>@Catalog.Stories.Count(s => s.Performance is not null)</dd></div>
+                </dl>
+            </section>
+        }
+        else
+        {
+            <div class="btp-toolbar" role="toolbar" aria-label="Preview options">
+                <nav class="btp-breadcrumb" aria-label="Breadcrumb">
+                    <span>@selected.Title</span><span aria-hidden="true">/</span><strong>@selected.Name</strong>
+                </nav>
+                <div class="btp-segments">
+                    <ul class="btp-segment" aria-label="Viewport">
+                        @foreach (var v in Options.Viewports)
+                        {
+                            <li><a href="@WorkbenchUrls.Shell(selected.Id, ThemeName, v.Name, mode, false, ArgsForLinks)" data-btp-keep-args aria-current="@(v.Name == viewport.Name ? "true" : null)" title="@v">@v.Name</a></li>
+                        }
+                    </ul>
+                    <ul class="btp-segment" aria-label="Theme">
+                        @foreach (var t in Options.Themes)
+                        {
+                            <li><a href="@WorkbenchUrls.Shell(selected.Id, t.Name, ViewportName, mode, false, ArgsForLinks)" data-btp-keep-args aria-current="@(t.Name == theme.Name ? "true" : null)">@t.DisplayName</a></li>
+                        }
+                    </ul>
+                    <ul class="btp-segment" aria-label="Render mode">
+                        @foreach (var m in Options.HostingModels.Where(selected.Matrix.Allows))
+                        {
+                            <li><a href="@WorkbenchUrls.Shell(selected.Id, ThemeName, ViewportName, m, false, ArgsForLinks)" data-btp-keep-args aria-current="@(m == mode ? "true" : null)">@ModeLabel(m)</a></li>
+                        }
+                    </ul>
+                    @if (selected.HasPlay && mode.IsInteractive())
+                    {
+                        <a class="btp-button btp-button--primary" href="@WorkbenchUrls.Shell(selected.Id, ThemeName, ViewportName, mode, true, ArgsForLinks)" data-btp-keep-args>▶ Run interactions</a>
+                    }
+                    <a class="btp-button" href="@FrameUrl" data-btp-keep-args target="_blank" rel="noopener">Open frame ↗</a>
+                </div>
+            </div>
+
+            @if (AutoPlay)
+            {
+                <section class="btp-panel btp-play" id="btp-play-panel" aria-live="polite" data-story="@selected.Id">
+                    <h2>Interactions <span class="btp-play__status" data-status="running">running…</span></h2>
+                    <p class="btp-muted">The play function runs inside the frame, in the story's own @ModeLabel(mode) runtime.</p>
+                    <ol class="btp-play__steps"></ol>
+                </section>
+            }
+
+            @if (Options.UnsupportedOverridesOf(selected) is { Count: > 0 } unsupported)
+            {
+                <p class="btp-notice" role="note">
+                    This story registers services that cannot apply per story in browsers, so the frame uses the
+                    application's: @string.Join(", ", unsupported.Select(t => t.Name)). They still apply in bUnit.
+                </p>
+            }
+
+            <div class="btp-stage">
+                <iframe title="Preview of @selected.Path" src="@FrameUrl" style="width:@(viewport.Width)px;height:@(viewport.Height)px"></iframe>
+            </div>
+
+            <div class="btp-panels">
+                <section class="btp-panel btp-panel--wide" aria-labelledby="btp-controls-title">
+                    <h2 id="btp-controls-title">Controls</h2>
+                    @if (controls.Count == 0)
+                    {
+                        <p class="btp-muted">No editable parameters.</p>
+                    }
+                    else
+                    {
+                        <form class="btp-controls" method="get" action="@WorkbenchOptions.RoutePrefix" data-btp-controls data-story="@selected.Id">
+                            <input type="hidden" name="story" value="@selected.Id" />
+                            @if (ThemeName is not null)
+                            {
+                                <input type="hidden" name="theme" value="@ThemeName" />
+                            }
+                            @if (ViewportName is not null)
+                            {
+                                <input type="hidden" name="viewport" value="@ViewportName" />
+                            }
+                            <input type="hidden" name="mode" value="@mode.ToToken()" />
+                            <ul class="btp-control-errors" role="alert" data-btp-control-errors hidden="@(resolvedArgs.Errors.Count == 0)">
+                                @foreach (var error in resolvedArgs.Errors)
+                                {
+                                    <li>@error</li>
+                                }
+                            </ul>
+                            <table>
+                                <thead><tr><th scope="col">Parameter</th><th scope="col">Value</th><th scope="col">Type</th></tr></thead>
+                                <tbody>
+                                    @foreach (var control in controls)
+                                    {
+                                        var id = "btp-arg-" + control.Name;
+                                        var name = StoryArgs.QueryPrefix + control.Name;
+                                        var value = CurrentText(control);
+                                        <tr data-overridden="@(resolvedArgs.Values.ContainsKey(control.Name) ? "true" : null)">
+                                            <th scope="row"><label for="@id"><code>@control.Name</code></label></th>
+                                            <td>
+                                                @switch (control.Control)
+                                                {
+                                                    case ArgControlType.Boolean:
+                                                        <input type="hidden" name="@name" value="false" />
+                                                        <input type="checkbox" id="@id" name="@name" value="true" checked="@(value == "true")" data-default="@(control.DefaultText ?? "false")" />
+                                                        break;
+                                                    case ArgControlType.Select:
+                                                        <select id="@id" name="@name" data-default="@(control.DefaultText ?? string.Empty)">
+                                                            @foreach (var option in control.Options)
+                                                            {
+                                                                <option value="@option" selected="@(option == (value ?? string.Empty))">@(option.Length == 0 ? "(unset)" : option)</option>
+                                                            }
+                                                        </select>
+                                                        break;
+                                                    default:
+                                                        <input type="@InputType(control)" id="@id" name="@name" value="@value" step="@Step(control)"
+                                                               placeholder="@(control.Computed ? "(computed by the story)" : control.Nullable ? "null" : null)"
+                                                               data-default="@(control.DefaultText ?? string.Empty)" autocomplete="off" />
+                                                        break;
+                                                }
+                                            </td>
+                                            <td class="btp-muted"><code>@control.TypeName</code> · @Origin(control)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                            <div class="btp-controls__actions">
+                                <button type="submit" class="btp-button btp-button--primary">Apply</button>
+                                <a class="btp-button" href="@WorkbenchUrls.Shell(selected.Id, ThemeName, ViewportName, mode)">Reset</a>
+                                <span class="btp-muted" data-btp-control-status aria-live="polite"></span>
+                            </div>
+                        </form>
+                    }
+
+                    @if (OtherArgs.Count > 0)
+                    {
+                        <details class="btp-other-args">
+                            <summary>Other args (@OtherArgs.Count)</summary>
+                            <table>
+                                <thead><tr><th scope="col">Parameter</th><th scope="col">Kind</th><th scope="col">Value</th></tr></thead>
+                                <tbody>
+                                    @foreach (var arg in OtherArgs)
+                                    {
+                                        <tr><td><code>@arg.Name</code></td><td>@arg.Kind</td><td><code>@arg.Display</code></td></tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </details>
+                    }
+                </section>
+
+                <section class="btp-panel">
+                    <h2>Story</h2>
+                    @if (!string.IsNullOrWhiteSpace(selected.Description))
+                    {
+                        <p>@selected.Description</p>
+                    }
+                    <dl class="btp-facts">
+                        <dt>Id</dt><dd><code>@selected.Id</code></dd>
+                        <dt>Component</dt><dd><code>@selected.ComponentType.FullName</code></dd>
+                        <dt>Seed</dt><dd>@selected.Seed</dd>
+                        <dt>User</dt><dd>@(selected.User?.ToString() ?? "—")</dd>
+                        <dt>Play script</dt><dd>@(selected.HasPlay ? "yes" : "no")</dd>
+                        <dt>Tags</dt><dd>@(selected.Tags.Count == 0 ? "—" : string.Join(", ", selected.Tags))</dd>
+                    </dl>
+                </section>
+
+
+                <section class="btp-panel">
+                    <h2>Quality gates</h2>
+                    <dl class="btp-facts">
+                        <dt>Visual</dt>
+                        <dd>@(selected.Visual.Skip ? "skipped" : $"threshold {selected.Visual.Threshold ?? 0.1}, masks {selected.Visual.Masks.Count}")</dd>
+                        <dt>Accessibility</dt>
+                        <dd>
+                            @if (selected.Accessibility.Skip)
+                            {
+                                <span>skipped</span>
+                            }
+                            else if (selected.Accessibility.DisabledRules.Count == 0)
+                            {
+                                <span>all rules</span>
+                            }
+                            else
+                            {
+                                <ul class="btp-plain">
+                                    @foreach (var rule in selected.Accessibility.DisabledRules)
+                                    {
+                                        <li><code>@rule</code> disabled — @selected.Accessibility.Justifications.GetValueOrDefault(rule)</li>
+                                    }
+                                </ul>
+                            }
+                        </dd>
+                        <dt>Performance</dt>
+                        <dd>@PerformanceSummary(selected)</dd>
+                        <dt>Matrix</dt>
+                        <dd>@MatrixSummary(selected)</dd>
+                    </dl>
+                </section>
+
+                @if (Review is { } review)
+                {
+                    <section class="btp-panel">
+                        <h2>Manual accessibility review</h2>
+                        <p>
+                            Reviewed by <strong>@(review.Reviewer ?? "unknown")</strong> on @(review.ReviewedAt?.ToString("yyyy-MM-dd") ?? "—")
+                            @if (review.AssistiveTechnology is not null)
+                            {
+                                <span> with @review.AssistiveTechnology</span>
+                            }
+                        </p>
+                        <ul class="btp-checklist">
+                            @foreach (var item in review.Items)
+                            {
+                                var check = ManualChecklists.Wcag22AA.FirstOrDefault(c => c.Id == item.CheckId);
+                                <li data-status="@item.Status">
+                                    <span class="btp-status">@item.Status</span>
+                                    <span>@(check?.Title ?? item.CheckId) @(check is null ? null : $"({check.Criterion})")</span>
+                                    @if (!string.IsNullOrWhiteSpace(item.Notes))
+                                    {
+                                        <small>@item.Notes</small>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    </section>
+                }
+            </div>
+        }
+    </main>
+</div>
+
+@code {
+    private Story? selected;
+    private ThemeDefinition theme = ThemeDefinition.Light;
+    private Viewport viewport = BlazorTestPlatform.Viewport.Desktop;
+    private HostingModel mode;
+
+    /// <summary>Selected story id.</summary>
+    [SupplyParameterFromQuery(Name = "story")]
+    public string? StoryId { get; set; }
+
+    /// <summary>Theme name.</summary>
+    [SupplyParameterFromQuery(Name = "theme")]
+    public string? ThemeName { get; set; }
+
+    /// <summary>Viewport name.</summary>
+    [SupplyParameterFromQuery(Name = "viewport")]
+    public string? ViewportName { get; set; }
+
+    /// <summary>Hosting model token.</summary>
+    [SupplyParameterFromQuery(Name = "mode")]
+    public string? Mode { get; set; }
+
+    /// <summary>Search text.</summary>
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? Query { get; set; }
+
+    /// <summary>Set to <c>1</c> to run the selected story's interactions in the frame.</summary>
+    [SupplyParameterFromQuery(Name = "play")]
+    public string? Play { get; set; }
+
+    private bool AutoPlay => Play is "1" or "true" && selected is { HasPlay: true } && mode.IsInteractive();
+
+    private string FrameUrl => WorkbenchUrls.Frame(selected!.Id, mode, theme.Name, viewport.Name, selected.Prerender, AutoPlay, ArgsForLinks);
+
+    private IReadOnlyList<ArgControl> controls = [];
+    private IReadOnlyDictionary<string, string?> rawArgs = new Dictionary<string, string?>();
+    private ResolvedArgs resolvedArgs = ResolvedArgs.Empty;
+
+    // Accepted overrides, in canonical text, carried by every link that keeps the story selected.
+    private IEnumerable<KeyValuePair<string, string?>> ArgsForLinks =>
+        resolvedArgs.Values.Select(v => new KeyValuePair<string, string?>(v.Key, StoryArgs.Format(v.Value)));
+
+    private IReadOnlyList<StoryArg> OtherArgs =>
+        selected is null ? [] : selected.Args.Where(a => !controls.Any(c => string.Equals(c.Name, a.Name, StringComparison.OrdinalIgnoreCase))).ToArray();
+
+    private string? CurrentText(ArgControl control) =>
+        resolvedArgs.Values.ContainsKey(control.Name) && rawArgs.TryGetValue(control.Name, out var text) ? text : control.DefaultText;
+
+    private static string InputType(ArgControl control) => control.Control switch
+    {
+        ArgControlType.Number => "number",
+        ArgControlType.Date => "date",
+        ArgControlType.DateTime => "datetime-local",
+        ArgControlType.Time => "time",
+        _ => "text",
+    };
+
+    private static string? Step(ArgControl control)
+    {
+        if (control.Control is ArgControlType.DateTime or ArgControlType.Time)
+        {
+            return "1";
+        }
+
+        if (control.Control != ArgControlType.Number)
+        {
+            return null;
+        }
+
+        var type = Nullable.GetUnderlyingType(control.ParameterType) ?? control.ParameterType;
+        return type == typeof(double) || type == typeof(float) || type == typeof(decimal) ? "any" : "1";
+    }
+
+    private static string Origin(ArgControl control) =>
+        !control.SetByStory ? "component default" : control.Computed ? "computed by the story" : "set by the story";
+
+    private IEnumerable<IGrouping<string, StoryGroup>> Categories => Catalog.Groups
+        .Where(g => g.Stories.Any(Matches))
+        .GroupBy(g => g.Segments.Count > 1 ? g.Segments[0] : "Components");
+
+    private ComponentReview? Review =>
+        selected is null || Options.ReviewsDirectory is null || OperatingSystem.IsBrowser()
+            ? null
+            : new ManualReviewStore(Options.ReviewsDirectory).Load(selected.Title);
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        selected = StoryId is not null && Catalog.TryGet(StoryId, out var story) ? story : null;
+        theme = Options.ResolveTheme(ThemeName);
+        viewport = Options.ResolveViewport(ViewportName);
+        mode = HostingModelExtensions.TryParse(Mode, out var parsed) && parsed != HostingModel.InMemory ? parsed : Options.DefaultHostingModel;
+        if (selected is not null && !selected.Matrix.Allows(mode))
+        {
+            mode = Options.HostingModels.FirstOrDefault(selected.Matrix.Allows, Options.DefaultHostingModel);
+        }
+
+        controls = selected is null ? [] : StoryArgs.ControlsFor(selected);
+        rawArgs = StoryArgs.FromQuery(new Uri(Navigation.Uri).Query);
+        resolvedArgs = selected is null ? ResolvedArgs.Empty : StoryArgs.Resolve(selected, rawArgs, fromLink: true);
+    }
+
+    private bool Matches(Story story) =>
+        string.IsNullOrWhiteSpace(Query)
+        || story.Path.Contains(Query, StringComparison.OrdinalIgnoreCase)
+        || story.Tags.Any(t => t.Contains(Query, StringComparison.OrdinalIgnoreCase));
+
+    private static string ComponentLabel(StoryGroup group) =>
+        group.Segments.Count > 1 ? string.Join(" / ", group.Segments.Skip(1)) : group.Title;
+
+    private static string ModeLabel(HostingModel model) => model switch
+    {
+        HostingModel.StaticServer => "SSR",
+        HostingModel.InteractiveServer => "Server",
+        HostingModel.InteractiveWebAssembly => "WebAssembly",
+        HostingModel.InteractiveAuto => "Auto",
+        _ => model.ToString(),
+    };
+
+    private static string PerformanceSummary(Story story)
+    {
+        if (story.Performance is not { } budget)
+        {
+            return "not measured";
+        }
+
+        var parts = new List<string>();
+        if (budget.MaxRootRenders is { } roots)
+        {
+            parts.Add($"≤ {roots} root renders");
+        }
+
+        if (budget.MaxTotalRenders is { } total)
+        {
+            parts.Add($"≤ {total} total renders");
+        }
+
+        if (budget.MaxAllocatedBytes is { } bytes)
+        {
+            parts.Add($"≤ {bytes:N0} B allocated");
+        }
+
+        if (budget.MaxMedianDuration is { } duration)
+        {
+            parts.Add($"≤ {duration.TotalMilliseconds:0} ms");
+        }
+
+        parts.Add(budget.TrackBaseline ? "baseline tracked" : "no baseline");
+        return string.Join(", ", parts);
+    }
+
+    private static string MatrixSummary(Story story)
+    {
+        var parts = new List<string>();
+        if (story.Matrix.HostingModels.Count > 0)
+        {
+            parts.Add("only " + string.Join("/", story.Matrix.HostingModels.Select(m => m.ToToken())));
+        }
+
+        if (story.Matrix.ExcludedHostingModels.Count > 0)
+        {
+            parts.Add("never " + string.Join("/", story.Matrix.ExcludedHostingModels.Select(m => m.ToToken())));
+        }
+
+        if (story.Matrix.Viewports.Count > 0)
+        {
+            parts.Add("viewports " + string.Join("/", story.Matrix.Viewports));
+        }
+
+        if (story.Matrix.Themes.Count > 0)
+        {
+            parts.Add("themes " + string.Join("/", story.Matrix.Themes));
+        }
+
+        return parts.Count == 0 ? "every cell" : string.Join("; ", parts);
+    }
+}

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Contoso.Workbench\Contoso.Workbench.csproj" />
+    <ProjectReference Include="..\Contoso.UI.Stories\Contoso.UI.Stories.csproj" />
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.Bunit\BlazorTestPlatform.Bunit.csproj" />
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.Playwright\BlazorTestPlatform.Playwright.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="BlazorTestPlatform" />
+  </ItemGroup>
+
+</Project>

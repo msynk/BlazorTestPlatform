@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Playwright upgrades change browser builds and therefore screenshots. Dependabot opens the PR; run the
+  # "Regenerate visual baselines" workflow on its branch to commit the new chromium-linux baselines (see docs/ci.md).
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    allow:
+      - dependency-name: Microsoft.Playwright
+    groups:
+      playwright:
+        patterns: ["Microsoft.Playwright*"]

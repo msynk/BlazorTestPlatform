@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>BlazorTestPlatform.Cli</RootNamespace>
+    <AssemblyName>btp</AssemblyName>
+    <PackageId>BlazorTestPlatform.Cli</PackageId>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>btp</ToolCommandName>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <Description>The btp command-line tool: HTML/JUnit/Markdown reports, visual baseline approval, performance baseline approval, manual accessibility review workflow and flake analysis for BlazorTestPlatform.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlazorTestPlatform.Core\BlazorTestPlatform.Core.csproj" />
+    <ProjectReference Include="..\BlazorTestPlatform.Visual\BlazorTestPlatform.Visual.csproj" />
+    <ProjectReference Include="..\BlazorTestPlatform.Reporting\BlazorTestPlatform.Reporting.csproj" />
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+
+</Project>

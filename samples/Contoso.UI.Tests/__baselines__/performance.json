@@ -1,0 +1,13 @@
+{
+  "schema": "https://blazortestplatform.dev/schemas/performance-baseline-v1.json",
+  "stories": {
+    "inputs-button--click-raises-onclick": {
+      "rootRenderCount": 1,
+      "totalRenderCount": 1,
+      "allocatedBytes": 3624,
+      "medianMilliseconds": 0.674,
+      "recordedAt": "2026-10-20T12:11:14.2098021+00:00",
+      "environment": ".NET 10.0.13; Microsoft Windows 10.0.26100"
+    }
+  }
+}

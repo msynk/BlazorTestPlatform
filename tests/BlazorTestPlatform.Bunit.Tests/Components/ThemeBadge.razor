@@ -1,0 +1,25 @@
+@inject IJSRuntime JS
+
+<p data-testid="theme">Theme: @theme</p>
+<p data-testid="motion">Reduced motion: @reducedMotion</p>
+<button @onclick="TrackAsync">Track</button>
+
+@code {
+    private string theme = "unknown";
+    private bool reducedMotion;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        theme = await JS.InvokeAsync<string>("localStorage.getItem", "theme");
+        var media = await JS.InvokeAsync<IJSObjectReference>("import", "./media.js");
+        reducedMotion = await media.InvokeAsync<bool>("prefersReducedMotion");
+        StateHasChanged();
+    }
+
+    private async Task TrackAsync() => await JS.InvokeVoidAsync("analytics.track", "clicked");
+}
