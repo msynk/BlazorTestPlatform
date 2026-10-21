@@ -70,7 +70,10 @@ jobs:
         run: dotnet test --project samples/Contoso.UI.Tests -c Release --no-build -- --filter-class '*BaselineProvenanceTests'
 
       # CI never writes baselines: missing or changed screenshots fail the build (BtpSettings defaults on CI).
+      # Container jobs run as root with HOME=/github/home (owned by another user), and Firefox refuses to start there.
       - name: End-to-end (bUnit, cross-hosting matrix, visual, axe, in-app play)
+        env:
+          HOME: /root
         run: dotnet test --project samples/Contoso.UI.Tests -c Release --no-build
 
       - name: Report

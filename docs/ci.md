@@ -81,7 +81,7 @@ CI is detected automatically (`CI` set to `1`, `true` or `yes`, or any of `GITHU
 
 ## Making snapshots stable across machines
 
-Font rendering differs between Windows, macOS and Linux, so the platform is part of the snapshot name (`…chromium-linux.png`). CI runs in the Playwright image that matches the pinned `Microsoft.Playwright` package (`mcr.microsoft.com/playwright/dotnet:v{version}-noble`). The workflow and the scripts read the version from `Directory.Packages.props`, so the tag never has to be kept in sync by hand. The image contains all three browsers, so CI gates on `chromium-linux`, `firefox-linux` and `webkit-linux` baselines. To produce or check the same Linux baselines on any machine with Docker:
+Font rendering differs between Windows, macOS and Linux, so the platform is part of the snapshot name (`…chromium-linux.png`). CI runs in the Playwright image that matches the pinned `Microsoft.Playwright` package (`mcr.microsoft.com/playwright/dotnet:v{version}-noble`). The workflow and the scripts read the version from `Directory.Packages.props`, so the tag never has to be kept in sync by hand. The image contains all three browsers, so CI gates on `chromium-linux`, `firefox-linux` and `webkit-linux` baselines. GitHub Actions container jobs run as root with `HOME=/github/home`, a folder owned by another user, and Firefox refuses to start there: set `HOME: /root` on the steps that run browser tests. To produce or check the same Linux baselines on any machine with Docker:
 
 ```bash
 scripts/visual-tests.sh              # compare with the committed Linux baselines

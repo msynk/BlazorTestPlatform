@@ -58,9 +58,11 @@ jobs:
         with:
           global-json-file: global.json
 
+      # HOME=/root: container jobs run as root with HOME=/github/home (owned by another user), and Firefox refuses to start there.
       - name: Render stories and rewrite baselines
         env:
           BTP_UPDATE_SNAPSHOTS: ${{ inputs.mode }}
+          HOME: /root
         run: >
           dotnet test --project samples/Contoso.UI.Tests -c Release --
           --filter-class '*CrossHostingTests' --filter-class '*VisualTests' --filter-class '*CrossBrowserTests' --filter-class '*InAppPlayTests'
