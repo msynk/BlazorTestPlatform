@@ -11,6 +11,8 @@ pwsh samples/Contoso.UI.Tests/bin/Debug/net10.0/playwright.ps1 install chromium
 dotnet test --project samples/Contoso.UI.Tests
 ```
 
+To browse the sample stories, run `dotnet run --project samples/Contoso.Workbench` and open http://localhost:5288/_workbench. The launch profile runs the host in `Development`, which is what serves the static assets (`blazor.web.js`, the workbench and Contoso stylesheets) of the referenced projects from build output; `--no-launch-profile` without `ASPNETCORE_ENVIRONMENT=Development` gives an unstyled, non-interactive page.
+
 On Windows and macOS, the first browser run writes local baselines (`*-win32.png`, `*-darwin.png`) into `samples/Contoso.UI.Tests/__snapshots__/`. They are git-ignored: CI compares against the committed Linux baselines. To add or update those, run `scripts/visual-tests.sh --update` (or `pwsh scripts/visual-tests.ps1 -Update`), which renders them in CI's Playwright image, and commit the `*-linux` images.
 
 ## Guidelines
