@@ -92,10 +92,11 @@ public sealed class TestMatrix
     public IEnumerable<MatrixCase> Expand(IEnumerable<Story> stories)
     {
         ArgumentNullException.ThrowIfNull(stories);
-        var viewports = Viewports.Count > 0 ? Viewports : [Viewport.Desktop];
-        var themes = Themes.Count > 0 ? Themes : [ThemeDefinition.Light];
-        var models = HostingModels.Count > 0 ? HostingModels : [HostingModel.InteractiveServer];
-        var browsers = Browsers.Count > 0 ? Browsers : [BlazorTestPlatform.Browsers.Chromium];
+        // Repeated dimensions (a preset plus WithViewports(Viewport.Desktop)) must not produce duplicate cells and keys.
+        var viewports = Viewports.Count > 0 ? Viewports.DistinctBy(v => v.Name, StringComparer.OrdinalIgnoreCase).ToList() : [Viewport.Desktop];
+        var themes = Themes.Count > 0 ? Themes.DistinctBy(t => t.Name, StringComparer.OrdinalIgnoreCase).ToList() : [ThemeDefinition.Light];
+        var models = HostingModels.Count > 0 ? HostingModels.Distinct().ToList() : [HostingModel.InteractiveServer];
+        var browsers = Browsers.Count > 0 ? Browsers.Distinct(StringComparer.OrdinalIgnoreCase).ToList() : [BlazorTestPlatform.Browsers.Chromium];
 
         foreach (var story in stories)
         {
@@ -140,6 +141,12 @@ public sealed class TestMatrix
             ?? (string.Equals(parts[2], ThemeDefinition.Dark.Name, StringComparison.OrdinalIgnoreCase) ? ThemeDefinition.Dark
                 : string.Equals(parts[2], ThemeDefinition.Light.Name, StringComparison.OrdinalIgnoreCase) ? ThemeDefinition.Light
                 : throw new KeyNotFoundException($"Unknown theme '{parts[2]}'."));
-        return new MatrixCase(story, viewport, theme, HostingModelExtensions.Parse(parts[3]), parts[4]);
+        var model = HostingModelExtensions.Parse(parts[3]);
+        if (model == HostingModel.InMemory)
+        {
+            throw new FormatException($"Invalid matrix key '{key}': browser cells cannot use the in-memory hosting model.");
+        }
+
+        return new MatrixCase(story, viewport, theme, model, parts[4]);
     }
 }

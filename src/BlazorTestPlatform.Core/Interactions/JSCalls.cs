@@ -68,16 +68,80 @@ public sealed class JSCallLog
 
     /// <summary>
     /// Formats an argument the same way under every driver: strings as-is, numbers and dates invariant, booleans in
-    /// lower case, null as null and anything else through <see cref="object.ToString"/>.
+    /// lower case and null as null. Collections become <c>[1, 2, 3]</c> and dictionaries <c>{"key": value}</c> (nested
+    /// strings quoted), so different contents never format alike. Other objects become their JSON (camelCase, as JS
+    /// interop sends them) where reflection-based serialization is available, and <see cref="object.ToString"/> in
+    /// trimmed apps.
     /// </summary>
     public static string? Format(object? value) => value switch
     {
         null => null,
         string text => text,
-        bool flag => flag ? "true" : "false",
-        IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
-        _ => value.ToString(),
+        _ => FormatNested(value, depth: 0, topLevel: true),
     };
+
+    private const int MaxFormatDepth = 8;
+
+    private static readonly JsonSerializerOptions InteropJson = new(JsonSerializerDefaults.Web);
+
+    private static string FormatNested(object? value, int depth, bool topLevel = false)
+    {
+        switch (value)
+        {
+            case null:
+                return "null";
+            case string text:
+                return topLevel ? text : JsonSerializer.Serialize(text, BtpJson.TypeInfo<string>());
+            case bool flag:
+                return flag ? "true" : "false";
+            case char ch:
+                return topLevel ? ch.ToString() : JsonSerializer.Serialize(ch.ToString(), BtpJson.TypeInfo<string>());
+            case IFormattable formattable:
+                return formattable.ToString(null, CultureInfo.InvariantCulture);
+        }
+
+        if (depth >= MaxFormatDepth)
+        {
+            return "...";
+        }
+
+        if (value is System.Collections.IDictionary dictionary)
+        {
+            var entries = new List<string>();
+            foreach (System.Collections.DictionaryEntry entry in dictionary)
+            {
+                entries.Add($"{FormatNested(Convert.ToString(entry.Key, CultureInfo.InvariantCulture), depth + 1)}: {FormatNested(entry.Value, depth + 1)}");
+            }
+
+            return "{" + string.Join(", ", entries) + "}";
+        }
+
+        if (value is System.Collections.IEnumerable items)
+        {
+            return "[" + string.Join(", ", items.Cast<object?>().Select(item => FormatNested(item, depth + 1))) + "]";
+        }
+
+        return FormatObject(value);
+    }
+
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Only used when reflection-based serialization is enabled (JsonSerializer.IsReflectionEnabledByDefault), which trimmed apps disable.")]
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Only used when reflection-based serialization is enabled.")]
+    private static string FormatObject(object value)
+    {
+        if (JsonSerializer.IsReflectionEnabledByDefault)
+        {
+            try
+            {
+                return JsonSerializer.Serialize(value, value.GetType(), InteropJson);
+            }
+            catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException or JsonException)
+            {
+                // Cycles or unsupported members: fall back to the object's own description.
+            }
+        }
+
+        return value.ToString() ?? string.Empty;
+    }
 
     /// <summary>Serializes the calls (reflection-free).</summary>
     public string ToJson() => ToJson(Calls);
@@ -177,9 +241,21 @@ public sealed class JSCallAssertions
         _module = module;
     }
 
-    /// <summary>A matching call was made (exactly <paramref name="times"/> times when given).</summary>
-    public Task ToHaveBeenCalledAsync(int? times = null, TimeSpan? timeout = null) =>
-        CheckAsync(times is null ? "to have been called" : $"to have been called {times} time(s)", calls => times is null ? calls.Count > 0 : calls.Count == times, timeout);
+    /// <summary>
+    /// A matching call was made (exactly <paramref name="times"/> times when given). <c>times: 0</c> behaves like
+    /// <see cref="NotToHaveBeenCalledAsync"/>: it lets the story settle first instead of passing on the first probe.
+    /// </summary>
+    public Task ToHaveBeenCalledAsync(int? times = null, TimeSpan? timeout = null)
+    {
+        if (times is < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(times), times, "Cannot be negative.");
+        }
+
+        return times == 0
+            ? NotToHaveBeenCalledAsync()
+            : CheckAsync(times is null ? "to have been called" : $"to have been called {times} time(s)", calls => times is null ? calls.Count > 0 : calls.Count == times, timeout);
+    }
 
     /// <summary>No matching call was made (checked after the story settles).</summary>
     public async Task NotToHaveBeenCalledAsync()

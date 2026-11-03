@@ -4,7 +4,11 @@
 @inject StoryCatalog Catalog
 @inject WorkbenchOptions Options
 @inject NavigationManager Navigation
+@inject IServiceProvider WorkbenchServices
 
+@* Disabled (production without opt-in) or unauthorized: nothing but a 404. *@
+@if (allowed == true)
+{
 <PageTitle>@(selected is null ? Options.Title : $"{selected.Path} · {Options.Title}")</PageTitle>
 
 <header class="btp-header">
@@ -126,6 +130,43 @@
             <div class="btp-stage">
                 <iframe title="Preview of @selected.Path" src="@FrameUrl" style="width:@(viewport.Width)px;height:@(viewport.Height)px"></iframe>
             </div>
+
+            @if (mode.IsInteractive())
+            {
+                @* Live view of the frame through its bridge (workbench.js): what the story did, and a recorder that writes play code. *@
+                <section class="btp-panel btp-inspector" id="btp-inspector" aria-labelledby="btp-inspector-title" data-story="@selected.Id">
+                    <div class="btp-inspector__header">
+                        <h2 id="btp-inspector-title">Inspector</h2>
+                        <button type="button" class="btp-button" data-btp-record aria-pressed="false">Record</button>
+                        <button type="button" class="btp-button" data-btp-copy disabled>Copy play code</button>
+                        <span class="btp-muted" data-btp-inspector-status aria-live="polite"></span>
+                    </div>
+                    <details open>
+                        <summary>Recorded play function</summary>
+                        <pre><code data-btp-recording>Press Record, then use the story in the frame.</code></pre>
+                    </details>
+                    <details data-btp-aria-section>
+                        <summary>Accessibility tree</summary>
+                        <pre><code data-btp-aria></code></pre>
+                    </details>
+                    <details>
+                        <summary>Actions (<span data-btp-count="actions">0</span>)</summary>
+                        <ol data-btp-list="actions"></ol>
+                    </details>
+                    <details>
+                        <summary>HTTP requests (<span data-btp-count="requests">0</span>)</summary>
+                        <ol data-btp-list="requests"></ol>
+                    </details>
+                    <details>
+                        <summary>JS interop calls (<span data-btp-count="js">0</span>)</summary>
+                        <ol data-btp-list="js"></ol>
+                    </details>
+                    <details>
+                        <summary>Console (<span data-btp-count="console">0</span>)</summary>
+                        <ol data-btp-list="console"></ol>
+                    </details>
+                </section>
+            }
 
             <div class="btp-panels">
                 <section class="btp-panel btp-panel--wide" aria-labelledby="btp-controls-title">
@@ -298,7 +339,21 @@
     </main>
 </div>
 
+}
+
 @code {
+    private bool? allowed;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        allowed = await WorkbenchAccess.IsAllowedAsync(Options, WorkbenchServices);
+        if (!allowed.Value)
+        {
+            Navigation.NotFound();
+        }
+    }
+
     private Story? selected;
     private ThemeDefinition theme = ThemeDefinition.Light;
     private Viewport viewport = BlazorTestPlatform.Viewport.Desktop;
@@ -378,14 +433,16 @@
         .Where(g => g.Stories.Any(Matches))
         .GroupBy(g => g.Segments.Count > 1 ? g.Segments[0] : "Components");
 
-    private ComponentReview? Review =>
-        selected is null || Options.ReviewsDirectory is null || OperatingSystem.IsBrowser()
-            ? null
-            : new ManualReviewStore(Options.ReviewsDirectory).Load(selected.Title);
+    private ComponentReview? Review => selected is null ? null : Options.LoadReview(selected.Title);
 
     /// <inheritdoc />
     protected override void OnParametersSet()
     {
+        if (allowed != true)
+        {
+            return;
+        }
+
         selected = StoryId is not null && Catalog.TryGet(StoryId, out var story) ? story : null;
         theme = Options.ResolveTheme(ThemeName);
         viewport = Options.ResolveViewport(ViewportName);

@@ -123,10 +123,10 @@ jobs:
           (cd /tmp/workbench && ASPNETCORE_ENVIRONMENT=Production dotnet Contoso.Workbench.dll --urls http://127.0.0.1:5288 > /tmp/workbench.log 2>&1 &)
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:5288/_workbench > /dev/null && exit 0; sleep 1; done
           cat /tmp/workbench.log; exit 1
-      - name: Cross-hosting, in-app play and live controls against the published app
+      - name: Cross-hosting, in-app play, live controls and the inspector against the published app
         env:
           BTP_BASE_URL: http://127.0.0.1:5288
-        run: dotnet test --project samples/Contoso.UI.Tests -c Release -- --filter-class '*CrossHostingTests' --filter-class '*InAppPlayTests' --filter-class '*ArgControlsTests'
+        run: dotnet test --project samples/Contoso.UI.Tests -c Release -- --filter-class '*CrossHostingTests' --filter-class '*InAppPlayTests' --filter-class '*ArgControlsTests' --filter-class '*WorkbenchInspectorTests'
 
   pack:
     runs-on: ubuntu-latest
@@ -141,6 +141,7 @@ jobs:
       - name: Pack
         run: |
           dotnet build src/BlazorTestPlatform.Generators -c Release
+          dotnet build src/BlazorTestPlatform.CodeFixes -c Release
           for project in src/*/*.csproj; do
             dotnet pack "$project" -c Release -o artifacts/packages
           done

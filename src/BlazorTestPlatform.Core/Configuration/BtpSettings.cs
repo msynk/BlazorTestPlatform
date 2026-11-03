@@ -76,7 +76,11 @@ public sealed class BtpSettings
     /// <summary>Default auto-wait timeout (<c>BTP_TIMEOUT_MS</c>). Default 5 s.</summary>
     public TimeSpan DefaultTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
-    /// <summary>True on CI (detected from <c>CI</c>, <c>GITHUB_ACTIONS</c>, <c>TF_BUILD</c>...).</summary>
+    /// <summary>
+    /// True on CI: <c>BTP_CI</c> when set, otherwise detected from <c>CI</c> (any value but <c>false</c>/<c>0</c>) and the
+    /// variables of GitHub Actions, Azure Pipelines, GitLab, Jenkins, TeamCity, Buildkite, CircleCI, AWS CodeBuild,
+    /// Bitbucket, AppVeyor, Travis, Drone, Semaphore and Bitrise.
+    /// </summary>
     public bool IsContinuousIntegration { get; init; }
 
     /// <summary>Visual: per-pixel threshold default.</summary>
@@ -122,12 +126,12 @@ public sealed class BtpSettings
     /// <summary>Loads settings for a project directory (auto-detected when null).</summary>
     public static BtpSettings Load(string? projectDirectory = null, IReadOnlyDictionary<string, string?>? environment = null)
     {
-        string? Env(string name) => environment is not null ? environment.GetValueOrDefault(name) : Environment.GetEnvironmentVariable(name);
+        // An empty variable (an unset workflow input, `export X=`) means "not set", never "the project directory".
+        string? Env(string name) => NonEmpty(environment is not null ? environment.GetValueOrDefault(name) : Environment.GetEnvironmentVariable(name));
 
-        var directory = projectDirectory ?? Env("BTP_PROJECT_DIR") ?? FindProjectDirectory(AppContext.BaseDirectory) ?? Environment.CurrentDirectory;
+        var directory = NonEmpty(projectDirectory) ?? Env("BTP_PROJECT_DIR") ?? FindProjectDirectory(AppContext.BaseDirectory) ?? Environment.CurrentDirectory;
         var file = ReadFile(Path.Combine(directory, "btp.json"));
-        var ci = IsTruthy(Env("CI")) || !string.IsNullOrEmpty(Env("GITHUB_ACTIONS")) || !string.IsNullOrEmpty(Env("TF_BUILD"))
-            || !string.IsNullOrEmpty(Env("GITLAB_CI")) || !string.IsNullOrEmpty(Env("BUILDKITE")) || !string.IsNullOrEmpty(Env("TEAMCITY_VERSION"));
+        var ci = DetectContinuousIntegration(Env);
 
         var policy = new AccessibilityPolicy();
         if (file?.Accessibility is { } a11y)
@@ -155,17 +159,15 @@ public sealed class BtpSettings
         return new BtpSettings
         {
             ProjectDirectory = directory,
-            SnapshotDirectory = Env("BTP_SNAPSHOT_DIR") ?? file?.SnapshotDirectory ?? "__snapshots__",
-            ResultsDirectory = Env("BTP_RESULTS_DIR") ?? file?.ResultsDirectory ?? Path.Combine("TestResults", "btp"),
-            PerformanceBaselinePath = Env("BTP_PERF_BASELINE") ?? file?.PerformanceBaselinePath ?? Path.Combine("__baselines__", "performance.json"),
-            ReviewsDirectory = Env("BTP_REVIEWS_DIR") ?? file?.ReviewsDirectory ?? "a11y-reviews",
+            SnapshotDirectory = Env("BTP_SNAPSHOT_DIR") ?? NonEmpty(file?.SnapshotDirectory) ?? "__snapshots__",
+            ResultsDirectory = Env("BTP_RESULTS_DIR") ?? NonEmpty(file?.ResultsDirectory) ?? Path.Combine("TestResults", "btp"),
+            PerformanceBaselinePath = Env("BTP_PERF_BASELINE") ?? NonEmpty(file?.PerformanceBaselinePath) ?? Path.Combine("__baselines__", "performance.json"),
+            ReviewsDirectory = Env("BTP_REVIEWS_DIR") ?? NonEmpty(file?.ReviewsDirectory) ?? "a11y-reviews",
             UpdateSnapshots = ParseUpdateMode(Env("BTP_UPDATE_SNAPSHOTS")) ?? file?.UpdateSnapshots ?? (ci ? SnapshotUpdateMode.None : SnapshotUpdateMode.Missing),
             UpdatePerformanceBaselines = IsTruthy(Env("BTP_UPDATE_PERF")),
             Retries = int.TryParse(Env("BTP_RETRIES"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var retries) ? retries : file?.Retries ?? (ci ? 2 : 0),
             Diagnostics = ParseDiagnostics(Env("BTP_DIAGNOSTICS")) ?? file?.Diagnostics ?? DiagnosticsMode.RetainOnFailure,
-            DefaultTimeout = int.TryParse(Env("BTP_TIMEOUT_MS"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var timeout)
-                ? TimeSpan.FromMilliseconds(timeout)
-                : TimeSpan.FromMilliseconds(file?.TimeoutMilliseconds ?? 5000),
+            DefaultTimeout = TimeSpan.FromMilliseconds(ParsePositive(Env("BTP_TIMEOUT_MS"), "BTP_TIMEOUT_MS") ?? ValidatePositive(file?.TimeoutMilliseconds, "timeoutMilliseconds") ?? 5000),
             IsContinuousIntegration = ci,
             VisualThreshold = file?.Visual?.Threshold ?? 0.1,
             VisualMaxDiffRatio = file?.Visual?.MaxDiffRatio ?? 0,
@@ -216,6 +218,48 @@ public sealed class BtpSettings
     }
 
     private string Resolve(string path) => Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(ProjectDirectory, path));
+
+    private static string? NonEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private static readonly string[] CiVariables =
+    [
+        "GITHUB_ACTIONS", "TF_BUILD", "GITLAB_CI", "JENKINS_URL", "TEAMCITY_VERSION", "BUILDKITE", "CIRCLECI", "CODEBUILD_BUILD_ID",
+        "BITBUCKET_BUILD_NUMBER", "APPVEYOR", "TRAVIS", "DRONE", "SEMAPHORE", "BITRISE_IO",
+    ];
+
+    private static bool DetectContinuousIntegration(Func<string, string?> env)
+    {
+        if (env("BTP_CI") is { } explicitValue)
+        {
+            return IsTruthy(explicitValue);
+        }
+
+        // CI=true is the convention, but several systems set CI to their own name (CI=woodpecker).
+        if (env("CI") is { } ci)
+        {
+            return !IsFalsy(ci);
+        }
+
+        return CiVariables.Any(name => env(name) is not null);
+    }
+
+    private static bool IsFalsy(string value) =>
+        value.Trim() is "0" || value.Trim().Equals("false", StringComparison.OrdinalIgnoreCase) || value.Trim().Equals("no", StringComparison.OrdinalIgnoreCase);
+
+    private static int? ParsePositive(string? value, string name)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) && number > 0
+            ? number
+            : throw new FormatException($"Invalid {name} value '{value}'. Use a positive number of milliseconds.");
+    }
+
+    private static int? ValidatePositive(int? value, string name) =>
+        value is null or > 0 ? value : throw new FormatException($"Invalid btp.json {name} value '{value}'. Use a positive number of milliseconds.");
 
     /// <summary>True for the values that switch a <c>BTP_*</c> flag on: <c>1</c>, <c>true</c> or <c>yes</c> (case-insensitive).</summary>
     public static bool IsTruthy(string? value) => value is not null && (value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase) || value.Equals("yes", StringComparison.OrdinalIgnoreCase));

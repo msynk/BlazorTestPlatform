@@ -169,3 +169,13 @@ body:has(.btp-app) {
 .btp-play__steps li[data-failed="true"] { border-left-color: var(--btp-fail); }
 .btp-play__kind { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--btp-muted); }
 .btp-play__error { color: var(--btp-fail); white-space: pre-wrap; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* Inspector and recorder */
+.btp-inspector { margin: 16px 0; }
+.btp-inspector__header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.btp-inspector__header h2 { margin: 0 8px 0 0; }
+.btp-inspector [data-btp-record][aria-pressed="true"] { color: var(--btp-fail); border-color: var(--btp-fail); }
+.btp-inspector details { border-top: 1px solid var(--btp-border); padding: 6px 0; }
+.btp-inspector summary { cursor: pointer; font-weight: 600; }
+.btp-inspector pre { margin: 6px 0 0; max-height: 320px; overflow: auto; white-space: pre; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.btp-inspector ol { margin: 6px 0 0; padding-left: 22px; max-height: 240px; overflow: auto; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-word; }

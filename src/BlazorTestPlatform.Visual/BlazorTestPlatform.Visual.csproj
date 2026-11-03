@@ -7,7 +7,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\BlazorTestPlatform.Core\BlazorTestPlatform.Core.csproj" />
+    <!-- PrivateAssets="none": consumers of this package also get the story generator and analyzers that ship in Core. -->
+    <ProjectReference Include="..\BlazorTestPlatform.Core\BlazorTestPlatform.Core.csproj" PrivateAssets="none" />
   </ItemGroup>
 
   <ItemGroup>

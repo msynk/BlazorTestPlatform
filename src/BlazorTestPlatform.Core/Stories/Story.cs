@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using BlazorTestPlatform.Drivers;
 using BlazorTestPlatform.Performance;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
@@ -34,11 +35,23 @@ public sealed class Story
         Visual = data.Visual;
         Accessibility = data.Accessibility;
         Performance = data.Performance;
+
+        // Built stories are shared through cached catalogs: their options must not change under other tests.
+        Visual.Freeze();
+        Accessibility.Freeze();
+        Performance?.Freeze();
         Matrix = data.Matrix;
         Timeout = data.Timeout;
         SkipReason = data.SkipReason;
         Metadata = data.Metadata;
+        Requirements = data.Requirements;
+        RequiredCapabilities = data.Requirements.Aggregate(DriverCapabilities.None, (all, r) => all | r.Capabilities);
+        Emulation = data.Emulation;
+        BrowserBudget = data.BrowserBudget;
+        BrowserBudget?.Freeze();
         CollectionType = data.CollectionType;
+        SourceFile = data.SourceFile;
+        SourceLine = data.SourceLine;
         Order = data.Order;
     }
 
@@ -112,8 +125,26 @@ public sealed class Story
     /// <summary>Free-form metadata for extensions.</summary>
     public IReadOnlyDictionary<string, object?> Metadata { get; }
 
+    /// <summary>Driver capabilities the story declared with <c>Requires(...)</c>, each with its reason.</summary>
+    public IReadOnlyList<CapabilityRequirement> Requirements { get; }
+
+    /// <summary>Union of the capabilities in <see cref="Requirements"/>.</summary>
+    public DriverCapabilities RequiredCapabilities { get; }
+
+    /// <summary>Browser APIs and network conditions the story emulates (<see cref="BrowserEmulation.None"/> by default).</summary>
+    public BrowserEmulation Emulation { get; }
+
+    /// <summary>Limits on the runtime metrics real browsers report, or null.</summary>
+    public BrowserBudget? BrowserBudget { get; }
+
     /// <summary>The collection type that declared the story.</summary>
     public Type? CollectionType { get; }
+
+    /// <summary>The source file of the collection that declares the story (see <see cref="StoryCollection.SourceFile"/>).</summary>
+    public string? SourceFile { get; }
+
+    /// <summary>The line of the collection's declaration in <see cref="SourceFile"/> (0 when unknown).</summary>
+    public int SourceLine { get; }
 
     /// <summary>Declaration order within the collection.</summary>
     public int Order { get; }
@@ -135,6 +166,28 @@ public sealed class Story
 
     /// <summary>True when the story carries the tag.</summary>
     public bool HasTag(string tag) => Tags.Contains(tag);
+
+    /// <summary>True when a driver with <paramref name="capabilities"/> has everything the story <c>Requires(...)</c>.</summary>
+    public bool CanRunOn(DriverCapabilities capabilities) => (RequiredCapabilities & ~capabilities) == DriverCapabilities.None;
+
+    /// <summary>
+    /// Why a driver with <paramref name="capabilities"/> cannot run the story (missing capabilities and the story's
+    /// reasons), or null when it can.
+    /// </summary>
+    /// <param name="capabilities">The driver's capabilities.</param>
+    /// <param name="driverName">Driver name for the message (e.g. <c>bunit</c>).</param>
+    public string? UnsupportedReason(DriverCapabilities capabilities, string driverName)
+    {
+        if (CanRunOn(capabilities))
+        {
+            return null;
+        }
+
+        var missing = Requirements
+            .Where(r => (r.Capabilities & ~capabilities) != DriverCapabilities.None)
+            .Select(r => $"{r.Capabilities & ~capabilities} ({r.Reason})");
+        return $"Driver '{driverName}' lacks capabilities the story requires: {string.Join("; ", missing)}.";
+    }
 
     /// <summary>True when the story registers services or fixtures that must override the host's services.</summary>
     public bool HasServiceOverrides => ServiceConfigurations.Count > 0 || Fixtures.Count > 0 || FakeTimeStart is not null || HttpMocks.Count > 0;
@@ -190,7 +243,7 @@ public sealed class Story
             }
 
             services.AddSingleton(Bound);
-            services.AddSingleton<IHttpClientFactory>(provider => new HttpMockClientFactory(Bound(provider)));
+            services.AddSingleton<IHttpClientFactory>(provider => new HttpMockClientFactory(Bound(provider), provider));
             services.AddSingleton(provider => Bound(provider).CreateClient());
         }
 
@@ -215,6 +268,7 @@ public sealed class Story
     private void BuildComponent(RenderTreeBuilder builder, StoryRenderContext context)
     {
         builder.OpenComponent(0, ComponentType);
+        builder.SetKey(context.ComponentKey);
         var overrides = context.ArgOverrides;
         foreach (var arg in Args)
         {
@@ -315,7 +369,22 @@ internal sealed class StoryData
 
     public IReadOnlyDictionary<string, object?> Metadata { get; init; } = new Dictionary<string, object?>();
 
+    public IReadOnlyList<CapabilityRequirement> Requirements { get; init; } = [];
+
+    public BrowserEmulation Emulation { get; init; } = BrowserEmulation.None;
+
+    public BrowserBudget? BrowserBudget { get; init; }
+
     public Type? CollectionType { get; init; }
+
+    public string? SourceFile { get; init; }
+
+    public int SourceLine { get; init; }
 
     public int Order { get; init; }
 }
+
+/// <summary>A driver capability a story needs, and why (see <see cref="StoryBuilder{TComponent}.Requires"/>).</summary>
+/// <param name="Capabilities">The capabilities.</param>
+/// <param name="Reason">Why the story needs them; shown when a runner skips the story.</param>
+public sealed record CapabilityRequirement(DriverCapabilities Capabilities, string Reason);

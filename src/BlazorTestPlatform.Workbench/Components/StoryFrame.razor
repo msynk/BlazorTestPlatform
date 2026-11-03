@@ -4,7 +4,11 @@
 @attribute [StreamRendering]
 @inject WorkbenchOptions Options
 @inject NavigationManager Navigation
+@inject IServiceProvider WorkbenchServices
 
+@* Disabled (production without opt-in) or unauthorized: nothing but a 404. *@
+@if (allowed == true)
+{
 <PageTitle>@StoryId</PageTitle>
 
 <HeadContent>
@@ -29,7 +33,21 @@ else
     <StoryHost StoryId="@StoryId" Theme="@theme.Name" Viewport="@viewport.Name" HostingModelToken="@hostingModel.ToToken()" AutoPlay="@AutoPlay" Args="@argsToken" />
 }
 
+}
+
 @code {
+    private bool? allowed;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        allowed = await WorkbenchAccess.IsAllowedAsync(Options, WorkbenchServices);
+        if (!allowed.Value)
+        {
+            Navigation.NotFound();
+        }
+    }
+
     private ThemeDefinition theme = ThemeDefinition.Light;
     private Viewport viewport = BlazorTestPlatform.Viewport.Desktop;
     private HostingModel hostingModel;
@@ -98,13 +116,18 @@ else
                 ["renderer"] = "Static",
                 ["storyId"] = StoryId,
             });
-            return $"(function(r){{r.actions=0;r.steps=[];window.__btpPlayResult=r;if(window.parent&&window.parent!==window){{window.parent.postMessage(Object.assign({{source:'btp',type:'play-result'}},r),'*');}}}})({result});";
+            return $"(function(r){{r.actions=0;r.steps=[];window.__btpPlayResult=r;if(window.parent&&window.parent!==window){{window.parent.postMessage(Object.assign({{source:'btp',type:'play-result'}},r),window.location.origin);}}}})({result});";
         }
     }
 
     /// <inheritdoc />
     protected override void OnParametersSet()
     {
+        if (allowed != true)
+        {
+            return;
+        }
+
         theme = Options.ResolveTheme(ThemeName);
         viewport = Options.ResolveViewport(ViewportName);
         hostingModel = HostingModelExtensions.TryParse(Mode, out var parsed) && parsed != HostingModel.InMemory ? parsed : Options.DefaultHostingModel;

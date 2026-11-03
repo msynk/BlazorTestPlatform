@@ -9,10 +9,13 @@ namespace BlazorTestPlatform.Accessibility.Dom;
 /// <summary>
 /// A minimal cascade for the two properties that decide visibility without layout: <c>display</c> and
 /// <c>visibility</c>. Lets browser-free drivers honour stylesheets (including Blazor CSS-isolation bundles), so
-/// a component hidden by a class is hidden in bUnit too. Specificity, <c>!important</c>, source order, inline styles
-/// and <c>visibility</c> inheritance are applied. <c>@media</c> blocks are evaluated against a
-/// <see cref="MediaEnvironment"/> (viewport size, color scheme, reduced motion, pointer), desktop by default, so a
-/// rule like <c>@media (max-width: 600px) { .sidebar { display: none } }</c> hides the sidebar on a mobile viewport only.
+/// a component hidden by a class is hidden in bUnit too. Cascade layers (<c>@layer</c>, as Tailwind v4 uses them),
+/// specificity of the selector that matched, <c>!important</c>, source order, inline styles and <c>visibility</c>
+/// inheritance are applied. <c>@media</c> blocks are evaluated against a <see cref="MediaEnvironment"/> (viewport size,
+/// color scheme, reduced motion, pointer), desktop by default, so a rule like
+/// <c>@media (max-width: 600px) { .sidebar { display: none } }</c> hides the sidebar on a mobile viewport only.
+/// <c>@container</c> queries are evaluated against the viewport, the largest size a container can have, because there
+/// is no layout.
 /// </summary>
 public sealed partial class CssVisibility
 {
@@ -46,16 +49,22 @@ public sealed partial class CssVisibility
         var display = new List<Declaration>();
         var visibility = new List<Declaration>();
         var parser = new CssParser();
-        var order = 0;
+        var layers = new CssCascadeLayers();
         foreach (var css in stylesheets)
         {
-            if (string.IsNullOrWhiteSpace(css))
+            if (!string.IsNullOrWhiteSpace(css))
             {
-                continue;
+                layers.Add(css);
             }
+        }
 
+        // Unlayered rules rank above every layer; later layers above earlier ones (reversed for !important).
+        var order = 0;
+        foreach (var (layer, css) in layers.Sheets())
+        {
+            var rank = layer is null ? layers.Order.Count : IndexOf(layers.Order, layer);
             var sheet = parser.ParseStyleSheet(ExpandRangeQueries(css));
-            Collect(sheet.Rules, [], display, visibility, ref order);
+            Collect(sheet.Rules, [], rank, display, visibility, ref order);
         }
 
         return new CssVisibility(display, visibility, environment ?? MediaEnvironment.Desktop);
@@ -83,17 +92,49 @@ public sealed partial class CssVisibility
             }
         }
 
-        // visibility is inherited: the nearest element that declares it wins.
+        // visibility is inherited: the nearest element that declares a value of its own wins.
         for (var current = element; current is not null; current = current.ParentElement)
         {
-            var visibility = Resolve(current, _visibility, "visibility");
-            if (visibility is not null)
+            var visibility = Resolve(current, _visibility, "visibility")?.ToLowerInvariant();
+            switch (visibility)
             {
-                return visibility.Equals("hidden", StringComparison.OrdinalIgnoreCase) || visibility.Equals("collapse", StringComparison.OrdinalIgnoreCase);
+                case null or "inherit" or "unset" or "revert" or "revert-layer":
+                    continue;
+                case "initial":
+                    return false;
+                default:
+                    return visibility is "hidden" or "collapse";
             }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// True when the author's CSS gives the element a <c>display</c> other than <c>none</c>, which overrides the
+    /// <c>hidden</c> attribute (that only maps to <c>display: none</c> in the browser's own stylesheet).
+    /// </summary>
+    public bool DisplayOverridesHiddenAttribute(IElement element)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        return Resolve(element, _display, "display") is { } display
+            && !display.Equals("none", StringComparison.OrdinalIgnoreCase)
+            && !display.Equals("inherit", StringComparison.OrdinalIgnoreCase)
+            && !display.Equals("unset", StringComparison.OrdinalIgnoreCase)
+            && !display.Equals("revert", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int IndexOf(IReadOnlyList<string> items, string value)
+    {
+        for (var i = 0; i < items.Count; i++)
+        {
+            if (string.Equals(items[i], value, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private static string? Resolve(IElement element, Declaration[] declarations, string property)
@@ -155,28 +196,28 @@ public sealed partial class CssVisibility
     [GeneratedRegex(@"\(\s*([^()<>=:]+?)\s*(<=|<|>=|>)\s*([a-z-]+)\s*(<=|<|>=|>)\s*([^()<>=:]+?)\s*\)", RegexOptions.IgnoreCase)]
     private static partial Regex TwoSidedRange();
 
-    private static void Collect(ICssRuleList rules, string[] media, List<Declaration> display, List<Declaration> visibility, ref int order)
+    private static void Collect(ICssRuleList rules, string[] media, int layer, List<Declaration> display, List<Declaration> visibility, ref int order)
     {
         foreach (var rule in rules)
         {
             switch (rule)
             {
                 case ICssStyleRule style:
-                    Add(style, "display", media, display, ref order);
-                    Add(style, "visibility", media, visibility, ref order);
+                    Add(style, "display", media, layer, display, ref order);
+                    Add(style, "visibility", media, layer, visibility, ref order);
                     break;
                 case ICssMediaRule block:
-                    Collect(block.Rules, [.. media, block.Media.MediaText], display, visibility, ref order);
+                    Collect(block.Rules, [.. media, block.Media.MediaText], layer, display, visibility, ref order);
                     break;
                 case ICssSupportsRule supports:
                     // Feature queries: display/visibility themselves are universally supported, so the block applies.
-                    Collect(supports.Rules, media, display, visibility, ref order);
+                    Collect(supports.Rules, media, layer, display, visibility, ref order);
                     break;
             }
         }
     }
 
-    private static void Add(ICssStyleRule rule, string property, string[] media, List<Declaration> target, ref int order)
+    private static void Add(ICssStyleRule rule, string property, string[] media, int layer, List<Declaration> target, ref int order)
     {
         var value = rule.Style.GetPropertyValue(property);
         if (string.IsNullOrWhiteSpace(value) || rule.Selector is null)
@@ -185,15 +226,26 @@ public sealed partial class CssVisibility
         }
 
         var important = string.Equals(rule.Style.GetPropertyPriority(property), "important", StringComparison.OrdinalIgnoreCase);
-        target.Add(new Declaration(rule.Selector, value.Trim(), important, rule.Selector.Specificity, order++, media));
+
+        // In a selector list each selector keeps its own specificity: the one that matches decides, not the highest.
+        // AngleSharp's ListSelector is internal; compound selectors (.a.b) are enumerable too and must stay whole.
+        var selectors = rule.Selector.GetType().Name == "ListSelector" && rule.Selector is IEnumerable<ISelector> list ? list.ToArray() : [rule.Selector];
+        var position = order++;
+        foreach (var selector in selectors.Length == 0 ? [rule.Selector] : selectors)
+        {
+            target.Add(new Declaration(selector, value.Trim(), important, selector.Specificity, position, media, layer));
+        }
     }
 
-    private readonly record struct Declaration(ISelector Selector, string Value, bool Important, Priority Specificity, int Order, string[] Media)
+    private readonly record struct Declaration(ISelector Selector, string Value, bool Important, Priority Specificity, int Order, string[] Media, int Layer)
     {
         public bool AppliesTo(MediaEnvironment environment) => Array.TrueForAll(Media, environment.Matches);
 
+        // Cascade: importance, then layer (later layers win normal declarations, earlier ones win !important), then
+        // specificity, then source order.
         public bool Beats(Declaration other) =>
             Important != other.Important ? Important
+            : Layer != other.Layer ? (Important ? Layer < other.Layer : Layer > other.Layer)
             : Specificity != other.Specificity ? Specificity > other.Specificity
             : Order > other.Order;
     }

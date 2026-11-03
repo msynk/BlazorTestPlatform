@@ -93,7 +93,7 @@ public sealed class StoryAnalyzer : DiagnosticAnalyzer
             start.RegisterOperationAction(AnalyzeInvocation, OperationKind.Invocation);
             start.RegisterOperationBlockStartAction(block =>
             {
-                var names = new List<(string Name, string Slug, Location Location)>();
+                var names = new List<(string Name, string Slug, Location Location, bool Conditional)>();
                 block.RegisterOperationAction(operation => CollectStoryName((IInvocationOperation)operation.Operation, names), OperationKind.Invocation);
                 block.RegisterOperationBlockEndAction(end => ReportDuplicates(end, names));
             });
@@ -178,7 +178,9 @@ public sealed class StoryAnalyzer : DiagnosticAnalyzer
         var parameters = Parameters(component).ToArray();
         if (parameters.FirstOrDefault(p => string.Equals(p.Name, name, System.StringComparison.OrdinalIgnoreCase) && !CapturesUnmatched(p)) is { } declared)
         {
-            context.ReportDiagnostic(Diagnostic.Create(AttributeIsParameter, argument.Syntax.GetLocation(), component.Name, declared.Name));
+            // The code fix (BlazorTestPlatform.CodeFixes) needs the parameter's declared casing.
+            var properties = ImmutableDictionary<string, string?>.Empty.Add("Parameter", declared.Name);
+            context.ReportDiagnostic(Diagnostic.Create(AttributeIsParameter, argument.Syntax.GetLocation(), properties, component.Name, declared.Name));
         }
         else if (!parameters.Any(CapturesUnmatched))
         {
@@ -186,7 +188,7 @@ public sealed class StoryAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    private static void CollectStoryName(IInvocationOperation invocation, List<(string Name, string Slug, Location Location)> names)
+    private static void CollectStoryName(IInvocationOperation invocation, List<(string Name, string Slug, Location Location, bool Conditional)> names)
     {
         var method = invocation.TargetMethod;
         if (method.Name != "Add" || method.ContainingType?.OriginalDefinition.ToDisplayString() != CollectionBuilderType)
@@ -199,20 +201,48 @@ public sealed class StoryAnalyzer : DiagnosticAnalyzer
         {
             lock (names)
             {
-                names.Add((name, Slugify(name), argument.Syntax.GetLocation()));
+                names.Add((name, Slugify(name), argument.Syntax.GetLocation(), IsConditional(invocation)));
             }
         }
     }
 
-    private static void ReportDuplicates(OperationBlockAnalysisContext context, List<(string Name, string Slug, Location Location)> names)
+    private static void ReportDuplicates(OperationBlockAnalysisContext context, List<(string Name, string Slug, Location Location, bool Conditional)> names)
     {
         foreach (var group in names.GroupBy(n => n.Slug, System.StringComparer.Ordinal).Where(g => g.Count() > 1))
         {
-            foreach (var duplicate in group.OrderBy(n => n.Location.SourceSpan.Start).Skip(1))
+            var ordered = group.OrderBy(n => n.Location.SourceSpan.Start).ToArray();
+
+            // Two Add calls that both run conditionally may sit in exclusive branches (if/else, switch cases): only a
+            // name that is also added unconditionally is a certain duplicate.
+            if (ordered.All(n => n.Conditional))
+            {
+                continue;
+            }
+
+            foreach (var duplicate in ordered.Skip(1))
             {
                 context.ReportDiagnostic(Diagnostic.Create(DuplicateStory, duplicate.Location, duplicate.Name, duplicate.Slug));
             }
         }
+    }
+
+    /// <summary>True when the call runs only on some paths: inside a condition, switch or loop of its method.</summary>
+    private static bool IsConditional(IOperation operation)
+    {
+        for (var current = operation.Parent; current is not null; current = current.Parent)
+        {
+            if (current is IConditionalOperation or ISwitchOperation or ISwitchExpressionOperation or ILoopOperation or ICoalesceOperation or IConditionalAccessOperation)
+            {
+                return true;
+            }
+
+            if (current is IAnonymousFunctionOperation or ILocalFunctionOperation)
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     // c => c.Property (optionally converted): the shape StoryBuilder accepts.

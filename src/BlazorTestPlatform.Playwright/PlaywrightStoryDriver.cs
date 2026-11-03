@@ -29,10 +29,17 @@ public sealed class PlaywrightStoryDriver : IStoryDriver
         Page = page ?? throw new ArgumentNullException(nameof(page));
         Name = browserName;
         HostingModel = hostingModel;
-        Capabilities = DriverCapabilities.RealBrowser | DriverCapabilities.Layout | DriverCapabilities.Screenshots
-            | DriverCapabilities.NativeFocus | DriverCapabilities.JavaScript | DriverCapabilities.Css | DriverCapabilities.Network
-            | (fakeTime && hostingModel.IsInteractive() ? DriverCapabilities.FakeTime : DriverCapabilities.None);
+        Capabilities = CapabilitiesFor(hostingModel, fakeTime);
     }
+
+    /// <summary>What a real browser offers a story under <paramref name="hostingModel"/> (fake time needs interactivity).</summary>
+    /// <param name="hostingModel">The render mode of the story frame.</param>
+    /// <param name="fakeTime">Whether the story uses fake time.</param>
+    public static DriverCapabilities CapabilitiesFor(HostingModel hostingModel, bool fakeTime) =>
+        DriverCapabilities.RealBrowser | DriverCapabilities.Layout | DriverCapabilities.Screenshots
+        | DriverCapabilities.NativeFocus | DriverCapabilities.JavaScript | DriverCapabilities.Css | DriverCapabilities.Network
+        | DriverCapabilities.BrowserEmulation
+        | (fakeTime && hostingModel.IsInteractive() ? DriverCapabilities.FakeTime : DriverCapabilities.None);
 
     /// <summary>The Playwright page.</summary>
     public IPage Page { get; }
@@ -175,6 +182,26 @@ public sealed class PlaywrightStoryDriver : IStoryDriver
 
     /// <inheritdoc />
     public Task<string> GetMarkupAsync(CancellationToken cancellationToken) => Page.Locator(RootSelector).InnerHTMLAsync();
+
+    /// <inheritdoc />
+    public async Task<string> GetAriaSnapshotAsync(CancellationToken cancellationToken) =>
+        await Page.EvaluateAsync<string?>(Scripts.AriaSnapshot).ConfigureAwait(false) ?? string.Empty;
+
+    /// <inheritdoc />
+    public Task SetOfflineAsync(bool offline, CancellationToken cancellationToken) => Page.Context.SetOfflineAsync(offline);
+
+    /// <inheritdoc />
+    public async Task SetGeolocationAsync(GeoPosition? position, CancellationToken cancellationToken)
+    {
+        if (position is not null)
+        {
+            await Page.Context.GrantPermissionsAsync(["geolocation"]).ConfigureAwait(false);
+        }
+
+        await Page.Context.SetGeolocationAsync(position is null
+            ? null
+            : new Geolocation { Latitude = (float)position.Latitude, Longitude = (float)position.Longitude, Accuracy = (float)position.Accuracy }).ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<HttpRequestRecord>> GetHttpRequestsAsync(CancellationToken cancellationToken)

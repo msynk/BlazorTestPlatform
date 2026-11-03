@@ -137,6 +137,22 @@ public sealed record NetworkEntry
 /// <summary>Everything known about one story run (one matrix cell). Serialized to JSON for reports and CLI tooling.</summary>
 public sealed record StoryResult
 {
+    /// <summary>
+    /// Version of the result file format this library writes. Additive changes (new optional properties) keep the
+    /// version; it increases only when existing properties change meaning, and readers report files with a newer
+    /// version as unreadable instead of misinterpreting them.
+    /// </summary>
+    public const int CurrentSchemaVersion = 1;
+
+    private readonly int _schemaVersion = CurrentSchemaVersion;
+
+    /// <summary>Format version of this result. Files written before versioning (no or zero version) load as 1.</summary>
+    public int SchemaVersion
+    {
+        get => _schemaVersion == 0 ? 1 : _schemaVersion;
+        init => _schemaVersion = value;
+    }
+
     /// <summary>Unique key of the run (<c>story|driver|viewport|theme|mode</c>).</summary>
     public required string Key { get; init; }
 
@@ -151,6 +167,12 @@ public sealed record StoryResult
 
     /// <summary>Component type name.</summary>
     public string? Component { get; init; }
+
+    /// <summary>Source file of the story's collection, as compiled (see <see cref="Story.SourceFile"/>).</summary>
+    public string? SourceFile { get; init; }
+
+    /// <summary>Line of the collection's declaration in <see cref="SourceFile"/>.</summary>
+    public int? SourceLine { get; init; }
 
     /// <summary>Driver (<c>bunit</c>, <c>chromium</c>...).</summary>
     public required string Driver { get; init; }
@@ -209,8 +231,11 @@ public sealed record StoryResult
     /// <summary>Comparison against the performance baseline.</summary>
     public PerformanceComparison? PerformanceComparison { get; init; }
 
-    /// <summary>Exceeded performance budgets.</summary>
+    /// <summary>Exceeded performance budgets (render budgets in bUnit, browser budgets in real browsers).</summary>
     public IReadOnlyList<BudgetViolation> BudgetViolations { get; init; } = [];
+
+    /// <summary>Runtime metrics reported by a real browser (null for in-memory runs).</summary>
+    public BrowserMetrics? BrowserMetrics { get; init; }
 
     /// <summary>Console messages and page errors.</summary>
     public IReadOnlyList<ConsoleEntry> Console { get; init; } = [];

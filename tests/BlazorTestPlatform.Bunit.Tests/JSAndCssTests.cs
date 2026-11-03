@@ -187,4 +187,14 @@ public sealed class JSAndCssTests
 
         Assert.Equal([Path.Combine(directory, "theme.css")], settings.BunitStylesheets);
     }
+
+    [Fact]
+    public void A_configured_stylesheet_that_does_not_exist_fails_loudly()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".css");
+
+        var error = Assert.Throws<FileNotFoundException>(() => StylesheetCache.Resolve([], [missing], BlazorTestPlatform.Accessibility.Dom.MediaEnvironment.Desktop));
+
+        Assert.Contains(missing, error.Message, StringComparison.Ordinal);
+    }
 }

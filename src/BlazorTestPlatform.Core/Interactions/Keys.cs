@@ -63,13 +63,21 @@ public static class Keys
     /// <summary>Builds a chord such as <c>Shift+Tab</c>.</summary>
     public static string Chord(params string[] keys) => string.Join('+', keys);
 
-    /// <summary>Splits a chord into modifiers and the main key.</summary>
+    /// <summary>
+    /// Splits a chord into modifiers and the main key. <c>ControlOrMeta</c> is Meta on macOS and Control elsewhere, as in
+    /// Playwright; the main key can be <c>+</c> itself (<c>Shift++</c>).
+    /// </summary>
     public static (Drivers.KeyModifiers Modifiers, string Key) Parse(string chord)
     {
         ArgumentException.ThrowIfNullOrEmpty(chord);
         if (chord == "+")
         {
             return (Drivers.KeyModifiers.None, "+");
+        }
+
+        if (chord.EndsWith("++", StringComparison.Ordinal))
+        {
+            return (Parse(chord[..^1] + "x").Modifiers, "+");
         }
 
         var parts = chord.Split('+');
@@ -81,7 +89,8 @@ public static class Keys
                 Shift => Drivers.KeyModifiers.Shift,
                 Control or "Ctrl" => Drivers.KeyModifiers.Control,
                 Alt => Drivers.KeyModifiers.Alt,
-                Meta or "Cmd" or "ControlOrMeta" => Drivers.KeyModifiers.Meta,
+                Meta or "Cmd" => Drivers.KeyModifiers.Meta,
+                "ControlOrMeta" => OperatingSystem.IsMacOS() ? Drivers.KeyModifiers.Meta : Drivers.KeyModifiers.Control,
                 _ => throw new FormatException($"Unknown modifier '{parts[i]}' in '{chord}'."),
             };
         }

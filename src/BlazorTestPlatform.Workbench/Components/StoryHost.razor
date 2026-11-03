@@ -56,8 +56,12 @@
     private string? staticPlayStatus;
     private string? problem;
     private bool bridgeReady;
+    private bool disposed;
     private DotNetObjectReference<StoryHost>? selfReference;
     private IJSObjectReference? module;
+
+    // Cancelled when the frame goes away, so an in-app play run stops instead of driving a disposed story.
+    private readonly CancellationTokenSource lifetime = new();
 
     // The workbench's own calls bypass the story's JS-mock decorator.
     private IJSRuntime JS => jsRuntime ??= WorkbenchServiceCollectionExtensions.RealJSRuntime(Services);
@@ -90,6 +94,13 @@
     /// <inheritdoc />
     protected override async Task OnInitializedAsync()
     {
+        if (!Options.IsEnabled)
+        {
+            problem = "The workbench is disabled in this environment.";
+            status = "error";
+            return;
+        }
+
         if (!Catalog.TryGet(StoryId, out var story))
         {
             problem = $"Story '{StoryId}' was not found in the workbench catalog.";
@@ -138,7 +149,15 @@
         }
 
         selfReference = DotNetObjectReference.Create(this);
-        module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/BlazorTestPlatform.Workbench/btp-frame.js");
+        var imported = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/BlazorTestPlatform.Workbench/btp-frame.js");
+        if (disposed)
+        {
+            // Disposed while the module loaded: nothing may be registered with a released reference.
+            await imported.DisposeAsync();
+            return;
+        }
+
+        module = imported;
         await module.InvokeVoidAsync("register", selfReference, StoryId, RendererInfo.Name);
         bridgeReady = true;
         StateHasChanged();
@@ -151,47 +170,89 @@
 
     private async Task RunPlayAsync()
     {
-        var story = renderContext!.Story;
-        var driverModule = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/BlazorTestPlatform.Workbench/btp-driver.js");
-        var recorder = new BlazorTestPlatform.Results.StepRecorder();
-        string status;
-        string? error = null;
-        if (story.Play is not { } play)
+        // Fire-and-forget from OnAfterRenderAsync: nothing may escape, and every path that can still reach the page
+        // publishes a result, so callers waiting for data-btp-play-status never time out on an unreported failure.
+        IJSObjectReference? driverModule = null;
+        try
         {
-            status = "skipped";
-            error = "The story has no play function.";
+            driverModule = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/BlazorTestPlatform.Workbench/btp-driver.js");
+            var (status, error, steps) = await PlayAsync(driverModule);
+            var result = PlayResult.ToJson(status, error, steps, renderContext!.Actions.Records.Count, RendererInfo.Name);
+            await driverModule.InvokeVoidAsync("publishResultJson", StoryId, result);
         }
-        else
+        catch (JSDisconnectedException)
         {
-            // Same whole-run limit as the browser runner; assertions keep the default 5 s auto-wait.
-            var limit = story.Timeout ?? TimeSpan.FromSeconds(60);
-            using var timeout = new CancellationTokenSource(limit);
-            var driver = new InAppStoryDriver(driverModule, renderContext, ServiceScope, RendererInfo.Name);
-            var context = new StoryContext(story, driver, TimeSpan.FromSeconds(5), recorder, timeout.Token);
+            // The frame is gone (navigation, closed circuit): nobody is waiting for the result.
+        }
+        catch (Exception ex) when (driverModule is not null && ex is not OperationCanceledException)
+        {
+            var result = PlayResult.ToJson("failed", $"The in-app driver failed: {ex.GetType().Name}: {ex.Message}", [], renderContext?.Actions.Records.Count ?? 0, RendererInfo.Name);
             try
             {
-                await recorder.RunAsync("play", BlazorTestPlatform.Results.StepKind.Step, () => play(context));
-                status = "passed";
+                await driverModule.InvokeVoidAsync("publishResultJson", StoryId, result);
             }
-            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+            catch (Exception publishError) when (publishError is JSException or JSDisconnectedException or TaskCanceledException)
             {
-                status = "failed";
-                error = $"Story timed out after {limit.TotalSeconds:0.#} s.";
-            }
-            catch (StorySkippedException ex)
-            {
-                status = "skipped";
-                error = ex.Message;
-            }
-            catch (Exception ex)
-            {
-                status = "failed";
-                error = ex.Message;
+                // The page cannot take the result either.
             }
         }
+        catch (Exception ex) when (ex is JSException or TaskCanceledException)
+        {
+            // The driver script could not be loaded; there is no channel left to report through.
+        }
+        finally
+        {
+            if (driverModule is not null)
+            {
+                try
+                {
+                    await driverModule.DisposeAsync();
+                }
+                catch (JSDisconnectedException)
+                {
+                    // Circuit already gone.
+                }
+            }
+        }
+    }
 
-        var result = PlayResult.ToJson(status, error, recorder.Steps, renderContext.Actions.Records.Count, RendererInfo.Name);
-        await driverModule.InvokeVoidAsync("publishResultJson", StoryId, result);
+    private async Task<(string Status, string? Error, IReadOnlyList<BlazorTestPlatform.Results.StepRecord> Steps)> PlayAsync(IJSObjectReference driverModule)
+    {
+        var story = renderContext!.Story;
+        var recorder = new BlazorTestPlatform.Results.StepRecorder();
+        if (story.Play is not { } play)
+        {
+            return ("skipped", "The story has no play function.", []);
+        }
+
+        await using var driver = new InAppStoryDriver(driverModule, renderContext, ServiceScope, RendererInfo.Name);
+        if (story.UnsupportedReason(driver.Capabilities, driver.Name) is { } unsupported)
+        {
+            return ("skipped", unsupported, []);
+        }
+
+        // Same whole-run limit as the browser runner; assertions keep the default 5 s auto-wait.
+        var limit = story.Timeout ?? TimeSpan.FromSeconds(60);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        timeout.CancelAfter(limit);
+        var context = new StoryContext(story, driver, TimeSpan.FromSeconds(5), recorder, timeout.Token);
+        try
+        {
+            await recorder.RunAsync("play", BlazorTestPlatform.Results.StepKind.Step, () => play(context));
+            return ("passed", null, recorder.Steps);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            return ("failed", $"Story timed out after {limit.TotalSeconds:0.#} s.", recorder.Steps);
+        }
+        catch (StorySkippedException ex)
+        {
+            return ("skipped", ex.Message, recorder.Steps);
+        }
+        catch (Exception ex) when (ex is not JSDisconnectedException)
+        {
+            return ("failed", ex.Message, recorder.Steps);
+        }
     }
 
     /// <summary>Returns the action log as JSON (called by browser test runners).</summary>
@@ -256,6 +317,9 @@
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        disposed = true;
+        await lifetime.CancelAsync();
+        lifetime.Dispose();
         if (module is not null)
         {
             try

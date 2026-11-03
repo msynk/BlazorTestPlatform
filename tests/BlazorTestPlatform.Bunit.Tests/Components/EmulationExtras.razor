@@ -1,0 +1,55 @@
+@* Browser behaviours the in-memory driver emulates beyond basic events. *@
+<details @ontoggle="() => toggles++"><summary>More</summary><p>Hidden detail</p></details>
+<output data-testid="toggles">@toggles</output>
+
+<fieldset>
+    <legend>Plan</legend>
+    <label><input type="radio" name="plan" value="a" checked /> Basic</label>
+    <label><input type="radio" name="plan" value="b" /> Pro</label>
+    <label><input type="radio" name="plan" value="c" disabled /> Legacy</label>
+    <label><input type="radio" name="plan" value="d" @onchange="e => picked = (string?)e.Value" /> Team</label>
+</fieldset>
+<output data-testid="picked">@picked</output>
+
+<textarea aria-label="Notes" @oninput="e => notes = (string?)e.Value"></textarea>
+<output data-testid="notes">@notes?.Replace("\n", "|")</output>
+
+<input type="checkbox" aria-label="Locked" @onclick:preventDefault @onchange="() => changes++" />
+<output data-testid="changes">@changes</output>
+
+<label><input type="hidden" name="token" value="x" /><input type="checkbox" /> Remember me</label>
+
+<input aria-label="Code" readonly="@locked" />
+
+<p>Plain text to click</p>
+<button type="button">After text</button>
+
+<div data-testid="card" draggable="true" @ondragstart="() => { }">Card</div>
+<div data-testid="no-drop" @ondrop="() => drops++" @ondragleave="() => leaves++">Not a drop target</div>
+<div data-testid="target" @ondragover="() => { }" @ondragover:preventDefault @ondrop="() => drops++">Drop target</div>
+<output data-testid="drops">@drops/@leaves</output>
+
+<div data-testid="mouse" @onmousedown="e => buttons = e.Buttons">Mouse</div>
+<output data-testid="buttons">@buttons</output>
+
+@code {
+    private int toggles;
+    private string? picked;
+    private string? notes;
+    private int changes;
+    private bool locked = true;
+    private int drops;
+    private int leaves;
+    private long buttons;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // The field becomes editable a moment after the first render, like one waiting for data.
+            await Task.Delay(150);
+            locked = false;
+            StateHasChanged();
+        }
+    }
+}

@@ -38,12 +38,16 @@ public sealed record PerformanceBaselineEntry
 }
 
 /// <summary>
-/// A JSON file of <see cref="PerformanceBaselineEntry"/> keyed by story id. Thread-safe within a process
-/// so parallel tests can record into the same file.
+/// A JSON file of <see cref="PerformanceBaselineEntry"/> keyed by story id. Safe for parallel tests: writers in one
+/// process share a lock per file, writers in different processes (parallel test projects) take a lock file, and every
+/// write merges into what is on disk at that moment, so no recorded entry is lost.
 /// </summary>
 public sealed class PerformanceBaselineStore
 {
-    private readonly Lock _gate = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lock> Gates = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan FileLockTimeout = TimeSpan.FromSeconds(30);
+
+    private readonly Lock _gate;
     private SortedDictionary<string, PerformanceBaselineEntry>? _entries;
 
     /// <summary>Creates a store backed by <paramref name="path"/>.</summary>
@@ -51,6 +55,7 @@ public sealed class PerformanceBaselineStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         FilePath = Path.GetFullPath(path);
+        _gate = Gates.GetOrAdd(FilePath, _ => new Lock());
     }
 
     /// <summary>The baseline file.</summary>
@@ -80,64 +85,93 @@ public sealed class PerformanceBaselineStore
     /// <summary>Records (and persists) the baseline for a story.</summary>
     public void Set(string storyId, PerformanceBaselineEntry entry)
     {
-        lock (_gate)
+        ArgumentException.ThrowIfNullOrEmpty(storyId);
+        ArgumentNullException.ThrowIfNull(entry);
+        Update(entries =>
         {
-            Load()[storyId] = entry;
-            Save();
-        }
+            entries[storyId] = entry;
+            return true;
+        });
     }
 
     /// <summary>Removes baselines whose story no longer exists. Returns the removed ids.</summary>
     public IReadOnlyList<string> Prune(IEnumerable<string> liveStoryIds)
     {
         var live = liveStoryIds.ToHashSet(StringComparer.Ordinal);
-        lock (_gate)
+        List<string> removed = [];
+        Update(entries =>
         {
-            var entries = Load();
-            var removed = entries.Keys.Where(k => !live.Contains(k)).ToList();
+            removed = entries.Keys.Where(k => !live.Contains(k)).ToList();
             foreach (var id in removed)
             {
                 entries.Remove(id);
             }
 
-            if (removed.Count > 0)
+            return removed.Count > 0;
+        });
+        return removed;
+    }
+
+    /// <summary>Read-modify-write under both locks, starting from the file as it is now (other writers included).</summary>
+    private void Update(Func<SortedDictionary<string, PerformanceBaselineEntry>, bool> change)
+    {
+        lock (_gate)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+            using var fileLock = AcquireFileLock();
+            var entries = Read();
+            if (change(entries))
             {
-                Save();
+                Save(entries);
             }
 
-            return removed;
+            _entries = entries;
         }
     }
 
-    private SortedDictionary<string, PerformanceBaselineEntry> Load()
+    private FileStream AcquireFileLock()
     {
-        if (_entries is not null)
+        var path = FilePath + ".lock";
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (true)
         {
-            return _entries;
+            try
+            {
+                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+            }
+            catch (IOException) when (clock.Elapsed < FileLockTimeout)
+            {
+                Thread.Sleep(25);
+            }
         }
+    }
 
-        _entries = new SortedDictionary<string, PerformanceBaselineEntry>(StringComparer.Ordinal);
+    private SortedDictionary<string, PerformanceBaselineEntry> Load() => _entries ??= Read();
+
+    private SortedDictionary<string, PerformanceBaselineEntry> Read()
+    {
+        // Parsed into a local first: a corrupt file throws without leaving an empty cache that a later Set would save.
+        var entries = new SortedDictionary<string, PerformanceBaselineEntry>(StringComparer.Ordinal);
         if (File.Exists(FilePath))
         {
-            using var stream = File.OpenRead(FilePath);
+            using var stream = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             var document = BtpJson.Deserialize<PerformanceBaselineDocument>(stream);
             if (document?.Stories is not null)
             {
                 foreach (var pair in document.Stories)
                 {
-                    _entries[pair.Key] = pair.Value;
+                    entries[pair.Key] = pair.Value;
                 }
             }
         }
 
-        return _entries;
+        return entries;
     }
 
-    private void Save()
+    private void Save(SortedDictionary<string, PerformanceBaselineEntry> entries)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-        var document = new PerformanceBaselineDocument { Stories = new SortedDictionary<string, PerformanceBaselineEntry>(_entries!, StringComparer.Ordinal) };
-        var temp = FilePath + ".tmp";
+        var document = new PerformanceBaselineDocument { Stories = new SortedDictionary<string, PerformanceBaselineEntry>(entries, StringComparer.Ordinal) };
+        var temp = $"{FilePath}.{Environment.ProcessId}.tmp";
         File.WriteAllText(temp, BtpJson.Serialize(document));
         File.Move(temp, FilePath, overwrite: true);
     }

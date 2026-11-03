@@ -133,6 +133,12 @@ public sealed class StoryCatalog
     /// <summary>Stories of one component type.</summary>
     public StoryCatalog ForComponent<TComponent>() => Where(s => s.ComponentType == typeof(TComponent));
 
+    /// <summary>
+    /// Stories a driver with <paramref name="capabilities"/> can run (see <see cref="Story.CanRunOn"/>). Runners skip
+    /// the others with an explanation anyway; filtering keeps them out of test lists entirely.
+    /// </summary>
+    public StoryCatalog Supporting(Drivers.DriverCapabilities capabilities) => Where(s => s.CanRunOn(capabilities));
+
     /// <summary>Stories whose id or path matches a glob (<c>*</c>, <c>?</c>), e.g. <c>inputs-*</c>.</summary>
     public StoryCatalog Matching(string pattern) => Where(s => Glob.IsMatch(s.Id, pattern) || Glob.IsMatch(s.Path, pattern));
 
@@ -195,6 +201,12 @@ public sealed class StoryCatalog
             {
                 return false;
             }
+        }
+
+        // Same exclusions as the source generator: file-local types (compiler-mangled names) and types obsolete as errors.
+        if (type.Name.Contains('<', StringComparison.Ordinal) || type.GetCustomAttribute<ObsoleteAttribute>() is { IsError: true })
+        {
+            return false;
         }
 
         return typeof(StoryCollection).IsAssignableFrom(type) || typeof(IStoryConfiguration).IsAssignableFrom(type);

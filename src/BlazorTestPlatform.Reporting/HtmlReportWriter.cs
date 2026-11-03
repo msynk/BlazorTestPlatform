@@ -197,9 +197,9 @@ public static class HtmlReportWriter
             {
                 var failing = r.AccessibilityFailures.Contains(violation.RuleId);
                 h.Append("<tr class=\"").Append(failing ? "row-bad" : string.Empty).Append("\"><td><code>").Append(E(violation.RuleId)).Append("</code></td><td>").Append(violation.Impact).Append("</td><td>");
-                if (violation.HelpUrl is not null)
+                if (violation.HelpUrl is { } helpUrl && Uri.TryCreate(helpUrl, UriKind.Absolute, out var help) && (help.Scheme == Uri.UriSchemeHttps || help.Scheme == Uri.UriSchemeHttp))
                 {
-                    h.Append("<a href=\"").Append(E(violation.HelpUrl)).Append("\" target=\"_blank\" rel=\"noopener\">").Append(E(violation.Help)).Append("</a>");
+                    h.Append("<a href=\"").Append(E(help.AbsoluteUri)).Append("\" target=\"_blank\" rel=\"noopener noreferrer\">").Append(E(violation.Help)).Append("</a>");
                 }
                 else
                 {

@@ -100,6 +100,14 @@ public sealed class StepRecorder
 
         _current.Value = step;
 
+        // Every timeline step is also a tracing span (when an OpenTelemetry listener subscribes to BtpTelemetry.Source).
+        using var activity = BtpTelemetry.Source.StartActivity("btp.step");
+        if (activity is not null)
+        {
+            activity.DisplayName = title;
+            activity.SetTag("btp.step.kind", kind.ToString().ToLowerInvariant());
+        }
+
         try
         {
             return await body().ConfigureAwait(false);
@@ -107,6 +115,7 @@ public sealed class StepRecorder
         catch (Exception ex)
         {
             step.Error = FirstLine(ex.Message);
+            activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, step.Error);
             throw;
         }
         finally

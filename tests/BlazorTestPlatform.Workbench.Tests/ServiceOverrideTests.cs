@@ -73,6 +73,25 @@ public sealed class RecordingJSRuntime : IJSRuntime
     }
 }
 
+public interface IGreetingFormatter
+{
+    string Format();
+}
+
+/// <summary>A story service that depends on application services, as fakes often do.</summary>
+public sealed class ShoutingFormatter(IGreetingService greeting, Microsoft.Extensions.Logging.ILogger<ShoutingFormatter> logger) : IGreetingFormatter
+{
+    public string Format()
+    {
+        logger.LogDebug("formatting");
+        return greeting.Greet().ToUpperInvariant() + "!";
+    }
+}
+
+public interface IWasmOnlyService;
+
+public sealed class WasmOnlyService : IWasmOnlyService;
+
 public sealed class WidgetStories : Stories<Widget>
 {
     public override string Title => "Tests/Widget";
@@ -80,6 +99,15 @@ public sealed class WidgetStories : Stories<Widget>
     protected override void Define(StoryCollectionBuilder<Widget> stories)
     {
         stories.Add("Plain");
+        stories.Add("Uses app services", s => s.Services(services => services.AddSingleton<IGreetingFormatter, ShoutingFormatter>()));
+        stories.Add("Keyed", s => s.Services(services => services.AddKeyedSingleton<IGreetingService, FakeGreetingService>("special")));
+        stories.Add("WebAssembly only", s => s.Services((services, context) =>
+        {
+            if (context.HostingModel == HostingModel.InteractiveWebAssembly)
+            {
+                services.AddSingleton<IWasmOnlyService, WasmOnlyService>();
+            }
+        }));
         stories.Add("Overridden", s => s.Services(services => services.AddSingleton<IGreetingService, FakeGreetingService>()));
         stories.Add("Options", s => s.Services(services => services.Configure<WidgetSettings>(o => o.Applied.Add("story"))));
         stories.Add("Http", s => s.MockHttp(http => http.Get("api/ping").RespondText("pong")));
@@ -143,6 +171,71 @@ public sealed class ServiceOverrideTests
         }
 
         Assert.Equal("real", provider.GetRequiredService<IGreetingService>().Greet());
+    }
+
+    [Fact]
+    public async Task Story_services_can_depend_on_application_services()
+    {
+        await using var provider = BuildApp(services => services.AddLogging());
+        await using var frame = await ActivateAsync(provider, "tests-widget--uses-app-services");
+
+        Assert.Equal("REAL!", frame.ServiceProvider.GetRequiredService<IGreetingFormatter>().Format());
+    }
+
+    [Fact]
+    public async Task Disposing_a_frame_never_disposes_borrowed_application_services()
+    {
+        var app = new TrackingDisposable();
+        await using var provider = BuildApp(services => services.AddLogging().AddScoped(_ => app));
+        await using (var frame = await ActivateAsync(provider, "tests-widget--uses-app-services"))
+        {
+            _ = frame.ServiceProvider.GetRequiredService<StoryServiceScope>().Services!.GetRequiredService<TrackingDisposable>();
+            await frame.ServiceProvider.GetRequiredService<StoryServiceScope>().DisposeAsync();
+            Assert.False(app.Disposed);
+        }
+    }
+
+    public sealed class TrackingDisposable : IDisposable
+    {
+        public bool Disposed { get; private set; }
+
+        public void Dispose() => Disposed = true;
+    }
+
+    [Fact]
+    public async Task Services_a_story_registers_under_one_render_mode_only_are_still_overridable()
+    {
+        await using var provider = BuildApp();
+        await using var scope = provider.CreateAsyncScope();
+        var story = scope.ServiceProvider.GetRequiredService<StoryCatalog>().Get("tests-widget--webassembly-only");
+        await scope.ServiceProvider.GetRequiredService<StoryServiceScope>().ActivateAsync(story, HostingModel.InteractiveWebAssembly, authentication: null);
+
+        Assert.IsType<WasmOnlyService>(scope.ServiceProvider.GetService<IWasmOnlyService>());
+    }
+
+    [Fact]
+    public async Task Keyed_story_registrations_are_flagged()
+    {
+        await using var provider = BuildApp();
+        var options = provider.GetRequiredService<WorkbenchOptions>();
+
+        Assert.Equal([typeof(IGreetingService)], options.UnsupportedOverridesOf(provider.GetRequiredService<StoryCatalog>().Get("tests-widget--keyed")));
+        Assert.Empty(options.UnsupportedOverridesOf(provider.GetRequiredService<StoryCatalog>().Get("tests-widget--options")));
+    }
+
+    [Fact]
+    public async Task A_disposed_scope_forgets_its_story_and_refuses_new_instances()
+    {
+        await using var provider = BuildApp();
+        var scope = provider.CreateAsyncScope();
+        var storyScope = scope.ServiceProvider.GetRequiredService<StoryServiceScope>();
+        await storyScope.ActivateAsync(provider.GetRequiredService<StoryCatalog>().Get("tests-widget--overridden"), HostingModel.InteractiveServer, authentication: null);
+
+        await scope.DisposeAsync();
+
+        Assert.Null(storyScope.Story);
+        Assert.Null(storyScope.Resolve(typeof(IGreetingService)));
+        Assert.Throws<ObjectDisposedException>(() => storyScope.GetOrAdd("x", () => new object()));
     }
 
     [Fact]
@@ -292,7 +385,11 @@ public sealed class ServiceOverrideTests
         {
             var client = mocked.ServiceProvider.GetRequiredService<IHttpClientFactory>().CreateClient("api");
             Assert.Equal("pong", await client.GetStringAsync("api/ping"));
-            Assert.Single(mocked.ServiceProvider.GetRequiredService<StoryServiceScope>().Overrides!.GetRequiredService<HttpMock>().Requests);
+            var request = Assert.Single(mocked.ServiceProvider.GetRequiredService<StoryServiceScope>().Overrides!.GetRequiredService<HttpMock>().Requests);
+
+            // The application's configuration of the named client still applies; only the network is replaced.
+            Assert.Equal(new Uri("https://real.example/"), client.BaseAddress);
+            Assert.Equal("https://real.example/api/ping", request.Url);
         }
 
         await using var plain = await ActivateAsync(provider, "tests-widget--plain");

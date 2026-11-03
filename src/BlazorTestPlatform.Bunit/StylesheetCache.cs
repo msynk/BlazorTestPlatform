@@ -15,7 +15,15 @@ internal static class StylesheetCache
             return null;
         }
 
-        var sheets = inline.Concat(files.Where(File.Exists).Select(File.ReadAllText)).ToArray();
+        // A configured stylesheet that does not exist is a configuration error: skipping it would silently show
+        // elements its rules hide.
+        var missing = files.FirstOrDefault(f => !File.Exists(f));
+        if (missing is not null)
+        {
+            throw new FileNotFoundException($"The stylesheet '{missing}' configured for bUnit (bunit.stylesheets in btp.json, or BunitStoryOptions.AddStylesheetFile) does not exist. Build the project that produces it, or fix the path.", missing);
+        }
+
+        var sheets = inline.Concat(files.Select(File.ReadAllText)).ToArray();
         var key = string.Join('\u0001', sheets.Select(s => DeterministicRandom.StableHash(s).ToString("x16", System.Globalization.CultureInfo.InvariantCulture)));
         return Cache.GetOrAdd(key, _ => CssVisibility.Parse(sheets)).For(environment);
     }

@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq.Expressions;
+using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.Components;
 
 namespace BlazorTestPlatform;
@@ -17,6 +18,33 @@ public abstract class StoryCollection
     /// <summary>The component documented by this collection.</summary>
     [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)]
     public abstract Type ComponentType { get; }
+
+    /// <summary>
+    /// The source file that declares the collection, as the compiler saw it (an absolute path, or a mapped one such as
+    /// <c>/_/src/...</c> in deterministic CI builds). Null for collections created without caller information.
+    /// </summary>
+    public string? SourceFile { get; private protected set; }
+
+    /// <summary>The line of the declaration in <see cref="SourceFile"/> (0 when unknown).</summary>
+    public int SourceLine { get; private protected set; }
+
+    /// <summary>
+    /// Records where a collection is declared. Called by the generated story catalog, which knows every collection's
+    /// source; not meant for direct use.
+    /// </summary>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public static TCollection WithSource<TCollection>(TCollection collection, string? sourceFile, int sourceLine)
+        where TCollection : StoryCollection
+    {
+        ArgumentNullException.ThrowIfNull(collection);
+        if (collection.SourceFile is null && !string.IsNullOrEmpty(sourceFile))
+        {
+            collection.SourceFile = sourceFile;
+            collection.SourceLine = sourceLine;
+        }
+
+        return collection;
+    }
 
     internal abstract IReadOnlyList<Story> Build(IReadOnlyList<IStoryConfiguration> globalConfigurations);
 
@@ -54,6 +82,16 @@ public abstract class StoryCollection
 public abstract class Stories<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TComponent> : StoryCollection
     where TComponent : IComponent
 {
+    /// <summary>
+    /// Creates the collection. The compiler supplies where the derived class is declared, so reports, SARIF results and
+    /// the workbench can point at the story's source.
+    /// </summary>
+    protected Stories([CallerFilePath] string sourceFile = "", [CallerLineNumber] int sourceLine = 0)
+    {
+        SourceFile = string.IsNullOrEmpty(sourceFile) ? null : sourceFile;
+        SourceLine = sourceLine;
+    }
+
     /// <inheritdoc />
     [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)]
     public sealed override Type ComponentType => typeof(TComponent);
@@ -63,7 +101,7 @@ public abstract class Stories<[DynamicallyAccessedMembers(DynamicallyAccessedMem
 
     internal override IReadOnlyList<Story> Build(IReadOnlyList<IStoryConfiguration> globalConfigurations)
     {
-        var builder = new StoryCollectionBuilder<TComponent>(Title ?? DefaultTitle(typeof(TComponent)), GetType(), globalConfigurations);
+        var builder = new StoryCollectionBuilder<TComponent>(Title ?? DefaultTitle(typeof(TComponent)), GetType(), globalConfigurations) { Source = (SourceFile, SourceLine) };
         Define(builder);
         return builder.Build();
     }
@@ -99,6 +137,8 @@ public sealed class StoryCollectionBuilder<[DynamicallyAccessedMembers(Dynamical
     /// <summary>The collection title.</summary>
     public string Title { get; }
 
+    internal (string? File, int Line) Source { get; init; }
+
     /// <summary>Configuration applied to every story of the collection (before the story's own configuration).</summary>
     public StoryCollectionBuilder<TComponent> Defaults(Action<StoryBuilder<TComponent>> configure)
     {
@@ -117,7 +157,9 @@ public sealed class StoryCollectionBuilder<[DynamicallyAccessedMembers(Dynamical
 
     /// <summary>
     /// Adds one story per combination of parameter values (a visual state matrix), named like
-    /// <c>Variant=Primary, Size=Small</c>.
+    /// <c>Variant=Primary, Size=Small</c>. Use <see cref="VariantBuilder{TComponent}.Pairwise"/> to cover every pair of
+    /// values instead of every combination, and <see cref="VariantBuilder{TComponent}.Where"/> to leave out
+    /// combinations the component does not support.
     /// </summary>
     public StoryCollectionBuilder<TComponent> AddVariants(Action<VariantBuilder<TComponent>> vary, Action<StoryBuilder<TComponent>>? configure = null)
     {
@@ -154,7 +196,7 @@ public sealed class StoryCollectionBuilder<[DynamicallyAccessedMembers(Dynamical
             }
 
             configure?.Invoke(builder);
-            stories.Add(builder.Build(Title, _collectionType, i));
+            stories.Add(builder.Build(Title, _collectionType, i, Source));
         }
 
         return stories;
@@ -166,6 +208,8 @@ public sealed class VariantBuilder<[DynamicallyAccessedMembers(DynamicallyAccess
     where TComponent : IComponent
 {
     private readonly List<(string Parameter, Type Type, IReadOnlyList<object?> Values)> _dimensions = [];
+    private readonly List<Func<VariantCombination<TComponent>, bool>> _constraints = [];
+    private bool _pairwise;
 
     internal VariantBuilder()
     {
@@ -180,7 +224,37 @@ public sealed class VariantBuilder<[DynamicallyAccessedMembers(DynamicallyAccess
             throw new ArgumentException("At least one value is required.", nameof(values));
         }
 
-        _dimensions.Add((ComponentParameters.GetName(parameter), typeof(TValue), values.Cast<object?>().ToArray()));
+        var name = ComponentParameters.GetName(parameter);
+        if (_dimensions.Any(d => string.Equals(d.Parameter, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new ArgumentException($"'{name}' is already varied; give all of its values in one Vary call.", nameof(parameter));
+        }
+
+        _dimensions.Add((name, typeof(TValue), values.Cast<object?>().ToArray()));
+        return this;
+    }
+
+    /// <summary>
+    /// Covers every pair of values of any two parameters at least once instead of every combination (all-pairs
+    /// testing). Most interaction defects involve one or two parameters, so this keeps most of the coverage with far
+    /// fewer stories: 4 parameters with 4 values each give 16 to 20 stories instead of 256. With fewer than three
+    /// parameters it changes nothing. The selection is deterministic, so story ids and baselines are stable.
+    /// </summary>
+    public VariantBuilder<TComponent> Pairwise()
+    {
+        _pairwise = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Leaves out combinations the predicate rejects (for example <c>c =&gt; !(c.Get(b =&gt; b.Variant) == Variant.Link
+    /// &amp;&amp; c.Get(b =&gt; b.Size) == Size.Large)</c>). Constraints combine with <see cref="Pairwise"/>: pairs that
+    /// only occur in rejected combinations are not covered.
+    /// </summary>
+    public VariantBuilder<TComponent> Where(Func<VariantCombination<TComponent>, bool> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        _constraints.Add(predicate);
         return this;
     }
 
@@ -191,15 +265,22 @@ public sealed class VariantBuilder<[DynamicallyAccessedMembers(DynamicallyAccess
             yield break;
         }
 
-        var indices = new int[_dimensions.Count];
-        while (true)
+        var sizes = _dimensions.Select(d => d.Values.Count).ToArray();
+        Func<IReadOnlyList<int>, bool>? isValid = _constraints.Count == 0 ? null : row =>
+        {
+            var combination = new VariantCombination<TComponent>(_dimensions.Select((d, i) => (d.Parameter, d.Values[row[i]])).ToArray());
+            return _constraints.All(c => c(combination));
+        };
+        var rows = _pairwise ? Combinatorics.Pairwise(sizes, isValid) : Combinatorics.CartesianProduct(sizes, isValid);
+
+        foreach (var row in rows)
         {
             var parts = new List<string>(_dimensions.Count);
             var assignments = new List<(string Name, object? Value, Type Type)>(_dimensions.Count);
             for (var d = 0; d < _dimensions.Count; d++)
             {
                 var (parameter, type, values) = _dimensions[d];
-                var value = values[indices[d]];
+                var value = values[row[d]];
                 parts.Add($"{parameter}={Format(value)}");
                 assignments.Add((parameter, value, type));
             }
@@ -211,24 +292,6 @@ public sealed class VariantBuilder<[DynamicallyAccessedMembers(DynamicallyAccess
                     builder.SetValueArg(name, value, type);
                 }
             });
-
-            var dimension = _dimensions.Count - 1;
-            while (dimension >= 0)
-            {
-                indices[dimension]++;
-                if (indices[dimension] < _dimensions[dimension].Values.Count)
-                {
-                    break;
-                }
-
-                indices[dimension] = 0;
-                dimension--;
-            }
-
-            if (dimension < 0)
-            {
-                yield break;
-            }
         }
     }
 
@@ -238,4 +301,27 @@ public sealed class VariantBuilder<[DynamicallyAccessedMembers(DynamicallyAccess
         IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
         _ => value.ToString() ?? string.Empty,
     };
+}
+
+/// <summary>One combination of varied parameter values, passed to <see cref="VariantBuilder{TComponent}.Where"/>.</summary>
+public sealed class VariantCombination<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TComponent>
+    where TComponent : IComponent
+{
+    private readonly IReadOnlyList<(string Parameter, object? Value)> _values;
+
+    internal VariantCombination(IReadOnlyList<(string Parameter, object? Value)> values) => _values = values;
+
+    /// <summary>The value of a varied parameter by name.</summary>
+    /// <exception cref="KeyNotFoundException">The parameter is not varied.</exception>
+    public object? this[string parameter] =>
+        _values.FirstOrDefault(v => string.Equals(v.Parameter, parameter, StringComparison.OrdinalIgnoreCase)) is { Parameter: not null } match
+            ? match.Value
+            : throw new KeyNotFoundException($"'{parameter}' is not varied. Varied: {string.Join(", ", _values.Select(v => v.Parameter))}.");
+
+    /// <summary>The value of a varied parameter.</summary>
+    /// <exception cref="KeyNotFoundException">The parameter is not varied.</exception>
+    public TValue Get<TValue>(Expression<Func<TComponent, TValue>> parameter) => (TValue)this[ComponentParameters.GetName(parameter)]!;
+
+    /// <inheritdoc />
+    public override string ToString() => string.Join(", ", _values.Select(v => $"{v.Parameter}={v.Value}"));
 }

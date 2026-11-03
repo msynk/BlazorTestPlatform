@@ -42,6 +42,34 @@ public sealed class PullRequestCommentTests
     }
 
     [Fact]
+    public async Task A_person_pasting_the_marker_cannot_take_over_the_report_comment()
+    {
+        var github = new FakeGitHub();
+        github.Comments[3] = MarkdownSummaryWriter.CommentMarker + "\nAll green, trust me";
+        using var http = new HttpClient(github);
+
+        var result = await new GitHubPullRequestComment(http, "contoso/ui", 42, "token").UpsertAsync("## one failing", TestContext.Current.CancellationToken);
+
+        Assert.True(result.Created);
+        Assert.EndsWith("All green, trust me", github.Comments[3], StringComparison.Ordinal);
+        Assert.Equal(2, github.Comments.Count);
+    }
+
+    [Fact]
+    public void Own_comments_are_recognized_by_marker_and_author()
+    {
+        static JsonElement Comment(string body, string login, string type) =>
+            JsonDocument.Parse(JsonSerializer.Serialize(new { id = 1, body, user = new { login, type } })).RootElement;
+        var report = MarkdownSummaryWriter.CommentMarker + "\n## report";
+
+        Assert.True(GitHubPullRequestComment.IsOwnComment(Comment(report, "github-actions[bot]", "Bot")));
+        Assert.False(GitHubPullRequestComment.IsOwnComment(Comment(report, "octocat", "User")));
+        Assert.False(GitHubPullRequestComment.IsOwnComment(Comment("quoting " + report, "github-actions[bot]", "Bot")));
+        Assert.True(GitHubPullRequestComment.IsOwnComment(Comment(report, "ci-user", "User"), expectedAuthor: "ci-user"));
+        Assert.False(GitHubPullRequestComment.IsOwnComment(Comment(report, "github-actions[bot]", "Bot"), expectedAuthor: "ci-user"));
+    }
+
+    [Fact]
     public async Task Read_only_tokens_explain_the_missing_permission()
     {
         var github = new FakeGitHub { Forbidden = true };
@@ -116,6 +144,9 @@ public sealed class PullRequestCommentTests
 
         public SortedDictionary<long, string> Comments { get; } = [];
 
+        /// <summary>Comments posted through the API (as the workflow's bot); the others were written by people.</summary>
+        private readonly HashSet<long> _posted = [];
+
         public List<(string Method, string Path, string? Authorization)> Requests { get; } = [];
 
         public bool Forbidden { get; init; }
@@ -132,12 +163,14 @@ public sealed class PullRequestCommentTests
             switch (request.Method.Method)
             {
                 case "GET":
-                    var list = string.Join(",", Comments.Select(c => $$"""{"id":{{c.Key}},"body":{{JsonSerializer.Serialize(c.Value)}}}"""));
+                    var list = string.Join(",", Comments.Select(c =>
+                        $$"""{"id":{{c.Key}},"body":{{JsonSerializer.Serialize(c.Value)}},"user":{{(_posted.Contains(c.Key) ? "{\"login\":\"github-actions[bot]\",\"type\":\"Bot\"}" : "{\"login\":\"octocat\",\"type\":\"User\"}")}}}"""));
                     return Json($"[{list}]");
                 case "POST":
                     var id = Comments.Count == 0 ? _nextId : Math.Max(_nextId, Comments.Keys.Max() + 1);
                     _nextId = id + 1;
                     Comments[id] = body!;
+                    _posted.Add(id);
                     return Json($$"""{"id":{{id}},"html_url":"https://github.com/contoso/ui/pull/42#issuecomment-{{id}}"}""");
                 case "PATCH":
                     var target = long.Parse(request.RequestUri.Segments[^1], System.Globalization.CultureInfo.InvariantCulture);

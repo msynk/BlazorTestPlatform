@@ -30,7 +30,9 @@ public static class DomFacts
         IElement? previous = null;
         for (var current = element; current is not null; previous = current, current = current.ParentElement)
         {
-            if (NeverRendered.Contains(current.LocalName) || current.HasAttribute("hidden"))
+            // The hidden attribute is display: none in the browser's stylesheet, so an author display wins over it.
+            if (NeverRendered.Contains(current.LocalName)
+                || (current.HasAttribute("hidden") && !HasInlineDisplay(current) && scope?.Styles?.DisplayOverridesHiddenAttribute(current) != true))
             {
                 return true;
             }
@@ -311,6 +313,28 @@ public static class DomFacts
         var html = element.OuterHtml;
         html = System.Text.RegularExpressions.Regex.Replace(html, "\\s(?:blazor:[^\\s=>]+|b-[a-z0-9]{10}|_bl_[0-9a-f-]+)(?:=\"[^\"]*\")?", string.Empty, System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromSeconds(1));
         return html.Length <= maxLength ? html : html[..maxLength] + "…";
+    }
+
+    /// <summary>True when the element's style attribute sets a <c>display</c> other than <c>none</c>.</summary>
+    internal static bool HasInlineDisplay(IElement element)
+    {
+        var style = element.GetAttribute("style");
+        if (string.IsNullOrEmpty(style))
+        {
+            return false;
+        }
+
+        foreach (var declaration in style.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var colon = declaration.IndexOf(':', StringComparison.Ordinal);
+            if (colon > 0 && string.Equals(declaration[..colon].Trim(), "display", StringComparison.OrdinalIgnoreCase))
+            {
+                var value = declaration[(colon + 1)..].Replace("!important", string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
+                return value.Length > 0 && !value.Equals("none", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        return false;
     }
 
     internal static bool HasInlineStyle(IElement element, string property, string value)

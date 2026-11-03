@@ -28,6 +28,13 @@ public sealed record FlakeEntry(string Key, int Runs, int Failures, int Flaky)
 
     /// <summary>Share of unstable runs. Keys that failed every run are broken, not flaky, and get rate 0.</summary>
     public double FlakeRate => Runs == 0 || Failures == Runs ? 0 : (double)Unstable / Runs;
+
+    /// <summary>
+    /// How often the outcome switched between failed and passing from one run to the next. A story that regressed and
+    /// was then fixed flips twice however long it stayed broken; an intermittent one flips again and again. Ties in
+    /// <see cref="FlakeRate"/> are ranked by it.
+    /// </summary>
+    public int Flips { get; init; }
 }
 
 /// <summary>Flakiness over a window of runs.</summary>
@@ -51,17 +58,33 @@ public sealed class FlakeHistory
     /// <summary>Runs, oldest first.</summary>
     public IReadOnlyList<HistoryRun> Runs => _runs;
 
-    /// <summary>Loads a history file (empty when missing).</summary>
-    public static FlakeHistory Load(string path)
+    /// <summary>Loads a history file (empty when missing or unreadable).</summary>
+    public static FlakeHistory Load(string path) => Load(path, out _);
+
+    /// <summary>
+    /// Loads a history file. A missing file gives an empty history; so does a corrupt one (a cancelled job can leave a
+    /// truncated file in a CI cache), with the reason in <paramref name="problem"/>, so one bad cache entry never breaks
+    /// every later report.
+    /// </summary>
+    public static FlakeHistory Load(string path, out string? problem)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        problem = null;
         if (!File.Exists(path))
         {
             return new FlakeHistory([]);
         }
 
-        var runs = JsonSerializer.Deserialize<List<HistoryRun>>(File.ReadAllText(path), BtpJson.Options) ?? [];
-        return new FlakeHistory(runs);
+        try
+        {
+            var runs = JsonSerializer.Deserialize<List<HistoryRun>>(File.ReadAllText(path), BtpJson.Options) ?? [];
+            return new FlakeHistory(runs.Where(r => r is not null && !string.IsNullOrEmpty(r.RunId)).ToList());
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            problem = $"The flake history '{path}' is unreadable and was reset: {ex.Message}";
+            return new FlakeHistory([]);
+        }
     }
 
     /// <summary>Appends a run (keeping the newest <paramref name="capacity"/> runs).</summary>
@@ -85,8 +108,13 @@ public sealed class FlakeHistory
     /// <summary>Saves the history.</summary>
     public void Save(string path)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        File.WriteAllText(path, JsonSerializer.Serialize(_runs, BtpJson.Options));
+        var full = Path.GetFullPath(path);
+        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+
+        // Through a temporary file: a cancelled job must not leave a truncated history behind.
+        var temp = $"{full}.{Environment.ProcessId}.tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(_runs, BtpJson.Options));
+        File.Move(temp, full, overwrite: true);
     }
 
     /// <summary>Computes flakiness per key.</summary>
@@ -96,9 +124,13 @@ public sealed class FlakeHistory
             .SelectMany(r => r.Outcomes)
             .Where(o => o.Value != StoryOutcome.Skipped)
             .GroupBy(o => o.Key, StringComparer.Ordinal)
-            .Select(g => new FlakeEntry(g.Key, g.Count(), g.Count(o => o.Value == StoryOutcome.Failed), g.Count(o => o.Value == StoryOutcome.Flaky)))
+            .Select(g => new FlakeEntry(g.Key, g.Count(), g.Count(o => o.Value == StoryOutcome.Failed), g.Count(o => o.Value == StoryOutcome.Flaky))
+            {
+                Flips = g.Zip(g.Skip(1), (previous, next) => (previous.Value == StoryOutcome.Failed) != (next.Value == StoryOutcome.Failed)).Count(flipped => flipped),
+            })
             .Where(e => e.Runs >= minimumRuns && e.FlakeRate > 0)
             .OrderByDescending(e => e.FlakeRate)
+            .ThenByDescending(e => e.Flips)
             .ThenByDescending(e => e.Runs)
             .ToArray();
         return new FlakeReport(_runs.Count, entries);

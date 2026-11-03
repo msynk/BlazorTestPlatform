@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>BlazorTestPlatform.TUnit</RootNamespace>
+    <Description>TUnit integration for BlazorTestPlatform: stories and matrix cells as TestDataRow values with display names, categories and skip reasons, and story results that report skips as skipped tests.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- PrivateAssets="none": consumers of this package also get the story generator and analyzers that ship in Core. -->
+    <ProjectReference Include="..\BlazorTestPlatform.Core\BlazorTestPlatform.Core.csproj" PrivateAssets="none" />
+    <PackageReference Include="TUnit.Core" />
+  </ItemGroup>
+
+</Project>

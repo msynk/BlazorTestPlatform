@@ -134,6 +134,22 @@ public sealed class StoryAnalyzerTests
     }
 
     [Fact]
+    public async Task Story_names_in_exclusive_branches_are_not_duplicates()
+    {
+        var diagnostics = await AnalyzeAsync(Stories("""
+            var dense = System.Environment.ProcessorCount > 64;
+            if (dense) { stories.Add("Layout"); } else { stories.Add("Layout"); }
+            switch (System.Environment.ProcessorCount) { case 1: stories.Add("Mode"); break; default: stories.Add("Mode"); break; }
+            stories.Add("Shared");
+            if (dense) { stories.Add("Shared"); }
+            """));
+
+        var duplicate = Assert.Single(diagnostics);
+        Assert.Equal("BTP005", duplicate.Id);
+        Assert.Contains("'Shared'", duplicate.GetMessage(), System.StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Duplicate_story_ids_are_reported_once_per_extra_declaration()
     {
         var diagnostics = await AnalyzeAsync(Stories("""

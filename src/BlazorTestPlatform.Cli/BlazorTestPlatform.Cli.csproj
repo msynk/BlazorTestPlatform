@@ -6,6 +6,8 @@
     <AssemblyName>btp</AssemblyName>
     <PackageId>BlazorTestPlatform.Cli</PackageId>
     <PackAsTool>true</PackAsTool>
+    <!-- The tool only reads files; run it on newer runtimes too instead of failing with "framework not found". -->
+    <RollForward>Major</RollForward>
     <ToolCommandName>btp</ToolCommandName>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <Description>The btp command-line tool: HTML/JUnit/Markdown reports, visual baseline approval, performance baseline approval, manual accessibility review workflow and flake analysis for BlazorTestPlatform.</Description>
@@ -16,6 +18,12 @@
     <ProjectReference Include="..\BlazorTestPlatform.Visual\BlazorTestPlatform.Visual.csproj" />
     <ProjectReference Include="..\BlazorTestPlatform.Reporting\BlazorTestPlatform.Reporting.csproj" />
     <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- btp init writes CI pipelines on the Playwright image matching the version BlazorTestPlatform.Playwright uses. -->
+    <AssemblyMetadata Include="PlaywrightVersion" Value="@(PackageVersion->WithMetadataValue('Identity', 'Microsoft.Playwright')->'%(Version)')" />
+    <InternalsVisibleTo Include="BlazorTestPlatform.Cli.Tests" />
   </ItemGroup>
 
 </Project>

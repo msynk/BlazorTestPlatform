@@ -14,7 +14,17 @@ public static class PngCodec
     private static readonly byte[] Signature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
     private static readonly uint[] CrcTable = BuildCrcTable();
 
+    /// <summary>
+    /// Largest image (in pixels) the decoder accepts: 2^27 pixels, 512 MiB as RGBA. Far above any screenshot, and it
+    /// stops a crafted header from making the decoder allocate unbounded memory.
+    /// </summary>
+    public const long MaxPixels = 1L << 27;
+
     /// <summary>Decodes a PNG into an RGBA image.</summary>
+    /// <exception cref="InvalidDataException">
+    /// Not a valid PNG: bad signature, chunk CRC or lengths, an invalid header (bit depth / color type combination,
+    /// dimensions above <see cref="MaxPixels"/>), or too little image data.
+    /// </exception>
     public static RgbaImage Decode(byte[] png)
     {
         ArgumentNullException.ThrowIfNull(png);
@@ -32,25 +42,39 @@ public static class PngCodec
         var offset = Signature.Length;
         while (offset + 12 <= png.Length)
         {
-            var length = (int)BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(offset));
-            if (length < 0 || offset + 12 + length > png.Length)
+            var declared = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(offset));
+            if (declared > (uint)(png.Length - offset - 12))
             {
                 throw new InvalidDataException("Corrupt PNG chunk length.");
             }
 
+            var length = (int)declared;
             var type = Encoding.ASCII.GetString(png, offset + 4, 4);
             var data = png.AsSpan(offset + 8, length);
+            var crc = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(offset + 8 + length));
+            if ((UpdateCrc(0xFFFFFFFFu, png.AsSpan(offset + 4, 4 + length)) ^ 0xFFFFFFFFu) != crc)
+            {
+                throw new InvalidDataException($"PNG chunk '{type}' has a bad CRC (the file is corrupt or truncated).");
+            }
+
             offset += 12 + length;
 
             switch (type)
             {
                 case "IHDR":
-                    header = new Header(
-                        (int)BinaryPrimitives.ReadUInt32BigEndian(data),
-                        (int)BinaryPrimitives.ReadUInt32BigEndian(data[4..]),
-                        data[8],
-                        data[9],
-                        data[12]);
+                    if (length != 13)
+                    {
+                        throw new InvalidDataException($"PNG header has {length} bytes instead of 13.");
+                    }
+
+                    var width = BinaryPrimitives.ReadUInt32BigEndian(data);
+                    var height = BinaryPrimitives.ReadUInt32BigEndian(data[4..]);
+                    if (width is 0 or > int.MaxValue || height is 0 or > int.MaxValue || (long)width * height > MaxPixels)
+                    {
+                        throw new InvalidDataException($"PNG dimensions {width}x{height} are invalid or larger than {MaxPixels} pixels.");
+                    }
+
+                    header = new Header((int)width, (int)height, data[8], data[9], data[12]);
                     headerSeen = true;
                     break;
                 case "PLTE":
@@ -88,23 +112,49 @@ public static class PngCodec
             _ => throw new InvalidDataException($"Unsupported PNG color type {header.ColorType}."),
         };
 
+        var depthAllowed = header.ColorType switch
+        {
+            0 => header.BitDepth is 1 or 2 or 4 or 8 or 16,
+            3 => header.BitDepth is 1 or 2 or 4 or 8,
+            _ => header.BitDepth is 8 or 16,
+        };
+        if (!depthAllowed)
+        {
+            throw new InvalidDataException($"PNG bit depth {header.BitDepth} is not valid for color type {header.ColorType}.");
+        }
+
         if (header.ColorType == 3 && palette is null)
         {
             throw new InvalidDataException("Indexed PNG without palette.");
         }
 
-        byte[] raw;
+        var bitsPerPixel = channels * header.BitDepth;
+        var filterUnit = Math.Max(1, bitsPerPixel / 8);
+
+        // Inflate exactly what the header announces: a decompression bomb cannot make the decoder read further, and
+        // missing data is reported instead of surfacing later as an index error.
+        var expected = ExpectedDataLength(header, bitsPerPixel);
+        var raw = new byte[expected];
         idat.Position = 0;
         using (var zlib = new ZLibStream(idat, CompressionMode.Decompress))
-        using (var inflated = new MemoryStream())
         {
-            zlib.CopyTo(inflated);
-            raw = inflated.ToArray();
+            int read;
+            try
+            {
+                read = zlib.ReadAtLeast(raw, raw.Length, throwOnEndOfStream: false);
+            }
+            catch (InvalidDataException ex)
+            {
+                throw new InvalidDataException("PNG image data is not valid zlib data.", ex);
+            }
+
+            if (read < raw.Length)
+            {
+                throw new InvalidDataException($"PNG image data is truncated ({read} of {raw.Length} bytes).");
+            }
         }
 
         var image = new RgbaImage(header.Width, header.Height);
-        var bitsPerPixel = channels * header.BitDepth;
-        var filterUnit = Math.Max(1, bitsPerPixel / 8);
 
         if (header.Interlace == 0)
         {
@@ -482,6 +532,29 @@ public static class PngCodec
         }
 
         return table;
+    }
+
+    /// <summary>Bytes of filtered scanlines (one filter byte per row) the header implies, Adam7 passes included.</summary>
+    private static int ExpectedDataLength(Header header, int bitsPerPixel)
+    {
+        static long Pass(long width, long height, int bitsPerPixel) => width <= 0 || height <= 0 ? 0 : height * (1 + ((width * bitsPerPixel) + 7) / 8);
+
+        long total;
+        if (header.Interlace == 1)
+        {
+            ReadOnlySpan<(int X0, int Y0, int Dx, int Dy)> passes = [(0, 0, 8, 8), (4, 0, 8, 8), (0, 4, 4, 8), (2, 0, 4, 4), (0, 2, 2, 4), (1, 0, 2, 2), (0, 1, 1, 2)];
+            total = 0;
+            foreach (var (x0, y0, dx, dy) in passes)
+            {
+                total += Pass((header.Width - x0 + dx - 1) / dx, (header.Height - y0 + dy - 1) / dy, bitsPerPixel);
+            }
+        }
+        else
+        {
+            total = Pass(header.Width, header.Height, bitsPerPixel);
+        }
+
+        return total <= Array.MaxLength ? (int)total : throw new InvalidDataException("PNG image data would be too large.");
     }
 
     private readonly record struct Header(int Width, int Height, byte BitDepth, byte ColorType, byte Interlace);

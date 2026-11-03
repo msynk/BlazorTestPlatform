@@ -13,38 +13,62 @@ public enum StoryLayout
     Centered,
 }
 
+/// <summary>
+/// Options that become read-only once their story is built: catalogs are cached and shared by every test in the
+/// process, so a test changing a story's options would change them for all the others (in parallel, too).
+/// </summary>
+public abstract class StoryOptionsBase
+{
+    private bool _frozen;
+
+    /// <summary>True once the story that owns the options is built.</summary>
+    public bool IsReadOnly => _frozen;
+
+    internal void Freeze() => _frozen = true;
+
+    /// <summary>Throws when the options belong to a built story.</summary>
+    protected void ThrowIfReadOnly()
+    {
+        if (_frozen)
+        {
+            throw new InvalidOperationException(
+                "Story options are read-only once the story is built (catalogs are shared by every test). Configure them in the story builder, or pass run options (for example BunitStoryOptions or BrowserRunOptions) instead.");
+        }
+    }
+}
+
 /// <summary>Visual-regression settings for a story.</summary>
-public sealed class VisualOptions
+public sealed class VisualOptions : StoryOptionsBase
 {
     /// <summary>When true, no screenshot is taken for this story.</summary>
-    public bool Skip { get; set; }
+    public bool Skip { get; set { ThrowIfReadOnly(); field = value; } }
 
     /// <summary>Per-pixel color-distance threshold in <c>[0, 1]</c>. Default 0.1 (same as pixelmatch).</summary>
-    public double? Threshold { get; set; }
+    public double? Threshold { get; set { ThrowIfReadOnly(); field = value; } }
 
     /// <summary>Maximum number of differing pixels tolerated.</summary>
-    public int? MaxDiffPixels { get; set; }
+    public int? MaxDiffPixels { get; set { ThrowIfReadOnly(); field = value; } }
 
     /// <summary>Maximum ratio (0..1) of differing pixels tolerated.</summary>
-    public double? MaxDiffRatio { get; set; }
+    public double? MaxDiffRatio { get; set { ThrowIfReadOnly(); field = value; } }
 
     /// <summary>CSS selectors whose boxes are masked before capture (timestamps, avatars, ads...).</summary>
     public List<string> Masks { get; } = [];
 
     /// <summary>Capture the full page instead of the story root element.</summary>
-    public bool FullPage { get; set; }
+    public bool FullPage { get; set { ThrowIfReadOnly(); field = value; } }
 
     /// <summary>CSS selector that must be visible before the snapshot is taken.</summary>
-    public string? WaitForSelector { get; set; }
+    public string? WaitForSelector { get; set { ThrowIfReadOnly(); field = value; } }
 
     /// <summary>Extra settle delay before the capture (prefer <see cref="WaitForSelector"/>).</summary>
-    public TimeSpan Delay { get; set; }
+    public TimeSpan Delay { get; set { ThrowIfReadOnly(); field = value; } }
 
     /// <summary>Take the snapshot after the play function ran (default) or before it.</summary>
-    public bool CaptureAfterPlay { get; set; } = true;
+    public bool CaptureAfterPlay { get; set { ThrowIfReadOnly(); field = value; } } = true;
 
     /// <summary>Extra CSS injected only for the snapshot (e.g. hide a blinking caret).</summary>
-    public string? Css { get; set; }
+    public string? Css { get; set { ThrowIfReadOnly(); field = value; } }
 
     internal VisualOptions Clone()
     {
@@ -66,10 +90,10 @@ public sealed class VisualOptions
 }
 
 /// <summary>Accessibility settings for a story.</summary>
-public sealed class StoryAccessibilityOptions
+public sealed class StoryAccessibilityOptions : StoryOptionsBase
 {
     /// <summary>Skips automated accessibility checks for this story.</summary>
-    public bool Skip { get; set; }
+    public bool Skip { get; set { ThrowIfReadOnly(); field = value; } }
 
     /// <summary>Rule identifiers disabled for this story (with a reason recorded in <see cref="Justifications"/>).</summary>
     public HashSet<string> DisabledRules { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -78,7 +102,7 @@ public sealed class StoryAccessibilityOptions
     public Dictionary<string, string> Justifications { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>CSS selector limiting the scan (defaults to the story root).</summary>
-    public string? Include { get; set; }
+    public string? Include { get; set { ThrowIfReadOnly(); field = value; } }
 
     /// <summary>CSS selectors excluded from the scan.</summary>
     public List<string> Exclude { get; } = [];

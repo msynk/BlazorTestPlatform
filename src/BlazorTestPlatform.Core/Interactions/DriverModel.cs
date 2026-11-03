@@ -32,6 +32,12 @@ public enum DriverCapabilities
 
     /// <summary>Network traffic can be observed.</summary>
     Network = 128,
+
+    /// <summary>
+    /// Browser APIs and network conditions can be emulated: geolocation, permissions, latency and offline mode (see
+    /// <see cref="BrowserEmulation"/> and <c>ctx.SetOfflineAsync</c>).
+    /// </summary>
+    BrowserEmulation = 256,
 }
 
 /// <summary>Kind of a locator step.</summary>
@@ -358,4 +364,26 @@ public interface IStoryDriver : IAsyncDisposable
     /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
     Task<IReadOnlyList<JSCallRecord>> GetJSCallsAsync(CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<JSCallRecord>>([]);
+
+    /// <summary>
+    /// The story's accessibility tree as text (see <c>AriaSnapshot</c> in BlazorTestPlatform.Accessibility): one line per
+    /// element with a role, its accessible name and states, children indented. Every built-in driver computes it with the
+    /// same rules.
+    /// </summary>
+    /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
+    Task<string> GetAriaSnapshotAsync(CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"The {Name} driver cannot take accessibility snapshots.");
+
+    /// <summary>Takes the page offline or back online. Requires <see cref="DriverCapabilities.BrowserEmulation"/>.</summary>
+    /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
+    Task SetOfflineAsync(bool offline, CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"The {Name} driver cannot emulate offline mode.");
+
+    /// <summary>
+    /// Changes the position <c>navigator.geolocation</c> reports (null: no position) and grants the <c>geolocation</c>
+    /// permission. Requires <see cref="DriverCapabilities.BrowserEmulation"/>.
+    /// </summary>
+    /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
+    Task SetGeolocationAsync(GeoPosition? position, CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"The {Name} driver cannot emulate geolocation.");
 }

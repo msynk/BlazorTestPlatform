@@ -51,6 +51,8 @@ BlazorTestPlatform puts one layer above all of them:
 | Opportunity | What BlazorTestPlatform ships |
 |---|---|
 | **Visual regression** | Browser-rendered snapshots across viewports × themes × component states (`AddVariants`) in Chromium, Firefox and WebKit, with Linux baselines rendered in the Playwright container on CI. Includes a dependency-free PNG codec and a perceptual YIQ diff with anti-aliasing detection, masks, tolerances, `initial` vs post-play baselines, `btp approve`, and a slider diff viewer. One baseline is shared by every render mode, so SSR, Server and WASM must render identically. |
+| **Driver capabilities** | Each driver states what it really does (real browser, layout, screenshots, native focus, JavaScript, CSS, network, fake time). Stories declare what they need with `Requires(...)` and are skipped, with the reason, where it is missing, never run against an approximation. `catalog.Supporting(capabilities)` keeps them out of test lists. |
+| **Combinatorial stories** | `AddVariants(...).Pairwise()` covers every pair of parameter values in a fraction of the stories, deterministically, with `.Where(...)` constraints; `Combinatorics` is public for data-driven tests. |
 | **Component interaction testing** | Reusable play scripts with keyboard (Tab order, chords, Enter/Space activation), pointer, focus (`ExpectTabOrderAsync`, roving tabindex, programmatic `FocusAsync`), async (auto-waiting assertions, `WaitForIdleAsync`) and fake time (`AdvanceTimeAsync`). One script runs through three drivers: bUnit, Playwright and an in-app driver behind the workbench's **Run interactions** button. Stylesheet-aware visibility with viewport-aware media queries (`bunit.stylesheets`, `bunit.viewport`) and JS-interop mocks (`MockJS`, optionally applied in browsers too, with `ExpectJSCall` in every driver) keep bUnit and the browser in step. |
 | **Accessibility CI** | axe-core in browsers (bundled, offline). 37 axe-compatible markup rules in bUnit, with no browser needed. A policy with an impact threshold, WCAG tags, and justified, expiring suppressions, listed per run in the report as waived rules. A **manual review workflow**: a WCAG 2.2 checklist per component, committed as JSON and kept honest by an accessibility *fingerprint* that marks a review as stale when the component's structure changes. |
 | **Test-data framework** | Deterministic seeds (xoshiro256**, part of the API contract), seeded `FakeData`, reusable `StoryFixture`s, fake users (`AuthenticatedAs`, `Authenticating`), fake time (`UseFakeTime`), **story-scoped HTTP mocking** (`MockHttp` for `HttpClient` and named or typed `IHttpClientFactory` clients, with `ctx.ExpectRequest`), and per-story service overrides, including options, authorization handlers and multi-registered services. All of these also work under Server and WebAssembly. |
@@ -58,19 +60,25 @@ BlazorTestPlatform puts one layer above all of them:
 | **Render regression tests** | Render counts (root and total, per component type), allocations and median time across iterations. Includes budgets (`MaxRootRenders`...), committed baselines with tolerances, and `btp perf approve`. |
 | **Cross-hosting test matrix** | `TestMatrix.CrossHosting()` runs each story under SSR, Server, WebAssembly and Auto from a single workbench host. The runner checks hydration, the actual renderer, and console and circuit errors. Story discovery is source-generated, and the packages that run in the browser (Core and Workbench) are trimming-safe; CI re-runs the matrix against a trimmed Release publish. |
 | **Story state coverage** | `StoryCoverage` lists, for every `bool` and enum parameter, the values no story renders, and the components of a library that have no stories. It appears in the report, the pull-request comment and the workbench, and `ThrowIfBelow` turns it into a gate. |
+| **Browser emulation and runtime metrics** | `Geolocation(...)`, `GrantPermissions(...)`, `NetworkLatency(...)` and `ctx.SetOfflineAsync()` in Chromium, Firefox and WebKit (skipped, with the reason, by in-memory drivers). Every browser run records layout shift, largest contentful paint, long tasks, DOM size and heap size; `BrowserBudget(...)` fails a run that exceeds a limit and says which limits a browser could not check. |
+| **Accessibility tree snapshots** | `ctx.ExpectAriaSnapshotAsync(...)` asserts roles, names and states as a tree, identically in bUnit, Playwright and the in-app driver. |
+| **Workbench inspector and recorder** | Live actions, mocked requests, JS calls, console and accessibility tree of the selected story; **Record** turns interactions in the frame into a play function with unique, readable locators. |
+| **Any test framework** | xUnit v3, NUnit, MSTest and TUnit packages: stories as data rows with names, categories and skip reasons, and skipped runs reported as skipped. `btp init` scaffolds the test class, a first story and a GitHub, Azure Pipelines or GitLab pipeline. |
+| **CI integration** | SARIF 2.1.0 for code scanning, OpenTelemetry traces and metrics (`BtpTelemetry`), test impact analysis (`StoryImpact`, `BTP_CHANGED_SINCE`), sharding, JUnit, Markdown and pull-request comments. Story analyzers come with code fixes. |
 
 ## Packages
 
 | Package | Purpose | Depends on |
 |---|---|---|
-| `BlazorTestPlatform.Core` | Story model, unified interactions and assertions, matrix, test data (incl. HTTP mocking), quality-gate models, story coverage, results. Ships the story-catalog source generator and the story analyzers (BTP001-BTP005). | Components.Web, Components.Authorization, Extensions.Http, TimeProvider.Testing |
+| `BlazorTestPlatform.Core` | Story model, unified interactions and assertions, matrix, test data (incl. HTTP mocking), quality-gate models, story coverage, results, telemetry, impact analysis. Ships the story-catalog source generator, the story analyzers (BTP001-BTP005) and their code fixes. | Components.Web, Components.Authorization, Extensions.Http, TimeProvider.Testing |
 | `BlazorTestPlatform.Bunit` | In-memory driver and runner, render metrics, review fingerprints | Core, bUnit, Accessibility |
 | `BlazorTestPlatform.Accessibility` | ARIA role/name engine, Testing-Library-style queries, markup rules, fingerprints | Core, AngleSharp |
 | `BlazorTestPlatform.Workbench` | Component workbench UI, story frames for every render mode, per-story service overrides, in-app play driver | Core, Components.Web |
 | `BlazorTestPlatform.Playwright` | Browser driver, matrix runner, axe-core, diagnostics, in-process/external/process hosts | Core, Workbench, Visual, Playwright, AxeCore, Mvc.Testing |
 | `BlazorTestPlatform.Visual` | PNG codec, perceptual diff, baseline store | Core |
-| `BlazorTestPlatform.Reporting` | HTML, JUnit and Markdown reports, pull-request comments, flake history | Core |
-| `BlazorTestPlatform.Cli` (`btp`) | `report` (with `--pr-comment`), `approve`, `perf approve`, `a11y init/status`, `flaky`, `clean` | Core, Visual, Reporting |
+| `BlazorTestPlatform.Reporting` | HTML, JUnit, Markdown and SARIF reports, pull-request comments, flake history | Core |
+| `BlazorTestPlatform.Xunit` / `.NUnit` / `.MSTest` / `.TUnit` | Stories and matrix cells as test-framework data rows; skipped runs reported as skips | Core and the framework |
+| `BlazorTestPlatform.Cli` (`btp`) | `init`, `report` (with `--pr-comment`, `--sarif`), `approve`, `perf approve`, `a11y init/status`, `flaky`, `clean` | Core, Visual, Reporting |
 
 Target framework: **.NET 10**.
 
@@ -104,7 +112,7 @@ app.MapRazorComponents<App>()
    .AddAdditionalAssemblies(typeof(WorkbenchOptions).Assembly);
 ```
 
-Then open `/_workbench`.
+Then open `/_workbench`. The workbench is off in the `Production` environment unless you set `Enabled = true` (and, ideally, an `AuthorizationPolicy`); see [getting started](docs/getting-started.md#4-workbench-host).
 
 **4. Run the cross-hosting matrix in real browsers:**
 
@@ -145,9 +153,11 @@ btp perf approve       # accept intended render-performance changes
 * [Test data](docs/test-data.md): seeds, fake data, fixtures, fake users, fake time and service overrides
 * [Cross-hosting matrix](docs/cross-hosting.md): render modes, hydration, prerendering and hosts
 * [Quality gates](docs/quality-gates.md): visual regression, accessibility (automated and manual review), render performance and story state coverage
-* [Diagnostics, reports and CI](docs/ci.md): timelines, traces, flake history, the `btp` CLI, pull-request comments and GitHub Actions
+* [Test frameworks](docs/test-frameworks.md): xUnit, NUnit, MSTest and TUnit integration, and `btp init`
+* [Diagnostics, reports and CI](docs/ci.md): timelines, traces, flake history, the `btp` CLI, pull-request comments, SARIF, OpenTelemetry, impact analysis, GitHub Actions, Azure Pipelines, GitLab and mutation testing
 * [Configuration](docs/configuration.md): `btp.json` and `BTP_*` environment variables
 * [Architecture](docs/architecture.md): how the pieces fit, and how to write a new driver
+* [Improvement progress](docs/improvement-progress.md): the audit, what was fixed and verified, and what is deferred
 
 ## How it relates to other tools
 
@@ -170,7 +180,7 @@ The latest preview is `0.1.0-preview.2`; [CHANGELOG.md](CHANGELOG.md) lists what
 
 ```
 src/        the packages
-tests/      unit and driver tests for every package (339 tests)
+tests/      unit and driver tests for every package (613 tests)
 samples/    Contoso.UI design system, stories, workbench host (Server + WASM), end-to-end tests
 docs/       guides
 ```

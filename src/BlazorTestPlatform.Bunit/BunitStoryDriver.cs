@@ -1,4 +1,5 @@
 using AngleSharp.Dom;
+using BlazorTestPlatform.Accessibility;
 using BlazorTestPlatform.Accessibility.Dom;
 using BlazorTestPlatform.Drivers;
 using Bunit;
@@ -27,12 +28,30 @@ public sealed class BunitStoryDriver : IStoryDriver
     private string? _focusedPath;
     private string? _valueAtFocus;
     private string? _hoveredPath;
+    private ElementAnchor? _focusedAnchor;
+    private ElementAnchor? _navigationStart;
+    private ElementAnchor? _hoveredAnchor;
+    private readonly Dictionary<string, ElementAnchor> _referenceAnchors = new(StringComparer.Ordinal);
     private int _processedFocusCalls;
     private bool _syncingFocus;
     private int _renderVersion;
     private readonly Dictionary<string, string> _referencePaths = new(StringComparer.Ordinal);
     private readonly CssVisibility? _styles;
     private readonly Lock _referenceGate = new();
+
+    // Form state the user changed (typed text, checked state). bUnit re-parses its DOM from the rendered markup after
+    // every render, which would forget it; a browser keeps it until Blazor itself writes a new value. Keyed by path.
+    private readonly Dictionary<string, LiveFormState> _live = new(StringComparer.Ordinal);
+    private readonly Lock _liveGate = new();
+
+    /// <summary>What the user set on a control, and what the last render produced for it when they did.</summary>
+    private sealed record LiveFormState(string Signature, string? RenderedValue, bool RenderedChecked, string? Value, bool? Checked)
+    {
+        /// <summary>Whether the last render produced <c>open</c> on a details element, and what the user toggled it to.</summary>
+        public bool RenderedOpen { get; init; }
+
+        public bool? Open { get; init; }
+    }
 
     /// <summary>Creates a driver for a rendered story.</summary>
     public BunitStoryDriver(BunitContext context, IRenderedComponent<StoryRoot> root, StoryRenderContext renderContext, CssVisibility? styles = null)
@@ -45,10 +64,20 @@ public sealed class BunitStoryDriver : IStoryDriver
         _root.OnMarkupUpdated += (_, _) =>
         {
             Interlocked.Increment(ref _renderVersion);
+            RelocateTrackedElements();
             CaptureElementReferences();
+            ReapplyLiveFormState();
         };
-        Capabilities = renderContext.Story.FakeTimeStart is not null ? DriverCapabilities.FakeTime : DriverCapabilities.None;
+        Capabilities = CapabilitiesFor(renderContext.Story);
     }
+
+    /// <summary>
+    /// What the in-memory driver offers a story: DOM queries and event dispatch, plus <see cref="DriverCapabilities.FakeTime"/>
+    /// when the story uses fake time. Layout, real CSS, JavaScript and native focus are emulated or approximated, so they
+    /// are not claimed.
+    /// </summary>
+    public static DriverCapabilities CapabilitiesFor(Story story) =>
+        (story ?? throw new ArgumentNullException(nameof(story))).FakeTimeStart is not null ? DriverCapabilities.FakeTime : DriverCapabilities.None;
 
     /// <inheritdoc />
     public string Name => "bunit";
@@ -254,6 +283,9 @@ public sealed class BunitStoryDriver : IStoryDriver
     public Task<string> GetMarkupAsync(CancellationToken cancellationToken) => Task.FromResult(_root.Markup);
 
     /// <inheritdoc />
+    public Task<string> GetAriaSnapshotAsync(CancellationToken cancellationToken) => Task.FromResult(AriaSnapshot.Of(Scope()));
+
+    /// <inheritdoc />
     public Task<IReadOnlyList<HttpRequestRecord>> GetHttpRequestsAsync(CancellationToken cancellationToken) =>
         Task.FromResult(_context.Services.GetService<HttpMock>()?.Requests ?? (IReadOnlyList<HttpRequestRecord>)[]);
 
@@ -302,7 +334,7 @@ public sealed class BunitStoryDriver : IStoryDriver
                 {
                     problem = "element is disabled";
                 }
-                else if (!action.Force && requiresEditable && !DomFacts.IsEditable(element) && element.LocalName != "input")
+                else if (!action.Force && requiresEditable && (element.HasAttribute("readonly") || (!DomFacts.IsEditable(element) && element.LocalName != "input")))
                 {
                     problem = "element is not editable";
                 }
@@ -339,6 +371,9 @@ public sealed class BunitStoryDriver : IStoryDriver
         var focusTarget = FocusableAncestor(target, scope);
         await SetFocusAsync(focusTarget is null ? null : DomFacts.CssPath(focusTarget, Scope())).ConfigureAwait(false);
 
+        // Clicking non-focusable content leaves focus on the body but moves the point Tab continues from.
+        _navigationStart = focusTarget is null ? AnchorOf(target, Scope()) : null;
+
         await DispatchAsync(path, "onpointerup", Pointer("pointerup", modifiers, button)).ConfigureAwait(false);
         await DispatchAsync(path, "onmouseup", Mouse("mouseup", modifiers, button, clickCount)).ConfigureAwait(false);
 
@@ -370,8 +405,44 @@ public sealed class BunitStoryDriver : IStoryDriver
         }
 
         // Checkboxes and radios toggle before click handlers observe them.
+        var wasChecked = element.HasAttribute("checked");
+        var clickPrevented = HasPreventDefault(element, "onclick");
+        var uncheckedSiblings = new List<IElement>();
         var toggled = TryToggle(element);
+        if (toggled is { } nowChecked)
+        {
+            RememberChecked(path, element, wasChecked, nowChecked);
+            if (nowChecked && string.Equals(element.GetAttribute("type"), "radio", StringComparison.OrdinalIgnoreCase))
+            {
+                uncheckedSiblings.AddRange(UncheckRadioGroup(element));
+            }
+        }
+
         await DispatchAsync(path, "onclick", click).ConfigureAwait(false);
+
+        if (toggled is not null && clickPrevented)
+        {
+            // @onclick:preventDefault cancels the activation: the browser restores the previous checked state and fires
+            // neither input nor change.
+            var scope2 = Scope();
+            if (ResolvePath(scope2, path) is { } reverted)
+            {
+                SetChecked(reverted, wasChecked);
+                RememberChecked(path, reverted, !wasChecked, wasChecked);
+            }
+
+            foreach (var sibling in uncheckedSiblings)
+            {
+                var siblingPath = DomFacts.CssPath(sibling, scope);
+                if (ResolvePath(scope2, siblingPath) is { } restored)
+                {
+                    SetChecked(restored, true);
+                    RememberChecked(siblingPath, restored, false, true);
+                }
+            }
+
+            return;
+        }
 
         if (toggled is { } isChecked)
         {
@@ -386,6 +457,17 @@ public sealed class BunitStoryDriver : IStoryDriver
         element = ResolvePath(Scope(), path);
         if (element is null)
         {
+            return;
+        }
+
+        // Activating a details element's summary toggles it (unless the click was cancelled).
+        if (!clickPrevented && SummaryOf(element) is { } summary && summary.ParentElement is { LocalName: "details" } details)
+        {
+            var detailsScope = Scope();
+            var detailsPath = DomFacts.CssPath(details, detailsScope);
+            var open = !details.HasAttribute("open");
+            SetOpen(detailsPath, details, open);
+            await DispatchAsync(detailsPath, "ontoggle", EventArgs.Empty).ConfigureAwait(false);
             return;
         }
 
@@ -426,6 +508,7 @@ public sealed class BunitStoryDriver : IStoryDriver
         }
 
         _hoveredPath = path;
+        _hoveredAnchor = AnchorOf(path);
         await DispatchAsync(path, "onpointerover", Pointer("pointerover", KeyModifiers.None, MouseButton.Left)).ConfigureAwait(false);
         await DispatchAsync(path, "onpointerenter", Pointer("pointerenter", KeyModifiers.None, MouseButton.Left)).ConfigureAwait(false);
         await DispatchAsync(path, "onmouseover", Mouse("mouseover", KeyModifiers.None, MouseButton.Left, 0)).ConfigureAwait(false);
@@ -459,6 +542,7 @@ public sealed class BunitStoryDriver : IStoryDriver
         }
 
         _focusedPath = path;
+        _focusedAnchor = path is null ? null : AnchorOf(path);
         _valueAtFocus = null;
         if (path is null)
         {
@@ -497,7 +581,11 @@ public sealed class BunitStoryDriver : IStoryDriver
 
         await SetFocusAsync(path).ConfigureAwait(false);
         element = ResolvePath(Scope(), path);
-        element?.SetAttribute("value", value);
+        if (element is not null)
+        {
+            SetLiveValue(path, element, value);
+        }
+
         await DispatchAsync(path, "oninput", new ChangeEventArgs { Value = value }).ConfigureAwait(false);
     }
 
@@ -514,7 +602,8 @@ public sealed class BunitStoryDriver : IStoryDriver
         var element = path is null ? null : ResolvePath(Scope(), path);
         var printable = Keys.IsPrintable(key) && (modifiers & (KeyModifiers.Control | KeyModifiers.Meta | KeyModifiers.Alt)) == 0;
 
-        if (printable)
+        // Browsers fire the legacy keypress for character keys and for Enter (handlers often watch e.Key == "Enter").
+        if (printable || (key == Keys.Enter && (modifiers & (KeyModifiers.Control | KeyModifiers.Meta | KeyModifiers.Alt)) == 0))
         {
             await DispatchToFocusedAsync("onkeypress", Keyboard("keypress", key, modifiers)).ConfigureAwait(false);
         }
@@ -559,7 +648,21 @@ public sealed class BunitStoryDriver : IStoryDriver
             {
                 await SubmitImplicitlyAsync(path, element).ConfigureAwait(false);
             }
+            else if ((element.LocalName == "textarea" || DomFacts.IsContentEditable(element)) && DomFacts.IsEditable(element))
+            {
+                // Enter in a multi-line field inserts a line break.
+                var text = DomQueries.ValueOf(element) ?? string.Empty;
+                SetLiveValue(path, element, text + "\n");
+                await DispatchAsync(path, "oninput", new ChangeEventArgs { Value = text + "\n" }).ConfigureAwait(false);
+            }
 
+            return;
+        }
+
+        if (key is Keys.ArrowDown or Keys.ArrowRight or Keys.ArrowUp or Keys.ArrowLeft
+            && element.LocalName == "input" && string.Equals(element.GetAttribute("type"), "radio", StringComparison.OrdinalIgnoreCase)
+            && await MoveInRadioGroupAsync(element, forward: key is Keys.ArrowDown or Keys.ArrowRight).ConfigureAwait(false))
+        {
             return;
         }
 
@@ -581,7 +684,7 @@ public sealed class BunitStoryDriver : IStoryDriver
 
         if (next is not null)
         {
-            element.SetAttribute("value", next);
+            SetLiveValue(path, element, next);
             await DispatchAsync(path, "oninput", new ChangeEventArgs { Value = next }).ConfigureAwait(false);
         }
     }
@@ -632,6 +735,13 @@ public sealed class BunitStoryDriver : IStoryDriver
         }
 
         var current = ResolvePath(scope, _focusedPath);
+        if (current is null && _navigationStart is { } start && Relocate(start, scope) is { } startPath)
+        {
+            // Tab after clicking non-focusable content continues from the click point, as in browsers.
+            current = ResolvePath(scope, startPath);
+        }
+
+        _navigationStart = null;
         var index = current is null ? -1 : order.ToList().FindIndex(e => ReferenceEquals(e, current));
         int next;
         if (index < 0)
@@ -726,7 +836,11 @@ public sealed class BunitStoryDriver : IStoryDriver
         await SetFocusAsync(path).ConfigureAwait(false);
         var multiple = element.HasAttribute("multiple");
         object value = multiple ? selected.ToArray() : selected.FirstOrDefault() ?? string.Empty;
-        ResolvePath(Scope(), path)?.SetAttribute("value", multiple ? string.Join(",", selected) : (string)value);
+        if (ResolvePath(Scope(), path) is { } selectElement)
+        {
+            SetLiveValue(path, selectElement, multiple ? string.Join(",", selected) : (string)value);
+        }
+
         await DispatchAsync(path, "oninput", new ChangeEventArgs { Value = value }).ConfigureAwait(false);
         await DispatchAsync(path, "onchange", new ChangeEventArgs { Value = value }).ConfigureAwait(false);
         _valueAtFocus = DomQueries.ValueOf(ResolvePath(Scope(), path)!);
@@ -740,7 +854,17 @@ public sealed class BunitStoryDriver : IStoryDriver
         await DispatchAsync(sourcePath, "ondragstart", new DragEventArgs { Type = "dragstart", DataTransfer = data }).ConfigureAwait(false);
         await DispatchAsync(targetPath, "ondragenter", new DragEventArgs { Type = "dragenter", DataTransfer = data }).ConfigureAwait(false);
         await DispatchAsync(targetPath, "ondragover", new DragEventArgs { Type = "dragover", DataTransfer = data }).ConfigureAwait(false);
-        await DispatchAsync(targetPath, "ondrop", new DragEventArgs { Type = "drop", DataTransfer = data }).ConfigureAwait(false);
+
+        // HTML drag and drop: an element is a drop target only when its dragover is cancelled (preventDefault);
+        // otherwise the drag leaves it and nothing is dropped.
+        if (HasPreventDefault(ResolvePath(Scope(), targetPath), "ondragover"))
+        {
+            await DispatchAsync(targetPath, "ondrop", new DragEventArgs { Type = "drop", DataTransfer = data }).ConfigureAwait(false);
+        }
+        else
+        {
+            await DispatchAsync(targetPath, "ondragleave", new DragEventArgs { Type = "dragleave", DataTransfer = data }).ConfigureAwait(false);
+        }
         await DispatchAsync(sourcePath, "ondragend", new DragEventArgs { Type = "dragend", DataTransfer = data }).ConfigureAwait(false);
         await DispatchAsync(targetPath, "onpointerup", Pointer("pointerup", KeyModifiers.None, MouseButton.Left)).ConfigureAwait(false);
     }
@@ -867,11 +991,359 @@ public sealed class BunitStoryDriver : IStoryDriver
                     lock (_referenceGate)
                     {
                         _referencePaths[attribute.Value] = path;
+                        _referenceAnchors[attribute.Value] = AnchorOf(element, scope);
                     }
                 }
             }
         }
     }
+
+    /// <summary>
+    /// Where a tracked element (the focused or hovered one, an <c>@ref</c> target) was, and what it looked like. bUnit
+    /// re-parses its DOM after every render, so elements have no identity across renders; the anchor finds the same
+    /// element again when content is inserted or removed before it, instead of losing it with its old position.
+    /// </summary>
+    private sealed record ElementAnchor(string Path, string Tag, string? Id, string Key, string Text, int Ordinal);
+
+    private ElementAnchor? AnchorOf(string path)
+    {
+        var scope = Scope();
+        return ResolvePath(scope, path) is { } element ? AnchorOf(element, scope) : null;
+    }
+
+    private static ElementAnchor AnchorOf(IElement element, DomScope scope)
+    {
+        var key = AnchorKey(element);
+        var ordinal = 0;
+        foreach (var candidate in scope.Elements())
+        {
+            if (candidate == element)
+            {
+                break;
+            }
+
+            if (AnchorKey(candidate) == key)
+            {
+                ordinal++;
+            }
+        }
+
+        return new ElementAnchor(DomFacts.CssPath(element, scope), element.LocalName, element.GetAttribute("id"), key, AnchorText(element), ordinal);
+    }
+
+    // What identifies an element across renders: stable attributes only (classes change with focus and hover styles).
+    private static string AnchorKey(IElement element) => string.Join(
+        '\u0001',
+        element.LocalName,
+        element.GetAttribute("name"),
+        element.GetAttribute("type"),
+        element.GetAttribute("role"),
+        element.GetAttribute("aria-label"),
+        element.GetAttribute("data-testid"),
+        element.GetAttribute("href"),
+        element.GetAttribute("for"));
+
+    private static string AnchorText(IElement element)
+    {
+        var text = DomFacts.TextOf(element);
+        return text.Length <= 60 ? text : text[..60];
+    }
+
+    /// <summary>The current path of an anchored element, or null when it is gone.</summary>
+    private static string? Relocate(ElementAnchor anchor, DomScope scope)
+    {
+        if (anchor.Id is { Length: > 0 } id && scope.GetElementById(id) is { } byId && byId.LocalName == anchor.Tag)
+        {
+            return DomFacts.CssPath(byId, scope);
+        }
+
+        var atPath = ResolvePath(scope, anchor.Path);
+        if (atPath is not null && atPath.LocalName == anchor.Tag && AnchorKey(atPath) == anchor.Key)
+        {
+            return anchor.Path;
+        }
+
+        var candidates = scope.Elements().Where(c => AnchorKey(c) == anchor.Key).ToList();
+        if (candidates.Count == 0)
+        {
+            return atPath is not null && atPath.LocalName == anchor.Tag ? anchor.Path : null;
+        }
+
+        var sameText = candidates.Where(c => AnchorText(c) == anchor.Text).ToList();
+        var pool = sameText.Count > 0 ? sameText : candidates;
+        return DomFacts.CssPath(pool[Math.Min(anchor.Ordinal, pool.Count - 1)], scope);
+    }
+
+    /// <summary>After a render, finds the focused and hovered elements and the <c>@ref</c> targets again.</summary>
+    private void RelocateTrackedElements()
+    {
+        if (_focusedAnchor is null && _hoveredAnchor is null && _referenceAnchors.Count == 0)
+        {
+            return;
+        }
+
+        var scope = Scope();
+        if (_focusedAnchor is { } focused)
+        {
+            _focusedPath = Relocate(focused, scope);
+            _focusedAnchor = _focusedPath is null ? null : focused with { Path = _focusedPath };
+        }
+
+        if (_hoveredAnchor is { } hovered)
+        {
+            _hoveredPath = Relocate(hovered, scope);
+            _hoveredAnchor = _hoveredPath is null ? null : hovered with { Path = _hoveredPath };
+        }
+
+        lock (_referenceGate)
+        {
+            foreach (var (id, anchor) in _referenceAnchors.ToArray())
+            {
+                if (Relocate(anchor, scope) is { } path)
+                {
+                    _referencePaths[id] = path;
+                    _referenceAnchors[id] = anchor with { Path = path };
+                }
+            }
+        }
+    }
+
+    /// <summary>Sets a control's value the way typing does: it stays until a render writes a different value.</summary>
+    private void SetLiveValue(string path, IElement element, string value)
+    {
+        lock (_liveGate)
+        {
+            var signature = Signature(element);
+            var existing = _live.TryGetValue(path, out var state) && state.Signature == signature ? state : null;
+            _live[path] = new LiveFormState(
+                signature,
+                existing is null ? element.GetAttribute("value") : existing.RenderedValue,
+                existing?.RenderedChecked ?? element.HasAttribute("checked"),
+                value,
+                existing?.Checked);
+        }
+
+        element.SetAttribute("value", value);
+    }
+
+    private void RememberChecked(string path, IElement element, bool wasChecked, bool isChecked)
+    {
+        lock (_liveGate)
+        {
+            var signature = Signature(element);
+            var existing = _live.TryGetValue(path, out var state) && state.Signature == signature ? state : null;
+            _live[path] = new LiveFormState(
+                signature,
+                existing?.RenderedValue ?? element.GetAttribute("value"),
+                existing is null ? wasChecked : existing.RenderedChecked,
+                existing?.Value,
+                isChecked);
+        }
+    }
+
+    /// <summary>Checking a radio unchecks the others of its group (same name, same form), as in a browser.</summary>
+    /// <returns>The radios that were unchecked.</returns>
+    private List<IElement> UncheckRadioGroup(IElement radio)
+    {
+        var cleared = new List<IElement>();
+        if (radio.GetAttribute("name") is not { Length: > 0 })
+        {
+            return cleared;
+        }
+
+        var scope = Scope();
+        foreach (var other in RadioGroup(radio, scope).Where(e => e != radio && e.HasAttribute("checked")))
+        {
+            other.RemoveAttribute("checked");
+            RememberChecked(DomFacts.CssPath(other, scope), other, wasChecked: true, isChecked: false);
+            cleared.Add(other);
+        }
+
+        return cleared;
+    }
+
+    /// <summary>The radios sharing <paramref name="radio"/>'s name and form owner, in document order.</summary>
+    private static IEnumerable<IElement> RadioGroup(IElement radio, DomScope scope)
+    {
+        var name = radio.GetAttribute("name");
+        var form = FormOwner(radio, scope);
+        return scope.Elements().Where(e => e.LocalName == "input"
+            && string.Equals(e.GetAttribute("type"), "radio", StringComparison.OrdinalIgnoreCase)
+            && e.GetAttribute("name") == name && FormOwner(e, scope) == form);
+    }
+
+    private static void SetChecked(IElement element, bool isChecked)
+    {
+        if (isChecked)
+        {
+            element.SetAttribute("checked", string.Empty);
+        }
+        else
+        {
+            element.RemoveAttribute("checked");
+        }
+    }
+
+    /// <summary>The summary that toggles a details element, when <paramref name="element"/> is in it.</summary>
+    private static IElement? SummaryOf(IElement element)
+    {
+        for (var current = element; current is not null; current = current.ParentElement)
+        {
+            if (current.LocalName == "summary")
+            {
+                return DomFacts.IsDetailsSummary(current) ? current : null;
+            }
+
+            if (current.LocalName == "details")
+            {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Opens or closes a details element; the state stays until the component renders a different one.</summary>
+    private void SetOpen(string path, IElement details, bool open)
+    {
+        lock (_liveGate)
+        {
+            var signature = Signature(details);
+            var existing = _live.TryGetValue(path, out var state) && state.Signature == signature ? state : null;
+            _live[path] = new LiveFormState(
+                signature,
+                existing?.RenderedValue ?? details.GetAttribute("value"),
+                existing?.RenderedChecked ?? details.HasAttribute("checked"),
+                existing?.Value,
+                existing?.Checked)
+            {
+                RenderedOpen = existing?.RenderedOpen ?? details.HasAttribute("open"),
+                Open = open,
+            };
+        }
+
+        if (open)
+        {
+            details.SetAttribute("open", string.Empty);
+        }
+        else
+        {
+            details.RemoveAttribute("open");
+        }
+    }
+
+    /// <summary>Arrow keys in a radio group move to the next (or previous) enabled radio, focus and check it.</summary>
+    private async Task<bool> MoveInRadioGroupAsync(IElement radio, bool forward)
+    {
+        if (radio.GetAttribute("name") is not { Length: > 0 })
+        {
+            return false;
+        }
+
+        var scope = Scope();
+        var group = RadioGroup(radio, scope).Where(r => r == radio || (!DomFacts.IsDisabled(r) && !DomFacts.IsHidden(r, scope))).ToList();
+        if (group.Count < 2)
+        {
+            return false;
+        }
+
+        var index = group.IndexOf(radio);
+        var next = group[(index + (forward ? 1 : -1) + group.Count) % group.Count];
+        var nextPath = DomFacts.CssPath(next, scope);
+        await SetFocusAsync(nextPath).ConfigureAwait(false);
+        await ActivateAsync(nextPath, Mouse("click", KeyModifiers.None, MouseButton.Left, 0)).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
+    /// After a render, puts back what the user set on controls whose rendered value or checked state did not change:
+    /// Blazor only writes to the DOM what changed, so a value it rendered before keeps the user's edit in a browser,
+    /// while a new rendered value (a two-way binding) replaces it.
+    /// </summary>
+    private void ReapplyLiveFormState()
+    {
+        lock (_liveGate)
+        {
+            if (_live.Count == 0)
+            {
+                return;
+            }
+
+            var scope = Scope();
+            foreach (var (path, state) in _live.ToArray())
+            {
+                var element = ResolvePath(scope, path);
+                if (element is null || Signature(element) != state.Signature)
+                {
+                    _live.Remove(path);
+                    continue;
+                }
+
+                var kept = state;
+                if (state.Value is { } value)
+                {
+                    if (string.Equals(element.GetAttribute("value"), state.RenderedValue, StringComparison.Ordinal))
+                    {
+                        element.SetAttribute("value", value);
+                    }
+                    else
+                    {
+                        kept = kept with { Value = null };
+                    }
+                }
+
+                if (state.Checked is { } isChecked)
+                {
+                    if (element.HasAttribute("checked") == state.RenderedChecked)
+                    {
+                        if (isChecked)
+                        {
+                            element.SetAttribute("checked", string.Empty);
+                        }
+                        else
+                        {
+                            element.RemoveAttribute("checked");
+                        }
+                    }
+                    else
+                    {
+                        kept = kept with { Checked = null };
+                    }
+                }
+
+                if (state.Open is { } open)
+                {
+                    if (element.HasAttribute("open") == state.RenderedOpen)
+                    {
+                        if (open)
+                        {
+                            element.SetAttribute("open", string.Empty);
+                        }
+                        else
+                        {
+                            element.RemoveAttribute("open");
+                        }
+                    }
+                    else
+                    {
+                        kept = kept with { Open = null };
+                    }
+                }
+
+                if (kept.Value is null && kept.Checked is null && kept.Open is null)
+                {
+                    _live.Remove(path);
+                }
+                else
+                {
+                    _live[path] = kept;
+                }
+            }
+        }
+    }
+
+    private static string Signature(IElement element) =>
+        $"{element.LocalName}|{element.GetAttribute("type")}|{element.GetAttribute("name")}|{element.GetAttribute("id")}";
 
     private static bool? TryToggle(IElement element)
     {
@@ -923,15 +1395,20 @@ public sealed class BunitStoryDriver : IStoryDriver
         return null;
     }
 
+    /// <summary>The control a label activates: the labelable element its <c>for</c> names, else its first labelable descendant.</summary>
     private static IElement? LabelledControl(IElement label, DomScope scope)
     {
         if (label.GetAttribute("for") is { Length: > 0 } id)
         {
-            return scope.GetElementById(id);
+            return scope.GetElementById(id) is { } target && IsLabelable(target) ? target : null;
         }
 
-        return label.QuerySelector("input, select, textarea, button");
+        return label.QuerySelectorAll("*").FirstOrDefault(IsLabelable);
     }
+
+    private static bool IsLabelable(IElement element) =>
+        element.LocalName is "button" or "meter" or "output" or "progress" or "select" or "textarea"
+        || (element.LocalName == "input" && !string.Equals(element.GetAttribute("type"), "hidden", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsInteractive(IElement element) =>
         element.LocalName is "input" or "select" or "textarea" or "button" || (element.LocalName == "a" && element.HasAttribute("href"));
@@ -981,12 +1458,20 @@ public sealed class BunitStoryDriver : IStoryDriver
         return false;
     }
 
+    // MouseEvent.buttons: primary 1, secondary (right) 2, auxiliary (middle) 4 — not the order of MouseEvent.button.
+    private static long ButtonsMask(MouseButton button) => button switch
+    {
+        MouseButton.Right => 2,
+        MouseButton.Middle => 4,
+        _ => 1,
+    };
+
     private static MouseEventArgs Mouse(string type, KeyModifiers modifiers, MouseButton button, long detail) => new()
     {
         Type = type,
         Detail = detail,
         Button = (long)button,
-        Buttons = type is "mousedown" ? 1 << (int)button : 0,
+        Buttons = type is "mousedown" ? ButtonsMask(button) : 0,
         ShiftKey = (modifiers & KeyModifiers.Shift) != 0,
         CtrlKey = (modifiers & KeyModifiers.Control) != 0,
         AltKey = (modifiers & KeyModifiers.Alt) != 0,
@@ -1000,7 +1485,7 @@ public sealed class BunitStoryDriver : IStoryDriver
         PointerType = "mouse",
         IsPrimary = true,
         Button = (long)button,
-        Buttons = type is "pointerdown" ? 1 << (int)button : 0,
+        Buttons = type is "pointerdown" ? ButtonsMask(button) : 0,
         Width = 1,
         Height = 1,
         Pressure = type is "pointerdown" ? 0.5f : 0,

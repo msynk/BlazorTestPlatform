@@ -5,6 +5,7 @@ using BlazorTestPlatform.Workbench;
 using BlazorTestPlatform.Workbench.Services;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
 
@@ -36,6 +37,7 @@ public static class WorkbenchServiceCollectionExtensions
 
         var options = new WorkbenchOptions();
         configure(options);
+        options.IsEnabled = options.Enabled ?? EnabledByEnvironment(services, Environment.GetEnvironmentVariable("BTP_WORKBENCH_ENABLED"));
         var catalog = options.BuildCatalog();
 
         services.AddSingleton(options);
@@ -43,7 +45,8 @@ public static class WorkbenchServiceCollectionExtensions
         services.AddScoped<StoryServiceScope>();
         services.AddAuthorizationCore();
 
-        var overridden = DiscoverOverriddenServices(catalog);
+        var overridden = DiscoverOverriddenServices(catalog, services);
+        options.UnwrappableOverrides.UnionWith(overridden.Unsupported);
         foreach (var (serviceType, registrations) in overridden.Services)
         {
             if (serviceType == typeof(IJSRuntime) && overridden.UsesJSMocks)
@@ -77,6 +80,22 @@ public static class WorkbenchServiceCollectionExtensions
         }
 
         return services;
+    }
+
+    /// <summary>
+    /// The default of <see cref="WorkbenchOptions.Enabled"/>: <c>BTP_WORKBENCH_ENABLED</c> when set, otherwise enabled
+    /// unless the host environment registered in <paramref name="services"/> is Production. WebAssembly clients register
+    /// no host environment; they only render frames the (gated) server asks for.
+    /// </summary>
+    internal static bool EnabledByEnvironment(IServiceCollection services, string? variable)
+    {
+        if (!string.IsNullOrWhiteSpace(variable))
+        {
+            return BlazorTestPlatform.Configuration.BtpSettings.IsTruthy(variable.Trim());
+        }
+
+        var environment = services.LastOrDefault(d => d.ServiceType == typeof(IHostEnvironment) && !d.IsKeyedService)?.ImplementationInstance as IHostEnvironment;
+        return environment is null || !environment.IsProduction();
     }
 
     // Contracts consumed once, when the application (or a circuit) starts, before any story frame exists: a story cannot
@@ -130,6 +149,14 @@ public static class WorkbenchServiceCollectionExtensions
             return OverrideStrategy.Unsupported;
         }
 
+        // Wrapped services are resolved through a per-scope factory, and the container disposes what such factories
+        // return when the scope (request, circuit) ends: wrapping a disposable application singleton would dispose it
+        // for every user after the first frame. Those overrides are flagged instead.
+        if (services.Any(d => d.ServiceType == serviceType && !d.IsKeyedService && IsDisposableSingleton(d)))
+        {
+            return OverrideStrategy.Unsupported;
+        }
+
         if ((name is not null && EnumerableContracts.Contains(name))
             || storyRegistrations > 1
             || services.Count(d => d.ServiceType == serviceType && !d.IsKeyedService) > 1)
@@ -140,17 +167,27 @@ public static class WorkbenchServiceCollectionExtensions
         return OverrideStrategy.Replace;
     }
 
+    private static bool IsDisposableSingleton(ServiceDescriptor descriptor) =>
+        descriptor.Lifetime == ServiceLifetime.Singleton
+        && (descriptor.ImplementationInstance is IDisposable or IAsyncDisposable
+            || (descriptor.ImplementationType is { } type && (typeof(IDisposable).IsAssignableFrom(type) || typeof(IAsyncDisposable).IsAssignableFrom(type))));
+
     /// <summary>Kept for compatibility with earlier previews: true when the story's registration can replace the application's.</summary>
     internal static bool CanWrap(IServiceCollection services, Type serviceType) => Classify(services, serviceType) == OverrideStrategy.Replace;
 
     private static string? ContractName(Type serviceType) => (serviceType.IsGenericType ? serviceType.GetGenericTypeDefinition() : serviceType).FullName;
 
-    private sealed record OverriddenServices(Dictionary<Type, int> Services, HashSet<Type> Options, bool UsesJSMocks);
+    private sealed record OverriddenServices(Dictionary<Type, int> Services, HashSet<Type> Options, bool UsesJSMocks, HashSet<Type> Unsupported);
 
-    private static OverriddenServices DiscoverOverriddenServices(StoryCatalog catalog)
+    /// <summary>Render modes a story's registrations are probed under: fixtures may register different services per mode.</summary>
+    internal static readonly HostingModel[] ProbedHostingModels = [HostingModel.InteractiveServer, HostingModel.InteractiveWebAssembly, HostingModel.StaticServer];
+
+    private static OverriddenServices DiscoverOverriddenServices(StoryCatalog catalog, IServiceCollection application)
     {
+        var applicationOpenGenerics = application.Where(d => !d.IsKeyedService && d.ServiceType.IsGenericTypeDefinition).Select(d => d.ServiceType).ToHashSet();
         var types = new Dictionary<Type, int>();
         var optionsTypes = new HashSet<Type>();
+        var unsupported = new HashSet<Type>();
         var usesJS = false;
         foreach (var story in catalog.Stories)
         {
@@ -165,19 +202,28 @@ public static class WorkbenchServiceCollectionExtensions
                 continue;
             }
 
-            var probe = new ServiceCollection();
-            story.ConfigureServices(probe, new FixtureContext(story, HostingModel.InteractiveServer));
-            foreach (var group in probe.Where(d => !d.IsKeyedService && !d.ServiceType.IsGenericTypeDefinition).GroupBy(d => d.ServiceType))
+            foreach (var hostingModel in ProbedHostingModels)
             {
-                types[group.Key] = Math.Max(types.GetValueOrDefault(group.Key), group.Count());
-                if (group.Key.IsGenericType && ContractName(group.Key) is { } name && OptionsContracts.Contains(name))
+                var probe = new ServiceCollection();
+                story.ConfigureServices(probe, new FixtureContext(story, hostingModel));
+
+                // Keyed registrations and open generics the application lacks cannot be resolved per story in browsers:
+                // flag them. Open generics the application has too (AddOptions() inside Configure<T>) change nothing.
+                unsupported.UnionWith(probe
+                    .Where(d => d.IsKeyedService || (d.ServiceType.IsGenericTypeDefinition && !applicationOpenGenerics.Contains(d.ServiceType)))
+                    .Select(d => d.ServiceType));
+                foreach (var group in probe.Where(d => !d.IsKeyedService && !d.ServiceType.IsGenericTypeDefinition).GroupBy(d => d.ServiceType))
                 {
-                    optionsTypes.Add(group.Key.GetGenericArguments()[0]);
+                    types[group.Key] = Math.Max(types.GetValueOrDefault(group.Key), group.Count());
+                    if (group.Key.IsGenericType && ContractName(group.Key) is { } name && OptionsContracts.Contains(name))
+                    {
+                        optionsTypes.Add(group.Key.GetGenericArguments()[0]);
+                    }
                 }
             }
         }
 
-        return new OverriddenServices(types, optionsTypes, usesJS);
+        return new OverriddenServices(types, optionsTypes, usesJS, unsupported);
     }
 
     private static StoryServiceScope? StoryScopeOf(IServiceProvider provider)
@@ -214,9 +260,9 @@ public static class WorkbenchServiceCollectionExtensions
                 return provider.GetRequiredKeyedService(serviceType, OriginalKey);
             }
 
-            return serviceType == typeof(TimeProvider)
-                ? TimeProvider.System
-                : throw new InvalidOperationException($"No service for type '{serviceType}' has been registered and the current story does not provide one.");
+            // The application never registered the type (only stories do): outside those stories it stays optional, as
+            // GetService<T>() returning null, not an exception. Required consumers still fail with the container's error.
+            return serviceType == typeof(TimeProvider) ? TimeProvider.System : null!;
         }, ServiceLifetime.Transient));
     }
 
@@ -293,7 +339,20 @@ public static class WorkbenchServiceCollectionExtensions
             StoryScopeOf(provider) is { } scope && ConfiguresOptions<TOptions>(scope)
                 ? scope.GetOrAdd(typeof(IOptionsMonitor<TOptions>), () => new OptionsMonitor<TOptions>(
                     provider.GetRequiredService<IOptionsFactory<TOptions>>(), provider.GetServices<IOptionsChangeTokenSource<TOptions>>(), new OptionsCache<TOptions>()))
-                : provider.GetRequiredKeyedService<IOptionsMonitor<TOptions>>(OriginalKey));
+
+                // The application's monitor is a disposable singleton: hand out a non-disposable view of it, or the
+                // first scope that resolves it would dispose it and stop configuration reloads for everyone.
+                : new SharedOptionsMonitor<TOptions>(provider.GetRequiredKeyedService<IOptionsMonitor<TOptions>>(OriginalKey)));
+    }
+
+    /// <summary>Forwards to the application's options monitor without exposing its <see cref="IDisposable"/>.</summary>
+    private sealed class SharedOptionsMonitor<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] TOptions>(IOptionsMonitor<TOptions> inner) : IOptionsMonitor<TOptions>
+    {
+        public TOptions CurrentValue => inner.CurrentValue;
+
+        public TOptions Get(string? name) => inner.Get(name);
+
+        public IDisposable? OnChange(Action<TOptions, string?> listener) => inner.OnChange(listener);
     }
 
     private static bool ConfiguresOptions<TOptions>(StoryServiceScope scope)

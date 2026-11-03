@@ -174,6 +174,12 @@ public static class StoryArgs
                 continue;
             }
 
+            if (fromLink && text is not null && IsScriptUrl(text))
+            {
+                errors.Add($"'{control.Name}': values from links cannot be javascript:, vbscript: or data: URLs. Type the value in the control instead.");
+                continue;
+            }
+
             if (!TryConvert(text, control.ParameterType, out var value, out var error))
             {
                 errors.Add($"'{control.Name}': {error}");
@@ -191,6 +197,41 @@ public static class StoryArgs
         return new ResolvedArgs(values, errors);
     }
 
+    /// <summary>
+    /// True for text a browser would run or render as a document when used as a link (<c>javascript:</c>,
+    /// <c>vbscript:</c>, <c>data:</c>), with the obfuscations browsers tolerate: leading spaces and control characters,
+    /// and tabs or newlines inside the scheme.
+    /// </summary>
+    public static bool IsScriptUrl(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return false;
+        }
+
+        var scheme = new System.Text.StringBuilder();
+        foreach (var ch in text)
+        {
+            if (ch is '\t' or '\n' or '\r' || (scheme.Length == 0 && (ch <= ' ' || char.IsControl(ch))))
+            {
+                continue;
+            }
+
+            if (ch == ':')
+            {
+                break;
+            }
+
+            scheme.Append(char.ToLowerInvariant(ch));
+            if (scheme.Length > 10)
+            {
+                return false;
+            }
+        }
+
+        return scheme.ToString() is "javascript" or "vbscript" or "data" && text.Contains(':', StringComparison.Ordinal);
+    }
+
     /// <summary>Writes a value as control text: invariant culture, ISO dates, enum names, <c>true</c>/<c>false</c>.</summary>
     public static string? Format(object? value) => value switch
     {
@@ -201,7 +242,7 @@ public static class StoryArgs
         DateTime dateTime => dateTime.ToString(dateTime.TimeOfDay.Ticks % TimeSpan.TicksPerMinute == 0 ? "yyyy-MM-dd'T'HH:mm" : "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture),
         DateTimeOffset offset => offset.ToString("O", CultureInfo.InvariantCulture),
         DateOnly date => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-        TimeOnly time => time.ToString(time.Second == 0 && time.Millisecond == 0 ? "HH:mm" : "HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture),
+        TimeOnly time => time.ToString(time.Ticks % TimeSpan.TicksPerMinute == 0 ? "HH:mm" : "HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture),
         TimeSpan span => span.ToString("c", CultureInfo.InvariantCulture),
         IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
         _ => value.ToString(),
@@ -434,7 +475,11 @@ public static class StoryArgs
 
         if (target.IsEnum && !target.IsDefined(typeof(FlagsAttribute), false))
         {
-            var names = Enum.GetNames(target);
+            // One option per value: aliases (Primary = 0, Default = 0) are the same state, named as Format names it.
+            var names = Enum.GetNames(target)
+                .Select(name => Enum.TryParse(target, name, ignoreCase: false, out var value) ? Format(value) ?? name : name)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
             return underlying is null ? names : [string.Empty, .. names];
         }
 
@@ -443,6 +488,13 @@ public static class StoryArgs
 
     /// <summary>The component's own default for a parameter (null when unknown).</summary>
     internal static object? ComponentDefault(Story story, string name) => ComponentDefaults(story.ComponentType).GetValueOrDefault(name);
+
+    /// <summary>
+    /// The component's own default for a parameter, when it can be known: parameters with a control, on components with
+    /// a public parameterless constructor.
+    /// </summary>
+    internal static bool TryGetComponentDefault(Story story, string name, out object? value) =>
+        ComponentDefaults(story.ComponentType).TryGetValue(name, out value);
 
     // Parameter defaults come from a fresh instance: component constructors only initialize fields, and nothing is
     // rendered or injected. Components without a public parameterless constructor show no defaults.

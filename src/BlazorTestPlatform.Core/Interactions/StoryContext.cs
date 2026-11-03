@@ -158,6 +158,83 @@ public sealed class StoryContext
         return Recorder.RunAsync($"advance time {delta}", StepKind.Wait, () => Driver.AdvanceTimeAsync(delta, CancellationToken));
     }
 
+    /// <summary>The story's accessibility tree as text (roles, names and states; see <see cref="ExpectAriaSnapshotAsync"/>).</summary>
+    public Task<string> GetAriaSnapshotAsync() => Driver.GetAriaSnapshotAsync(CancellationToken);
+
+    /// <summary>
+    /// Waits until the story's accessibility tree matches <paramref name="expected"/>: one line per element with a role
+    /// (generic containers flattened), as <c>- role "name" [state]</c>, children indented by two spaces under a line
+    /// ending in <c>:</c>. Indentation common to all lines, blank lines and trailing spaces are ignored. On failure the
+    /// message shows the actual tree, ready to paste. Equal under bUnit, Playwright and the in-app driver.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// await ctx.ExpectAriaSnapshotAsync("""
+    ///     - heading "Sign in" [level=2]
+    ///     - textbox "Email"
+    ///     - button "Continue" [disabled]
+    ///     """);
+    /// </code>
+    /// </example>
+    public Task ExpectAriaSnapshotAsync(string expected, TimeSpan? timeout = null)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        var wanted = NormalizeSnapshot(expected);
+        return Recorder.RunAsync("expect accessibility tree to match", StepKind.Assertion, async () =>
+        {
+            var (success, actual) = await Poll.UntilAsync(
+                async ct =>
+                {
+                    var snapshot = NormalizeSnapshot(await Driver.GetAriaSnapshotAsync(ct).ConfigureAwait(false));
+                    return (snapshot == wanted, snapshot);
+                },
+                timeout ?? DefaultTimeout,
+                CancellationToken).ConfigureAwait(false);
+            if (!success)
+            {
+                throw new StoryAssertionException(
+                    $"Expected the accessibility tree to match.{Environment.NewLine}Expected:{Environment.NewLine}{Indent(wanted)}{Environment.NewLine}" +
+                    $"Actual:{Environment.NewLine}{Indent(actual)}{Environment.NewLine}Driver: {Driver.Name}");
+            }
+        });
+
+        static string Indent(string text) => string.Join(Environment.NewLine, text.Split('\n').Select(l => "  " + l));
+    }
+
+    // Same rules as AriaSnapshot.Normalize: line endings, blank lines, trailing spaces and common indentation.
+    internal static string NormalizeSnapshot(string snapshot)
+    {
+        var lines = snapshot.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')
+            .Select(l => l.TrimEnd())
+            .Where(l => l.Length > 0)
+            .ToArray();
+        var indent = lines.Length == 0 ? 0 : lines.Min(l => l.Length - l.TrimStart().Length);
+        return string.Join('\n', lines.Select(l => l[indent..]));
+    }
+
+    /// <summary>
+    /// Takes the page offline (<c>navigator.onLine</c> turns false, requests fail) or back online. Requires
+    /// <see cref="DriverCapabilities.BrowserEmulation"/>; other drivers report the story as skipped. Under Interactive
+    /// Server the circuit's connection is cut too, so offline behaviour is best tested under WebAssembly.
+    /// </summary>
+    public Task SetOfflineAsync(bool offline = true)
+    {
+        Require(DriverCapabilities.BrowserEmulation, "emulating offline mode");
+        return Recorder.RunAsync(offline ? "go offline" : "go online", StepKind.Action, () => Driver.SetOfflineAsync(offline, CancellationToken));
+    }
+
+    /// <summary>
+    /// Changes the position <c>navigator.geolocation</c> reports (null: no position) and grants the <c>geolocation</c>
+    /// permission. Requires <see cref="DriverCapabilities.BrowserEmulation"/>; other drivers report the story as skipped.
+    /// </summary>
+    public Task SetGeolocationAsync(GeoPosition? position)
+    {
+        Require(DriverCapabilities.BrowserEmulation, "emulating geolocation");
+        var validated = position?.Validated();
+        return Recorder.RunAsync(validated is null ? "clear geolocation" : $"set geolocation {validated.Latitude}, {validated.Longitude}", StepKind.Action,
+            () => Driver.SetGeolocationAsync(validated, CancellationToken));
+    }
+
     /// <summary>Auto-waiting assertions on requests answered by the story's <see cref="HttpMock"/>.</summary>
     /// <param name="method">HTTP method, or null for any.</param>
     /// <param name="pattern">URL pattern, as in <see cref="HttpMock.When(HttpMethod?, string)"/>.</param>

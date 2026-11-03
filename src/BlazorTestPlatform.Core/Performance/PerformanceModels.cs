@@ -3,30 +3,39 @@ using System.Globalization;
 namespace BlazorTestPlatform.Performance;
 
 /// <summary>Absolute limits for a story's render behaviour. Exceeding a limit fails the story.</summary>
-public sealed class PerformanceBudget
+public sealed class PerformanceBudget : StoryOptionsBase
 {
     /// <summary>Maximum renders of the story's root component during render + play.</summary>
-    public int? MaxRootRenders { get; set; }
+    public int? MaxRootRenders { get; set { ThrowIfReadOnly(); field = value; } }
 
     /// <summary>Maximum renders across every component in the story's tree.</summary>
-    public int? MaxTotalRenders { get; set; }
+    public int? MaxTotalRenders { get; set { ThrowIfReadOnly(); field = value; } }
 
     /// <summary>Maximum managed bytes allocated by the initial render (median of iterations).</summary>
-    public long? MaxAllocatedBytes { get; set; }
+    public long? MaxAllocatedBytes { get; set { ThrowIfReadOnly(); field = value; } }
 
     /// <summary>Maximum median wall-clock duration of render + play.</summary>
-    public TimeSpan? MaxMedianDuration { get; set; }
+    public TimeSpan? MaxMedianDuration { get; set { ThrowIfReadOnly(); field = value; } }
 
     /// <summary>Measured iterations (median is reported). Default 5.</summary>
-    public int Iterations { get; set; } = 5;
+    public int Iterations { get; set { ThrowIfReadOnly(); field = value; } } = 5;
 
     /// <summary>Warm-up iterations discarded before measuring (JIT, caches). Default 1.</summary>
-    public int WarmupIterations { get; set; } = 1;
+    public int WarmupIterations { get; set { ThrowIfReadOnly(); field = value; } } = 1;
 
     /// <summary>Compare against (and record into) the performance baseline file. Default true.</summary>
-    public bool TrackBaseline { get; set; } = true;
+    public bool TrackBaseline { get; set { ThrowIfReadOnly(); field = value; } } = true;
 
-    internal PerformanceBudget Clone() => (PerformanceBudget)MemberwiseClone();
+    internal PerformanceBudget Clone() => new()
+    {
+        MaxRootRenders = MaxRootRenders,
+        MaxTotalRenders = MaxTotalRenders,
+        MaxAllocatedBytes = MaxAllocatedBytes,
+        MaxMedianDuration = MaxMedianDuration,
+        Iterations = Iterations,
+        WarmupIterations = WarmupIterations,
+        TrackBaseline = TrackBaseline,
+    };
 }
 
 /// <summary>Measured render behaviour of one story.</summary>

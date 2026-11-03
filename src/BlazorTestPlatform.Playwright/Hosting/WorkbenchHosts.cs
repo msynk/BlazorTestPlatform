@@ -129,8 +129,8 @@ public sealed class ProcessWorkbenchHost : IWorkbenchHost
         BaseAddress = new Uri($"http://127.0.0.1:{FreePort()}/");
     }
 
-    /// <inheritdoc />
-    public Uri BaseAddress { get; }
+    /// <summary>The address; it changes when the first free port was taken before the host could bind it.</summary>
+    public Uri BaseAddress { get; private set; }
 
     /// <summary>Recent process output (for diagnosing startup failures).</summary>
     public IReadOnlyList<string> Output
@@ -146,6 +146,29 @@ public sealed class ProcessWorkbenchHost : IWorkbenchHost
 
     /// <inheritdoc />
     public async Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        // A free port is only free when it is checked: something else can take it while 'dotnet run' builds. Then the
+        // host cannot bind, and starting again on another port is the fix.
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await StartOnceAsync(cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            catch (InvalidOperationException) when (attempt < 3 && Output.Any(line => line.Contains("address already in use", StringComparison.OrdinalIgnoreCase)))
+            {
+                lock (_output)
+                {
+                    _output.Clear();
+                }
+
+                BaseAddress = new Uri($"http://127.0.0.1:{FreePort()}/");
+            }
+        }
+    }
+
+    private async Task StartOnceAsync(CancellationToken cancellationToken)
     {
         if (_process is not null)
         {
@@ -181,22 +204,47 @@ public sealed class ProcessWorkbenchHost : IWorkbenchHost
         {
             await WorkbenchHostProbe.WaitUntilReadyAsync(BaseAddress, _options.StartupTimeout, cancellationToken, () => _process.HasExited).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is TimeoutException or InvalidOperationException)
+        catch (Exception ex)
         {
-            throw new InvalidOperationException($"Workbench host '{_projectPath}' did not start:{System.Environment.NewLine}{string.Join(System.Environment.NewLine, Output.TakeLast(40))}", ex);
+            // Never leave 'dotnet run' (and the app it started) behind: it would hold the port and lock bin/ on Windows.
+            await StopAsync().ConfigureAwait(false);
+            if (ex is TimeoutException or InvalidOperationException)
+            {
+                throw new InvalidOperationException($"Workbench host '{_projectPath}' did not start:{System.Environment.NewLine}{string.Join(System.Environment.NewLine, Output.TakeLast(40))}", ex);
+            }
+
+            throw;
         }
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
+
+    private async Task StopAsync()
     {
-        if (_process is { HasExited: false })
+        var process = _process;
+        _process = null;
+        if (process is null)
         {
-            _process.Kill(entireProcessTree: true);
-            await _process.WaitForExitAsync().ConfigureAwait(false);
+            return;
         }
 
-        _process?.Dispose();
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or TimeoutException)
+        {
+            // Already exited, or not ours to kill any more.
+        }
+        finally
+        {
+            process.Dispose();
+        }
     }
 
     private void Capture(string? line)

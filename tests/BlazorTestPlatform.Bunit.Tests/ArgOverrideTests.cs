@@ -1,6 +1,27 @@
 using BlazorTestPlatform.Configuration;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Rendering;
 
 namespace BlazorTestPlatform.Bunit.Tests;
+
+public sealed class TagList : ComponentBase
+{
+    [Parameter] public IReadOnlyList<string> Tags { get; set; } = ["default"];
+
+    protected override void BuildRenderTree(RenderTreeBuilder builder)
+    {
+        builder.OpenElement(0, "output");
+        builder.AddContent(1, string.Join(",", Tags));
+        builder.CloseElement();
+    }
+}
+
+public sealed class TagListStories : Stories<TagList>
+{
+    public override string Title => "Tests/Tag list";
+
+    protected override void Define(StoryCollectionBuilder<TagList> stories) => stories.Add("Default");
+}
 
 public sealed class ArgOverrideTests
 {
@@ -40,6 +61,20 @@ public sealed class ArgOverrideTests
         // Removing every override restores the story: the binding returns to its initial value.
         await session.RenderContext.SetArgOverridesAsync(new Dictionary<string, object?>());
         await ctx.Expect(output).ToHaveTextAsync("2 of 5");
+    }
+
+    [Fact]
+    public async Task Removing_an_override_whose_default_is_unknown_recreates_the_component()
+    {
+        await using var session = await BunitStoryRunner.RenderAsync(Catalog.Get("tests-tag-list--default"), new BunitStoryOptions { Settings = Settings, WriteResults = false });
+        var output = session.StoryContext.Locate("output");
+
+        await session.RenderContext.SetArgOverridesAsync(new Dictionary<string, object?> { ["Tags"] = new[] { "a", "b" } });
+        await session.StoryContext.Expect(output).ToHaveTextAsync("a,b");
+
+        // A list parameter has no control, so its default is unknown: the component starts over instead of getting null.
+        await session.RenderContext.SetArgOverridesAsync(new Dictionary<string, object?>());
+        await session.StoryContext.Expect(output).ToHaveTextAsync("default");
     }
 
     [Fact]

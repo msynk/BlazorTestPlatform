@@ -68,6 +68,9 @@ public sealed class StoryRenderContext
 
     internal IReadOnlyDictionary<string, object?> ArgResets => _argResets;
 
+    /// <summary>Key of the rendered component; it changes when the component must be recreated to reset a parameter.</summary>
+    internal int ComponentKey { get; private set; }
+
     /// <summary>
     /// Replaces the overrides while the story is rendered (live controls) and re-renders it. Two-way bound values take
     /// the new value; overrides that are removed fall back to the story's values.
@@ -79,9 +82,21 @@ public sealed class StoryRenderContext
         _argOverrides = new Dictionary<string, object?>(overrides, StringComparer.OrdinalIgnoreCase);
         foreach (var name in previous.Keys.Where(n => !_argOverrides.ContainsKey(n)))
         {
-            if (!Story.Args.Any(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase)))
+            if (Story.Args.Any(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase)))
             {
-                _argResets[name] = StoryArgs.ComponentDefault(Story, name);
+                continue;
+            }
+
+            if (StoryArgs.TryGetComponentDefault(Story, name, out var componentDefault))
+            {
+                _argResets[name] = componentDefault;
+            }
+            else
+            {
+                // The default is unknown (a constructor-injected component, a list or object parameter): passing null
+                // would be wrong, so a fresh component instance starts from its own defaults instead.
+                _argResets.Remove(name);
+                ComponentKey++;
             }
         }
         foreach (var arg in Story.Args.Where(a => a.Kind == StoryArgKind.Binding && a.HasConstant))

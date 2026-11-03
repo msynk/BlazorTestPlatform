@@ -27,7 +27,7 @@ public static class AccessibleName
         var describedBy = scope.ResolveIdRefs(element.GetAttribute("aria-describedby"));
         if (describedBy.Count > 0)
         {
-            return TextMatch.Normalize(string.Join(' ', describedBy.Select(e => Compute(e, scope, new HashSet<IElement>(), true, false))));
+            return TextMatch.Normalize(string.Join(' ', describedBy.Select(e => Referenced(e, scope, [], element))));
         }
 
         return TextMatch.Normalize(element.GetAttribute("aria-description") ?? (Compute(element, scope).Length > 0 ? element.GetAttribute("title") : null));
@@ -47,7 +47,12 @@ public static class AccessibleName
         {
             if (parent.LocalName == "label" && !labels.Contains(parent) && (!parent.HasAttribute("for") || parent.GetAttribute("for") == id))
             {
-                labels.Add(parent);
+                // A label without "for" labels only its first labelable descendant.
+                if (parent.HasAttribute("for") || parent.QuerySelectorAll("*").FirstOrDefault(IsLabelable) == element)
+                {
+                    labels.Add(parent);
+                }
+
                 break;
             }
         }
@@ -55,14 +60,31 @@ public static class AccessibleName
         return labels;
     }
 
-    private static string Compute(IElement element, DomScope scope, HashSet<IElement> visited, bool inLabelledByTraversal, bool inContentTraversal)
+    /// <summary>
+    /// The text an <c>aria-labelledby</c>/<c>aria-describedby</c> target contributes (accname 2B). The referencing element
+    /// may name itself (<c>aria-labelledby="self other"</c>): it is taken out of the visited set for this target, while
+    /// every other element on the traversal stays in it, so reference cycles still end. A hidden target contributes its
+    /// hidden content too (2A).
+    /// </summary>
+    private static string Referenced(IElement target, DomScope scope, HashSet<IElement> visited, IElement referencer)
+    {
+        var chain = new HashSet<IElement>(visited);
+        chain.Remove(referencer);
+        return Compute(target, scope, chain, inLabelledByTraversal: true, inContentTraversal: false, includeHidden: DomFacts.IsExcludedFromAccessibilityTree(target, scope));
+    }
+
+    private static bool IsLabelable(IElement element) =>
+        element.LocalName is "button" or "meter" or "output" or "progress" or "select" or "textarea"
+        || (element.LocalName == "input" && !string.Equals(element.GetAttribute("type"), "hidden", StringComparison.OrdinalIgnoreCase));
+
+    private static string Compute(IElement element, DomScope scope, HashSet<IElement> visited, bool inLabelledByTraversal, bool inContentTraversal, bool includeHidden = false)
     {
         if (!visited.Add(element))
         {
             return string.Empty;
         }
 
-        if (!inLabelledByTraversal && DomFacts.IsExcludedFromAccessibilityTree(element, scope))
+        if (!inLabelledByTraversal && !includeHidden && DomFacts.IsExcludedFromAccessibilityTree(element, scope))
         {
             return string.Empty;
         }
@@ -73,14 +95,14 @@ public static class AccessibleName
             var labelledBy = scope.ResolveIdRefs(element.GetAttribute("aria-labelledby"));
             if (labelledBy.Count > 0)
             {
-                return string.Join(' ', labelledBy.Select(e => Compute(e, scope, visited, inLabelledByTraversal: true, inContentTraversal: false)));
+                return string.Join(' ', labelledBy.Select(e => Referenced(e, scope, visited, element)));
             }
         }
 
         var role = AriaRoles.GetRole(element);
 
-        // 2C (embedded control inside a label): use the control's value.
-        if (inContentTraversal && role is "textbox" or "combobox" or "listbox" or "slider" or "spinbutton")
+        // 2C (control embedded in a label, or referenced by aria-labelledby): use the control's value.
+        if ((inContentTraversal || inLabelledByTraversal) && role is "textbox" or "combobox" or "listbox" or "slider" or "spinbutton")
         {
             return ControlValue(element);
         }
@@ -105,7 +127,7 @@ public static class AccessibleName
         // 2F: name from content.
         if (inLabelledByTraversal || inContentTraversal || (role is not null && AriaRoles.NameFromContent.Contains(role)) || element.LocalName is "label" or "legend" or "caption" or "figcaption" or "summary")
         {
-            var content = ContentText(element, scope, visited);
+            var content = ContentText(element, scope, visited, includeHidden);
             if (!string.IsNullOrWhiteSpace(content))
             {
                 return content;
@@ -113,7 +135,10 @@ public static class AccessibleName
         }
 
         // 2I: tooltip attribute fallbacks.
-        return element.GetAttribute("title") ?? (element.LocalName is "input" or "textarea" ? element.GetAttribute("placeholder") ?? string.Empty : string.Empty);
+        // An empty title is no tooltip: the placeholder still names the field.
+        return element.GetAttribute("title") is { } title && !string.IsNullOrWhiteSpace(title)
+            ? title
+            : element.LocalName is "input" or "textarea" ? element.GetAttribute("placeholder") ?? string.Empty : string.Empty;
     }
 
     private static string NativeName(IElement element, DomScope scope, HashSet<IElement> visited)
@@ -181,7 +206,7 @@ public static class AccessibleName
     private static string LabelsText(IElement element, DomScope scope, HashSet<IElement> visited) =>
         string.Join(' ', GetLabels(element, scope).Select(label => ContentText(label, scope, visited)).Where(t => !string.IsNullOrWhiteSpace(t)));
 
-    private static string ContentText(IElement element, DomScope scope, HashSet<IElement> visited)
+    private static string ContentText(IElement element, DomScope scope, HashSet<IElement> visited, bool includeHidden = false)
     {
         var builder = new StringBuilder();
         foreach (var child in element.ChildNodes)
@@ -192,13 +217,13 @@ public static class AccessibleName
             }
             else if (child is IElement childElement)
             {
-                if (DomFacts.IsExcludedFromAccessibilityTree(childElement, scope))
+                if (!includeHidden && DomFacts.IsExcludedFromAccessibilityTree(childElement, scope))
                 {
                     continue;
                 }
 
-                var text = Compute(childElement, scope, visited, inLabelledByTraversal: false, inContentTraversal: true);
-                var block = childElement.LocalName is "div" or "p" or "li" or "br" or "h1" or "h2" or "h3" or "h4" or "h5" or "h6";
+                var text = Compute(childElement, scope, visited, inLabelledByTraversal: false, inContentTraversal: true, includeHidden);
+                var block = NameBlocks.Contains(childElement.LocalName);
                 if (block)
                 {
                     builder.Append(' ');
@@ -225,4 +250,13 @@ public static class AccessibleName
 
         return element.GetAttribute("value") ?? element.GetAttribute("aria-valuetext") ?? element.GetAttribute("aria-valuenow") ?? element.TextContent;
     }
+
+    // Elements whose default display is not inline (and br): browsers separate their text with spaces in names computed
+    // from content, so a row of "Plan" and "Team" cells is named "Plan Team". Same list as NAME_BLOCKS in btp-driver.js.
+    private static readonly HashSet<string> NameBlocks = new(StringComparer.Ordinal)
+    {
+        "address", "article", "aside", "blockquote", "br", "caption", "dd", "details", "dialog", "div", "dl", "dt", "fieldset",
+        "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hgroup", "hr", "legend", "li",
+        "main", "nav", "ol", "p", "pre", "search", "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul",
+    };
 }

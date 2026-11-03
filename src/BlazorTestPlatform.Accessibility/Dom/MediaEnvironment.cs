@@ -123,12 +123,14 @@ public sealed record MediaEnvironment
         var colon = feature.IndexOf(':', StringComparison.Ordinal);
         if (colon < 0)
         {
+            // Boolean context: true unless the feature's value is none, no-preference or zero.
             return feature switch
             {
                 "hover" or "any-hover" => Hover,
                 "pointer" or "any-pointer" => true,
-                "color" => true,
-                "monochrome" or "grid" => false,
+                "color" or "width" or "height" or "orientation" or "prefers-color-scheme" or "aspect-ratio" or "resolution" => true,
+                "prefers-reduced-motion" => ReducedMotion,
+                "monochrome" or "grid" or "prefers-contrast" or "forced-colors" or "inverted-colors" or "prefers-reduced-transparency" => false,
                 _ => false,
             };
         }

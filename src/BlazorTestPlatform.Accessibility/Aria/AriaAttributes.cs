@@ -83,14 +83,19 @@ public static class AriaAttributes
 
         if (IdRefs.Contains(name))
         {
+            // As in axe-core: an empty id reference is allowed (Blazor renders aria-describedby="" for unset values).
             var ids = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             if (ids.Length == 0)
             {
-                return name is "aria-activedescendant" ? null : $"{name} is empty.";
+                return null;
             }
 
-            // aria-controls may reference elements that only exist when expanded.
-            if (name == "aria-controls" && string.Equals(element.GetAttribute("aria-expanded"), "false", StringComparison.OrdinalIgnoreCase))
+            // aria-controls may reference elements that only exist when expanded (disclosures) or selected (tabs that
+            // render only the active panel), and aria-owns those of a collapsed combobox. Missing aria-labelledby and
+            // aria-describedby targets are "needs review" in axe-core, not violations: the name computation reports them.
+            if ((name == "aria-controls" && (IsFalse(element, "aria-expanded") || IsFalse(element, "aria-selected")))
+                || (name == "aria-owns" && IsFalse(element, "aria-expanded"))
+                || name is "aria-labelledby" or "aria-describedby")
             {
                 return null;
             }
@@ -100,6 +105,17 @@ public static class AriaAttributes
 
         return null;
     }
+
+    private static bool IsFalse(IElement element, string attribute) => string.Equals(element.GetAttribute(attribute)?.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Roles axe-core reports for review instead of failing when they own no children (a list or tree still loading, an
+    /// empty result set).
+    /// </summary>
+    public static readonly IReadOnlySet<string> ReviewWhenEmpty = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "doc-bibliography", "doc-endnotes", "grid", "list", "listbox", "menu", "menubar", "table", "tablist", "tree", "treegrid", "rowgroup",
+    };
 
     /// <summary>Required attributes missing for the element's explicit role.</summary>
     public static IEnumerable<string> MissingRequired(IElement element)
@@ -131,7 +147,7 @@ public static class AriaAttributes
                 }
 
                 break;
-            case "heading" when !element.LocalName.StartsWith('h') && !element.HasAttribute("aria-level"):
+            case "heading" when element.LocalName is not ("h1" or "h2" or "h3" or "h4" or "h5" or "h6") && !element.HasAttribute("aria-level"):
                 yield return "aria-level";
                 break;
             case "combobox" when element.LocalName is not ("select" or "input") && !element.HasAttribute("aria-expanded"):
@@ -185,7 +201,7 @@ public static class AriaStructure
         var owned = OwnedRoles(element, roleOf).ToArray();
         if (owned.Length == 0)
         {
-            return $"Role '{role}' must contain {string.Join(" or ", required)}.";
+            return AriaAttributes.ReviewWhenEmpty.Contains(role) ? null : $"Role '{role}' must contain {string.Join(" or ", required)}.";
         }
 
         var unexpected = owned.Where(r => !required.Contains(r)).Distinct().ToArray();

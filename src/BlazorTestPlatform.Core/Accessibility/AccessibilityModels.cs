@@ -196,6 +196,12 @@ public sealed class AccessibilityPolicy
     /// <summary>Also run best-practice rules (reported, gate still uses <see cref="FailOn"/>). Default true.</summary>
     public bool IncludeBestPractices { get; set; } = true;
 
+    /// <summary>
+    /// The UTC date suppression expiries are compared with, fixed when the process starts: a run that crosses midnight
+    /// gates every story the same way. A suppression applies through the whole of its <c>expires</c> day.
+    /// </summary>
+    public static DateOnly RunDate { get; } = DateOnly.FromDateTime(DateTime.UtcNow);
+
     /// <summary>Rules disabled everywhere.</summary>
     public HashSet<string> DisabledRules { get; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -209,7 +215,7 @@ public sealed class AccessibilityPolicy
     public IReadOnlyList<AccessibilityWaiver> WaiversFor(string storyId, StoryAccessibilityOptions? storyOptions = null, DateOnly? today = null)
     {
         ArgumentNullException.ThrowIfNull(storyId);
-        var now = today ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var now = today ?? RunDate;
         var waivers = new List<AccessibilityWaiver>();
         foreach (var rule in (storyOptions?.DisabledRules ?? []).Order(StringComparer.OrdinalIgnoreCase))
         {
@@ -240,7 +246,7 @@ public sealed class AccessibilityPolicy
     public AccessibilityEvaluation Evaluate(AccessibilityReport report, string? storyId = null, StoryAccessibilityOptions? storyOptions = null, DateOnly? today = null)
     {
         ArgumentNullException.ThrowIfNull(report);
-        var now = today ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var now = today ?? RunDate;
         var failures = new List<AccessibilityViolation>();
         var warnings = new List<AccessibilityViolation>();
         var suppressed = new List<AccessibilityViolation>();
@@ -256,7 +262,7 @@ public sealed class AccessibilityPolicy
 
             var matching = Suppressions.Where(s =>
                 string.Equals(s.RuleId, violation.RuleId, StringComparison.OrdinalIgnoreCase)
-                && (storyId is null || Glob.IsMatch(storyId, s.StoryPattern))
+                && (storyId is null ? s.StoryPattern is "*" or "" : Glob.IsMatch(storyId, s.StoryPattern))
                 && (s.TargetContains is null || violation.Nodes.All(n => n.Target.Contains(s.TargetContains, StringComparison.OrdinalIgnoreCase))))
                 .ToArray();
 

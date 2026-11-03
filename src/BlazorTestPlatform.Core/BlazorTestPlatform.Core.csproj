@@ -22,8 +22,28 @@
        reflection-free, trimming-safe story discovery automatically. -->
   <ItemGroup>
     <ProjectReference Include="..\BlazorTestPlatform.Generators\BlazorTestPlatform.Generators.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
-    <None Include="..\BlazorTestPlatform.Generators\bin\$(Configuration)\netstandard2.0\BlazorTestPlatform.Generators.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <ProjectReference Include="..\BlazorTestPlatform.CodeFixes\BlazorTestPlatform.CodeFixes.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
   </ItemGroup>
+
+  <!-- Packs the generator from wherever it was built (bin/, -output, -artifacts-path or UseArtifactsOutput). -->
+  <PropertyGroup>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);_BtpPackStoryGenerator</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+
+  <Target Name="_BtpPackStoryGenerator">
+    <MSBuild Projects="..\BlazorTestPlatform.Generators\BlazorTestPlatform.Generators.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)" RemoveProperties="TargetFramework;RuntimeIdentifier">
+      <Output TaskParameter="TargetOutputs" ItemName="_BtpStoryGenerator" />
+    </MSBuild>
+    <MSBuild Projects="..\BlazorTestPlatform.CodeFixes\BlazorTestPlatform.CodeFixes.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)" RemoveProperties="TargetFramework;RuntimeIdentifier">
+      <Output TaskParameter="TargetOutputs" ItemName="_BtpStoryCodeFixes" />
+    </MSBuild>
+    <Error Condition="!Exists('@(_BtpStoryGenerator)')" Text="The story generator was not built: @(_BtpStoryGenerator). Build the solution (or the Generators project) before packing Core." />
+    <Error Condition="!Exists('@(_BtpStoryCodeFixes)')" Text="The story code fixes were not built: @(_BtpStoryCodeFixes). Build the solution (or the CodeFixes project) before packing Core." />
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="@(_BtpStoryGenerator)" PackagePath="analyzers/dotnet/cs" />
+      <TfmSpecificPackageFile Include="@(_BtpStoryCodeFixes)" PackagePath="analyzers/dotnet/cs" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <InternalsVisibleTo Include="BlazorTestPlatform.Bunit" />

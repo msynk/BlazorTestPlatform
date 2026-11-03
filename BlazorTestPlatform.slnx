@@ -10,20 +10,30 @@
     <Project Path="src/BlazorTestPlatform.Accessibility/BlazorTestPlatform.Accessibility.csproj" />
     <Project Path="src/BlazorTestPlatform.Bunit/BlazorTestPlatform.Bunit.csproj" />
     <Project Path="src/BlazorTestPlatform.Cli/BlazorTestPlatform.Cli.csproj" />
+    <Project Path="src/BlazorTestPlatform.CodeFixes/BlazorTestPlatform.CodeFixes.csproj" />
     <Project Path="src/BlazorTestPlatform.Core/BlazorTestPlatform.Core.csproj" />
     <Project Path="src/BlazorTestPlatform.Generators/BlazorTestPlatform.Generators.csproj" />
+    <Project Path="src/BlazorTestPlatform.MSTest/BlazorTestPlatform.MSTest.csproj" />
+    <Project Path="src/BlazorTestPlatform.NUnit/BlazorTestPlatform.NUnit.csproj" />
     <Project Path="src/BlazorTestPlatform.Playwright/BlazorTestPlatform.Playwright.csproj" />
     <Project Path="src/BlazorTestPlatform.Reporting/BlazorTestPlatform.Reporting.csproj" />
+    <Project Path="src/BlazorTestPlatform.TUnit/BlazorTestPlatform.TUnit.csproj" />
     <Project Path="src/BlazorTestPlatform.Visual/BlazorTestPlatform.Visual.csproj" />
     <Project Path="src/BlazorTestPlatform.Workbench/BlazorTestPlatform.Workbench.csproj" />
+    <Project Path="src/BlazorTestPlatform.Xunit/BlazorTestPlatform.Xunit.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/BlazorTestPlatform.Accessibility.Tests/BlazorTestPlatform.Accessibility.Tests.csproj" />
     <Project Path="tests/BlazorTestPlatform.Bunit.Tests/BlazorTestPlatform.Bunit.Tests.csproj" />
+    <Project Path="tests/BlazorTestPlatform.Cli.Tests/BlazorTestPlatform.Cli.Tests.csproj" />
     <Project Path="tests/BlazorTestPlatform.Core.Tests/BlazorTestPlatform.Core.Tests.csproj" />
     <Project Path="tests/BlazorTestPlatform.Generators.Tests/BlazorTestPlatform.Generators.Tests.csproj" />
+    <Project Path="tests/BlazorTestPlatform.MSTest.Tests/BlazorTestPlatform.MSTest.Tests.csproj" />
+    <Project Path="tests/BlazorTestPlatform.NUnit.Tests/BlazorTestPlatform.NUnit.Tests.csproj" />
     <Project Path="tests/BlazorTestPlatform.Reporting.Tests/BlazorTestPlatform.Reporting.Tests.csproj" />
+    <Project Path="tests/BlazorTestPlatform.TUnit.Tests/BlazorTestPlatform.TUnit.Tests.csproj" />
     <Project Path="tests/BlazorTestPlatform.Visual.Tests/BlazorTestPlatform.Visual.Tests.csproj" />
     <Project Path="tests/BlazorTestPlatform.Workbench.Tests/BlazorTestPlatform.Workbench.Tests.csproj" />
+    <Project Path="tests/BlazorTestPlatform.Xunit.Tests/BlazorTestPlatform.Xunit.Tests.csproj" />
   </Folder>
 </Solution>

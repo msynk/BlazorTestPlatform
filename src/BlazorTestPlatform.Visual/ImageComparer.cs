@@ -253,6 +253,11 @@ public static class ImageComparer
     }
 
     /// <summary>Squared YIQ distance; the sign tells whether the pixel got lighter (negative) or darker.</summary>
+    /// <remarks>
+    /// Translucent pixels are compared as composited over a background that varies from pixel to pixel (as pixelmatch 6
+    /// does), not over white: otherwise a fully transparent pixel and an opaque white one would compare equal, and an
+    /// alpha-only change would go unnoticed. Opaque pixels are compared as they are.
+    /// </remarks>
     private static double ColorDelta(byte[] a, byte[] b, int i, int j, bool yOnly)
     {
         double r1 = a[i], g1 = a[i + 1], b1 = a[i + 2], a1 = a[i + 3];
@@ -263,34 +268,35 @@ public static class ImageComparer
             return 0;
         }
 
-        if (a1 < 255)
+        double dr, dg, db;
+        if (a1 < 255 || a2 < 255)
         {
-            a1 /= 255;
-            r1 = BlendChannel(r1, a1);
-            g1 = BlendChannel(g1, a1);
-            b1 = BlendChannel(b1, a1);
+            var pixel = i / 4;
+            var rb = 48 + (159 * (pixel % 2));
+            var gb = 48 + (159 * ((int)(pixel / 1.618033988749895) % 2));
+            var bb = 48 + (159 * ((int)(pixel / 2.618033988749895) % 2));
+            var da = a1 - a2;
+            dr = ((r1 * a1) - (r2 * a2) - (rb * da)) / 255;
+            dg = ((g1 * a1) - (g2 * a2) - (gb * da)) / 255;
+            db = ((b1 * a1) - (b2 * a2) - (bb * da)) / 255;
+        }
+        else
+        {
+            dr = r1 - r2;
+            dg = g1 - g2;
+            db = b1 - b2;
         }
 
-        if (a2 < 255)
-        {
-            a2 /= 255;
-            r2 = BlendChannel(r2, a2);
-            g2 = BlendChannel(g2, a2);
-            b2 = BlendChannel(b2, a2);
-        }
-
-        var y1 = Y(r1, g1, b1);
-        var y2 = Y(r2, g2, b2);
-        var y = y1 - y2;
+        var y = Y(dr, dg, db);
         if (yOnly)
         {
             return y;
         }
 
-        var iDelta = I(r1, g1, b1) - I(r2, g2, b2);
-        var qDelta = Q(r1, g1, b1) - Q(r2, g2, b2);
-        var delta = 0.5053 * y * y + 0.299 * iDelta * iDelta + 0.1957 * qDelta * qDelta;
-        return y1 > y2 ? -delta : delta;
+        var iDelta = I(dr, dg, db);
+        var qDelta = Q(dr, dg, db);
+        var delta = (0.5053 * y * y) + (0.299 * iDelta * iDelta) + (0.1957 * qDelta * qDelta);
+        return y > 0 ? -delta : delta;
     }
 
     private static double Y(double r, double g, double b) => r * 0.29889531 + g * 0.58662247 + b * 0.11448223;
@@ -298,8 +304,6 @@ public static class ImageComparer
     private static double I(double r, double g, double b) => r * 0.59597799 - g * 0.27417610 - b * 0.32180189;
 
     private static double Q(double r, double g, double b) => r * 0.21147017 - g * 0.52261711 + b * 0.31114694;
-
-    private static double BlendChannel(double channel, double alpha) => 255 + (channel - 255) * alpha;
 
     private static double GrayOf(byte[] pixels, int i) => Y(pixels[i], pixels[i + 1], pixels[i + 2]);
 

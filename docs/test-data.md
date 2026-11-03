@@ -37,6 +37,10 @@ stories.Add("Seeded", s => s.UseFixture(new TodoFixture(4)));
 
 For one-off overrides, use `.Services(services => services.AddSingleton<IClock>(...))`.
 
+Story registrations can depend on the application's services, in the workbench as in bUnit: a story's
+`services.AddSingleton<IGreeter, ShoutingGreeter>()` whose constructor takes the application's `IOptions<Branding>`,
+or a factory that resolves one, gets the application's instance. The story's own registrations win where both exist.
+
 ### How overrides reach Server and WebAssembly
 
 `AddBlazorTestWorkbench` must be called **after** the application's own registrations. It probes every story for the service types it overrides and replaces those registrations with a resolver that does the following:
@@ -55,12 +59,14 @@ Services that the application registers more than once, or that are resolved as 
 
 This covers your own multi-registered services (notification channels, plug-ins...), authorization handlers (`AuthorizeView` and policies see the story's handlers) and options. For options, `IOptions<T>` and `IOptionsMonitor<T>` resolve per story for every options type a story configures, so a story's `services.Configure<T>(...)` reaches components under Server and WebAssembly. Application singletons keep the application's values, because they're built once at the root.
 
-A few contracts are consumed once when the application or a circuit starts, before any story frame exists: `IHostedService`, `ILoggerProvider`, `IStartupFilter`, `CircuitHandler` and `IHttpMessageHandlerBuilderFilter`. Story registrations of these apply in bUnit only. The same goes for `IJSRuntime` when a story uses `MockJS` but the application registers no JS runtime to decorate. The workbench flags affected stories: a notice in the shell, a `data-btp-unsupported-overrides` attribute on the frame, and a warning in the browser run's timeline. `WorkbenchOptions.UnwrappableOverrides` lists them, and `UnsupportedOverridesOf(story)` returns a story's.
+A few contracts are consumed once when the application or a circuit starts, before any story frame exists: `IHostedService`, `ILoggerProvider`, `IStartupFilter`, `CircuitHandler` and `IHttpMessageHandlerBuilderFilter`. Story registrations of these apply in bUnit only. So do overrides of services the application registers as **disposable singletons** (an `IDisposable` or `IAsyncDisposable` implementation type or instance): the container disposes whatever a per-frame resolver returns when the frame ends, which would dispose the application's shared instance for every other user, so those overrides are flagged instead. Register such a service as scoped in the workbench host if stories need to replace it in browsers. A singleton registered with a factory (`AddSingleton<T>(sp => ...)`) cannot be inspected before it is created, so it is still wrapped: if it is disposable and a story overrides it, register it as scoped in the workbench host as well. A service type only stories register stays optional outside them: `GetService<T>()` returns null. The same goes for `IJSRuntime` when a story uses `MockJS` but the application registers no JS runtime to decorate. The workbench flags affected stories: a notice in the shell, a `data-btp-unsupported-overrides` attribute on the frame, and a warning in the browser run's timeline. `WorkbenchOptions.UnwrappableOverrides` lists them, and `UnsupportedOverridesOf(story)` returns a story's.
 
 ## Mocked HTTP
 
 Most real components fetch data. `MockHttp` gives each story its own fake backend. It answers requests made through
-`HttpClient` and through `IHttpClientFactory`, which covers named and typed clients. It works the same in bUnit, under Interactive Server (where the mock runs on the server) and under WebAssembly (where it runs in the browser):
+`HttpClient` and through `IHttpClientFactory`, which covers named and typed clients. Named clients keep their
+`AddHttpClient(...)` configuration: base address, default headers and delegating handlers (an authentication or
+correlation handler runs before the mock answers); only the primary handler, the network, is replaced. It works the same in bUnit, under Interactive Server (where the mock runs on the server) and under WebAssembly (where it runs in the browser):
 
 ```csharp
 stories.Defaults(s => s
@@ -105,7 +111,15 @@ s.MockJS(js => js
     .SetupVoid("analytics.track")                                 // any arguments
     .Module("./media.js", media => media.Setup("prefersReducedMotion", true)));
 s.MockJS(js => js.Strict = true);                                 // fail on calls without a setup
+s.MockJS(js => js
+    .SetupGet("navigator.language", "nl-NL")                      // IJSRuntime.GetValueAsync<T>
+    .SetupSet("document.title")                                   // SetValueAsync
+    .Setup("new IntersectionObserver", observerReference));       // InvokeConstructorAsync
 ```
+
+Property reads, writes and constructor calls (the .NET 10 `GetValueAsync`, `SetValueAsync` and
+`InvokeConstructorAsync` interop) are mocked under the identifiers `get x`, `set x` and `new X`, in the in-process
+runtime and on object references too, and answered by the real JavaScript in browsers unless `ApplyInBrowsers()` is on.
 
 In browsers, the workbench decorates the `IJSRuntime` that the story's components inject. With `ApplyInBrowsers()`, mocked identifiers answer from the setups and every other call reaches the real JavaScript; in strict mode, every other call fails instead. Without `ApplyInBrowsers()` the decorator only records calls, so `Strict` has no effect in browsers. Blazor's own `Blazor.*` calls and the workbench's internal calls are never intercepted. A mocked module doesn't have to exist in the browser. If its import fails, unmocked calls on it return defaults, as in bUnit's loose mode. Later setups win, as with `MockHttp`. The two switches are additive: once any `MockJS` call on a story (including its collection and assembly defaults) turns `ApplyInBrowsers` or `Strict` on, a later call can't turn it off.
 

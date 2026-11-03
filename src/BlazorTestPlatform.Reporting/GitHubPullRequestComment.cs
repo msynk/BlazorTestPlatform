@@ -147,7 +147,7 @@ public sealed class GitHubPullRequestComment
             var comments = document.RootElement.EnumerateArray().ToArray();
             foreach (var comment in comments)
             {
-                if (comment.TryGetProperty("body", out var text) && text.GetString()?.Contains(MarkdownSummaryWriter.CommentMarker, StringComparison.Ordinal) == true)
+                if (IsOwnComment(comment))
                 {
                     return comment.GetProperty("id").GetInt64();
                 }
@@ -160,6 +160,31 @@ public sealed class GitHubPullRequestComment
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The comment an earlier run posted: its body starts with the marker, and a bot posted it (the default
+    /// <c>GITHUB_TOKEN</c> posts as <c>github-actions[bot]</c>) or the login in <c>BTP_PR_COMMENT_AUTHOR</c> did (a personal
+    /// token). Anyone can paste the marker into a comment; that must not let them have the report overwrite it.
+    /// </summary>
+    internal static bool IsOwnComment(JsonElement comment, string? expectedAuthor = null)
+    {
+        if (!comment.TryGetProperty("body", out var text) || text.GetString()?.StartsWith(MarkdownSummaryWriter.CommentMarker, StringComparison.Ordinal) != true)
+        {
+            return false;
+        }
+
+        if (!comment.TryGetProperty("user", out var user) || user.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        expectedAuthor ??= Environment.GetEnvironmentVariable("BTP_PR_COMMENT_AUTHOR");
+        var login = user.TryGetProperty("login", out var l) ? l.GetString() : null;
+        var type = user.TryGetProperty("type", out var t) ? t.GetString() : null;
+        return string.IsNullOrWhiteSpace(expectedAuthor)
+            ? string.Equals(type, "Bot", StringComparison.OrdinalIgnoreCase)
+            : string.Equals(login, expectedAuthor, StringComparison.OrdinalIgnoreCase);
     }
 
     private HttpRequestMessage Request(HttpMethod method, string path, string? body)

@@ -30,7 +30,7 @@ public static class MarkdownSummaryWriter
             md.AppendLine().AppendLine("### Failures").AppendLine();
             foreach (var result in failed.Take(30))
             {
-                md.AppendLine(CultureInfo.InvariantCulture, $"- **{result.Title} / {result.Name}** `{JUnitReportWriter.Cell(result)}` — {Escape(FirstLine(result.Error))}");
+                md.AppendLine(CultureInfo.InvariantCulture, $"- **{Escape(result.Title)} / {Escape(result.Name)}** `{JUnitReportWriter.Cell(result)}` — {Escape(FirstLine(result.Error))}");
             }
 
             if (failed.Length > 30)
@@ -45,7 +45,7 @@ public static class MarkdownSummaryWriter
             md.AppendLine().AppendLine("### Flaky (passed on retry)").AppendLine();
             foreach (var result in flaky)
             {
-                md.AppendLine(CultureInfo.InvariantCulture, $"- {result.Title} / {result.Name} `{JUnitReportWriter.Cell(result)}` — {result.Attempts} attempts");
+                md.AppendLine(CultureInfo.InvariantCulture, $"- {Escape(result.Title)} / {Escape(result.Name)} `{JUnitReportWriter.Cell(result)}` — {result.Attempts} attempts");
             }
         }
 
@@ -55,7 +55,7 @@ public static class MarkdownSummaryWriter
             md.AppendLine("| Story | Flake rate | Unstable runs |").AppendLine("|---|---:|---:|");
             foreach (var entry in flakes.Entries.Take(10))
             {
-                md.AppendLine(CultureInfo.InvariantCulture, $"| {entry.Key} | {entry.FlakeRate:P0} | {entry.Unstable}/{entry.Runs} |");
+                md.AppendLine(CultureInfo.InvariantCulture, $"| {Escape(entry.Key)} | {entry.FlakeRate:P0} | {entry.Unstable}/{entry.Runs} |");
             }
         }
 
@@ -101,5 +101,14 @@ public static class MarkdownSummaryWriter
         return index < 0 ? value : value[..index].TrimEnd('\r');
     }
 
-    private static string Escape(string value) => value.Replace("|", "\\|", StringComparison.Ordinal).Replace("<", "&lt;", StringComparison.Ordinal);
+    /// <summary>
+    /// Makes story-controlled text inert in GitHub Markdown: table pipes, HTML, code spans and <c>@mentions</c> (an error
+    /// that mentions <c>@media</c> must not notify a GitHub user called media).
+    /// </summary>
+    internal static string Escape(string value) => value
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("|", "\\|", StringComparison.Ordinal)
+        .Replace("<", "&lt;", StringComparison.Ordinal)
+        .Replace("`", "\\`", StringComparison.Ordinal)
+        .Replace("@", "&#64;", StringComparison.Ordinal);
 }

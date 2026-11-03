@@ -28,9 +28,11 @@ public static class BunitStoryRunner
         var settings = options.Settings ?? BtpSettings.Current;
         var started = DateTimeOffset.UtcNow;
         var clock = Stopwatch.StartNew();
-        var key = StoryResult.CreateKey(story.Id, "bunit");
+        // Runs of one story with a different viewport, theme or args are different results; they must not overwrite each other.
+        var key = StoryResult.CreateKey(story.Id, "bunit", options.Viewport?.Name, options.Theme?.Name, ArgsKey(options.Args));
+        using var activity = BtpTelemetry.StartStory(story, "bunit", HostingModel.InMemory.ToToken(), options.Viewport?.Name, options.Theme?.Name);
 
-        if (story.SkipReason is { } skip)
+        if ((story.SkipReason ?? story.UnsupportedReason(BunitStoryDriver.CapabilitiesFor(story), "bunit")) is { } skip)
         {
             return Write(options, settings, Base(story, key, started) with { Outcome = StoryOutcome.Skipped, SkipReason = skip });
         }
@@ -56,6 +58,13 @@ public static class BunitStoryRunner
                     if (options.RunPlay)
                     {
                         await session.PlayAsync().ConfigureAwait(false);
+                    }
+
+                    // A component that crashed after an await (outside any error boundary) must not leave the story
+                    // passed: in a browser the Blazor error UI would show, and the browser runner fails on it.
+                    if (session.UnhandledException is { } unhandled)
+                    {
+                        throw new StoryAssertionException($"A component threw an unhandled exception while the story ran: {unhandled.GetType().Name}: {unhandled.Message}", unhandled);
                     }
                 }
                 finally
@@ -126,9 +135,16 @@ public static class BunitStoryRunner
                 DurationMilliseconds = clock.Elapsed.TotalMilliseconds,
             });
         }
-        catch (Exception ex) when (ex is not OperationCanceledException || timeout.IsCancellationRequested)
+        catch (Exception ex) when (cancellationToken.IsCancellationRequested)
         {
-            var message = ex is OperationCanceledException ? $"Story timed out after {(options.Timeout ?? story.Timeout ?? TimeSpan.FromSeconds(30)).TotalSeconds:0.#} s." : ex.Message;
+            // The caller cancelled (test run aborted): that is not a story failure, and no result is recorded as one.
+            throw ex as OperationCanceledException ?? new OperationCanceledException("The story run was cancelled.", ex, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            var message = ex is OperationCanceledException && timeout.IsCancellationRequested
+                ? $"Story timed out after {(options.Timeout ?? story.Timeout ?? TimeSpan.FromSeconds(30)).TotalSeconds:0.#} s."
+                : ex.Message;
             return Write(options, settings, Base(story, key, started) with
             {
                 Outcome = StoryOutcome.Failed,
@@ -164,13 +180,19 @@ public static class BunitStoryRunner
     {
         ArgumentNullException.ThrowIfNull(story);
         ArgumentNullException.ThrowIfNull(budget);
+        ArgumentOutOfRangeException.ThrowIfNegative(budget.WarmupIterations, nameof(budget));
         var measureOptions = new BunitStoryOptions
         {
             ConfigureContext = options?.ConfigureContext,
             JSInteropMode = options?.JSInteropMode ?? global::Bunit.JSRuntimeMode.Loose,
             Settings = options?.Settings,
             WriteResults = false,
+
+            // Measure the render the story run checked: same viewport, theme decorator and stylesheets.
+            Viewport = options?.Viewport,
+            Theme = options?.Theme,
         };
+        measureOptions.Stylesheets.AddRange(options?.Stylesheets ?? []);
         foreach (var (name, value) in options?.Args ?? new Dictionary<string, string?>())
         {
             measureOptions.Args[name] = value;
@@ -202,16 +224,27 @@ public static class BunitStoryRunner
 
         durations.Sort();
         allocations.Sort();
-        var floor = await AllocationFloorAsync(measureOptions, cancellationToken).ConfigureAwait(false);
+        var floor = await AllocationFloorAsync(cancellationToken).ConfigureAwait(false);
         return counts! with
         {
-            MedianMilliseconds = durations[durations.Count / 2],
+            MedianMilliseconds = Median(durations),
             MinMilliseconds = durations[0],
             MaxMilliseconds = durations[^1],
-            AllocatedBytes = Math.Max(0, allocations[allocations.Count / 2] - floor),
+            AllocatedBytes = Math.Max(0, (long)Median(allocations.ConvertAll(a => (double)a)) - floor),
             Iterations = durations.Count,
         };
     }
+
+    /// <summary>Median of sorted samples (the mean of the middle two for an even count).</summary>
+    internal static double Median(IReadOnlyList<double> sorted) =>
+        sorted.Count % 2 == 1 ? sorted[sorted.Count / 2] : (sorted[(sorted.Count / 2) - 1] + sorted[sorted.Count / 2]) / 2;
+
+    /// <summary>A short, stable key for arg overrides, so differently configured runs get their own result file.</summary>
+    private static string? ArgsKey(IDictionary<string, string?> args) =>
+        args.Count == 0
+            ? null
+            : "args-" + DeterministicRandom.StableHash(string.Join('&', args.OrderBy(a => a.Key, StringComparer.OrdinalIgnoreCase).Select(a => $"{a.Key}={a.Value}")))
+                .ToString("x8", System.Globalization.CultureInfo.InvariantCulture)[..8];
 
     private static readonly SemaphoreSlim FloorGate = new(1, 1);
     private static long? _allocationFloor;
@@ -220,8 +253,10 @@ public static class BunitStoryRunner
     /// Allocations of rendering an empty story: bUnit's own per-render overhead (root wrappers, markup generation).
     /// Subtracted from measurements so allocation budgets reflect the component, not the harness.
     /// </summary>
-    private static async Task<long> AllocationFloorAsync(BunitStoryOptions options, CancellationToken cancellationToken)
+    private static async Task<long> AllocationFloorAsync(CancellationToken cancellationToken)
     {
+        // Calibrated with neutral options, never the first caller's: the cached floor must not depend on test order.
+        var options = new BunitStoryOptions { WriteResults = false, RunPlay = false, CheckAccessibility = false, MeasurePerformance = false };
         if (_allocationFloor is { } cached)
         {
             return cached;
@@ -272,6 +307,8 @@ public static class BunitStoryRunner
         Title = story.Title,
         Name = story.Name,
         Component = story.ComponentType.FullName,
+        SourceFile = story.SourceFile,
+        SourceLine = story.SourceLine > 0 ? story.SourceLine : null,
         Driver = "bunit",
         HostingModel = HostingModel.InMemory.ToToken(),
         StartedAt = started,
@@ -279,6 +316,7 @@ public static class BunitStoryRunner
 
     private static StoryResult Write(BunitStoryOptions options, BtpSettings settings, StoryResult result)
     {
+        BtpTelemetry.Complete(System.Diagnostics.Activity.Current is { OperationName: "btp.story" } story ? story : null, result);
         if (options.WriteResults)
         {
             try

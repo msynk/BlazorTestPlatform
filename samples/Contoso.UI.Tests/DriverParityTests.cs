@@ -95,6 +95,17 @@ public sealed class DriverParityTests(WorkbenchFixture workbench)
               space </div>
             <img src="data:," alt="Photo" title="Photo title"><input placeholder="Search here" data-testid="search">
             """,
+        ["names and roles"] = """
+            <button aria-labelledby="del-label del-count">x</button><span id="del-label">Delete</span><input id="del-count" value="5" aria-label="count">
+            <label>Size <input id="size-a"> <input id="size-b" aria-describedby=""></label>
+            <input title="" placeholder="Search here too"><input type="file" aria-label="Upload">
+            <ul><li role="none" aria-current="page">Current</li><li role="none">Plain</li></ul>
+            """,
+        ["labelled by"] = """
+            <button id="del" aria-labelledby="del file">Delete</button><span id="file">report.pdf</span>
+            <span id="close-label" hidden><b>Close</b> dialog</span><button aria-labelledby="close-label">x</button>
+            <div id="cycle-a" role="group" aria-labelledby="cycle-b">A <span id="cycle-c" aria-labelledby="cycle-a">C</span></div><span id="cycle-b" aria-labelledby="cycle-a">B</span>
+            """,
     };
 
     public static TheoryData<string> FixtureNames => new(Fixtures.Keys);

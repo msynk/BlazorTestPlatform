@@ -69,7 +69,14 @@ public sealed class WorkbenchBrowser : IAsyncDisposable
         {
             if (_browsers.TryGetValue(browserName, out var existing))
             {
-                return existing;
+                if (existing.IsConnected)
+                {
+                    return existing;
+                }
+
+                // The browser crashed or was closed (for example /dev/shm exhausted in a container): relaunch it
+                // instead of failing every later cell, retries included.
+                _browsers.Remove(browserName);
             }
 
             var type = browserName.ToLowerInvariant() switch
@@ -159,8 +166,16 @@ public sealed class WorkbenchBrowser : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(cell);
         options ??= new StoryPageOptions();
         var browser = await GetBrowserAsync(cell.Browser).ConfigureAwait(false);
+        var emulation = cell.Story.Emulation;
         var context = await browser.NewContextAsync(new BrowserNewContextOptions
         {
+            Geolocation = emulation.Geolocation is { } position
+                ? new Geolocation { Latitude = (float)position.Latitude, Longitude = (float)position.Longitude, Accuracy = (float)position.Accuracy }
+                : null,
+            // Null, not empty, without emulation: contexts are then created exactly as before (no permission grant).
+            Permissions = emulation.Geolocation is null
+                ? emulation.Permissions.Count == 0 ? null : emulation.Permissions
+                : [.. emulation.Permissions.Union(["geolocation"])],
             BaseURL = BaseAddress.ToString(),
             ViewportSize = new ViewportSize { Width = cell.Viewport.Width, Height = cell.Viewport.Height },
             DeviceScaleFactor = (float)cell.Viewport.DeviceScaleFactor,
@@ -179,11 +194,22 @@ public sealed class WorkbenchBrowser : IAsyncDisposable
 
         try
         {
+            if (emulation.Latency > TimeSpan.Zero)
+            {
+                // Routed first, so routes a ConfigurePageAsync adds take precedence and fall back to this one.
+                await context.RouteAsync("**/*", async route =>
+                {
+                    await Task.Delay(emulation.Latency).ConfigureAwait(false);
+                    await route.FallbackAsync().ConfigureAwait(false);
+                }).ConfigureAwait(false);
+            }
+
             if (options.Trace)
             {
                 await context.Tracing.StartAsync(new TracingStartOptions { Screenshots = true, Snapshots = true, Sources = false, Title = cell.ToString() }).ConfigureAwait(false);
             }
 
+            await context.AddInitScriptAsync(Scripts.VitalsObserver).ConfigureAwait(false);
             var page = await context.NewPageAsync().ConfigureAwait(false);
             var diagnostics = new DiagnosticsRecorder(page);
             if (options.ConfigurePageAsync is { } configurePage)
@@ -205,7 +231,14 @@ public sealed class WorkbenchBrowser : IAsyncDisposable
     {
         foreach (var browser in _browsers.Values)
         {
-            await browser.CloseAsync().ConfigureAwait(false);
+            try
+            {
+                await browser.CloseAsync().ConfigureAwait(false);
+            }
+            catch (PlaywrightException)
+            {
+                // Already crashed or closed; the remaining browsers and the driver still need to go.
+            }
         }
 
         _browsers.Clear();
@@ -387,13 +420,29 @@ public sealed class StoryPage : IAsyncDisposable
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        if (_tracing && !_traceStopped)
+        try
         {
-            _traceStopped = true;
-            await Context.Tracing.StopAsync().ConfigureAwait(false);
+            if (_tracing && !_traceStopped)
+            {
+                _traceStopped = true;
+                await Context.Tracing.StopAsync().ConfigureAwait(false);
+            }
         }
-
-        await Context.CloseAsync().ConfigureAwait(false);
+        catch (PlaywrightException)
+        {
+            // The browser or context is gone: there is no trace to stop, but the context must still be closed.
+        }
+        finally
+        {
+            try
+            {
+                await Context.CloseAsync().ConfigureAwait(false);
+            }
+            catch (PlaywrightException)
+            {
+                // Closed with its browser.
+            }
+        }
     }
 }
 

@@ -216,8 +216,15 @@ public static class AriaRoles
     }
 
     /// <summary>True when the element has a global ARIA attribute (forces presentational-role conflict resolution).</summary>
-    public static bool HasGlobalAriaAttribute(IElement element) =>
-        element.Attributes.Any(a => a.Name is "aria-label" or "aria-labelledby" or "aria-describedby" or "aria-live" or "aria-owns" or "aria-controls" or "aria-details" or "aria-keyshortcuts" or "aria-roledescription");
+    public static bool HasGlobalAriaAttribute(IElement element) => element.Attributes.Any(a => GlobalAttributes.Contains(a.Name));
+
+    /// <summary>The global states and properties of WAI-ARIA 1.2 (aria-disabled, aria-haspopup and aria-invalid included, as browsers treat them).</summary>
+    public static readonly IReadOnlySet<string> GlobalAttributes = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "aria-atomic", "aria-busy", "aria-controls", "aria-current", "aria-describedby", "aria-description", "aria-details", "aria-disabled",
+        "aria-dropeffect", "aria-errormessage", "aria-flowto", "aria-grabbed", "aria-haspopup", "aria-hidden", "aria-invalid", "aria-keyshortcuts",
+        "aria-label", "aria-labelledby", "aria-live", "aria-owns", "aria-relevant", "aria-roledescription",
+    };
 
     private static string InputRole(IElement element)
     {
@@ -225,6 +232,9 @@ public static class AriaRoles
         return type switch
         {
             "button" or "image" or "reset" or "submit" => "button",
+
+            // No ARIA mapping exists; browsers expose a file chooser as a button (Playwright's getByRole too).
+            "file" => "button",
             "checkbox" => "checkbox",
             "radio" => "radio",
             "range" => "slider",

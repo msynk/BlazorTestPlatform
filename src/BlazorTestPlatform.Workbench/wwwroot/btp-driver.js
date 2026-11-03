@@ -191,7 +191,10 @@ const VALID_ROLES = new Set([
 const ABSTRACT_ROLES = new Set(['command', 'composite', 'input', 'landmark', 'range', 'roletype', 'section', 'sectionhead', 'select', 'structure', 'widget', 'window']);
 const NAME_FROM_CONTENT = new Set(['button', 'cell', 'checkbox', 'columnheader', 'gridcell', 'heading', 'link', 'menuitem', 'menuitemcheckbox',
     'menuitemradio', 'option', 'radio', 'row', 'rowheader', 'switch', 'tab', 'tooltip', 'treeitem', 'caption']);
-const GLOBAL_ARIA = ['aria-label', 'aria-labelledby', 'aria-describedby', 'aria-live', 'aria-owns', 'aria-controls', 'aria-details', 'aria-keyshortcuts', 'aria-roledescription'];
+// The global states and properties of WAI-ARIA 1.2 (AriaRoles.GlobalAttributes).
+const GLOBAL_ARIA = ['aria-atomic', 'aria-busy', 'aria-controls', 'aria-current', 'aria-describedby', 'aria-description', 'aria-details', 'aria-disabled',
+    'aria-dropeffect', 'aria-errormessage', 'aria-flowto', 'aria-grabbed', 'aria-haspopup', 'aria-hidden', 'aria-invalid', 'aria-keyshortcuts',
+    'aria-label', 'aria-labelledby', 'aria-live', 'aria-owns', 'aria-relevant', 'aria-roledescription'];
 const SIMPLE_ROLES = {
     article: 'article', aside: 'complementary', blockquote: 'blockquote', button: 'button', caption: 'caption', code: 'code',
     datalist: 'listbox', dd: 'definition', del: 'deletion', details: 'group', dfn: 'term', dt: 'term', dialog: 'dialog',
@@ -223,6 +226,7 @@ function inputRole(e) {
     const type = (e.getAttribute('type') ?? 'text').trim().toLowerCase();
     switch (type) {
         case 'button': case 'image': case 'reset': case 'submit': return 'button';
+        case 'file': return 'button';
         case 'checkbox': return 'checkbox';
         case 'radio': return 'radio';
         case 'range': return 'slider';
@@ -258,13 +262,17 @@ function roleOf(e) {
 
 // ---- accessible names (AccessibleName) -----------------------------------------------------------------------------
 
+const isLabelable = e => ['button', 'meter', 'output', 'progress', 'select', 'textarea'].includes(e.localName)
+    || (e.localName === 'input' && (e.getAttribute('type') || '').toLowerCase() !== 'hidden');
+
 function labelsOf(e, root) {
     const labels = [];
     const id = e.getAttribute('id');
     if (id) labels.push(...Array.from(root.querySelectorAll('label')).filter(l => l.getAttribute('for') === id && inStory(l, root)));
     for (let parent = e.parentElement; parent; parent = parent.parentElement) {
         if (parent.localName === 'label' && !labels.includes(parent) && (!parent.hasAttribute('for') || parent.getAttribute('for') === id)) {
-            labels.push(parent);
+            // A label without "for" labels only its first labelable descendant.
+            if (parent.hasAttribute('for') || Array.from(parent.querySelectorAll('*')).find(isLabelable) === e) labels.push(parent);
             break;
         }
     }
@@ -318,35 +326,47 @@ function nativeName(e, root, visited) {
     }
 }
 
-const NAME_BLOCKS = new Set(['div', 'p', 'li', 'br', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+/** AccessibleName.NameBlocks: elements that are not inline by default; their text is set apart by spaces in names. */
+const NAME_BLOCKS = new Set(['address', 'article', 'aside', 'blockquote', 'br', 'caption', 'dd', 'details', 'dialog', 'div', 'dl', 'dt',
+    'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hgroup', 'hr', 'legend', 'li',
+    'main', 'nav', 'ol', 'p', 'pre', 'search', 'section', 'summary', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'ul']);
 
-function contentText(e, root, visited) {
+function contentText(e, root, visited, includeHidden) {
     let text = '';
     for (const child of e.childNodes) {
         if (child.nodeType === Node.TEXT_NODE) text += child.textContent;
-        else if (child.nodeType === Node.ELEMENT_NODE && !isExcluded(child)) {
+        else if (child.nodeType === Node.ELEMENT_NODE && (includeHidden || !isExcluded(child))) {
             const block = NAME_BLOCKS.has(child.localName);
-            const name = computeName(child, root, visited, false, true);
+            const name = computeName(child, root, visited, false, true, includeHidden);
             text += block ? ' ' + name + ' ' : name;
         }
     }
     return text;
 }
 
-function computeName(e, root, visited, inLabelledBy, inContent) {
+// 2B: the referencing element may name itself, so it leaves the visited set for this target while the rest of the
+// traversal stays in it (cycles still end); a hidden target contributes its hidden content too (2A). Same rules as
+// AccessibleName.Referenced.
+function referencedName(target, root, visited, referencer) {
+    const chain = new Set(visited);
+    chain.delete(referencer);
+    return computeName(target, root, chain, true, false, isExcluded(target));
+}
+
+function computeName(e, root, visited, inLabelledBy, inContent, includeHidden = false) {
     if (visited.has(e)) return '';
     visited.add(e);
-    if (!inLabelledBy && isExcluded(e)) return '';
+    if (!inLabelledBy && !includeHidden && isExcluded(e)) return '';
 
     // 2B: aria-labelledby (not followed recursively).
     if (!inLabelledBy) {
         const labelledBy = idRefs(root, e.getAttribute('aria-labelledby'));
-        if (labelledBy.length) return labelledBy.map(l => computeName(l, root, visited, true, false)).join(' ');
+        if (labelledBy.length) return labelledBy.map(l => referencedName(l, root, visited, e)).join(' ');
     }
 
     // 2C: a control embedded in a label contributes its value.
     const role = roleOf(e);
-    if (inContent && ['textbox', 'combobox', 'listbox', 'slider', 'spinbutton'].includes(role)) return controlValue(e);
+    if ((inContent || inLabelledBy) && ['textbox', 'combobox', 'listbox', 'slider', 'spinbutton'].includes(role)) return controlValue(e);
 
     // 2D: aria-label.
     const ariaLabel = e.getAttribute('aria-label');
@@ -360,12 +380,14 @@ function computeName(e, root, visited, inLabelledBy, inContent) {
 
     // 2F: name from content.
     if (inLabelledBy || inContent || (role && NAME_FROM_CONTENT.has(role)) || ['label', 'legend', 'caption', 'figcaption', 'summary'].includes(e.localName)) {
-        const content = contentText(e, root, visited);
+        const content = contentText(e, root, visited, includeHidden);
         if (!blank(content)) return content;
     }
 
     // 2I: tooltip attribute fallbacks.
-    return e.getAttribute('title') ?? (e.localName === 'input' || e.localName === 'textarea' ? e.getAttribute('placeholder') ?? '' : '');
+    // An empty title is no tooltip: the placeholder still names the field.
+    const title = e.getAttribute('title');
+    return !blank(title) ? title : (e.localName === 'input' || e.localName === 'textarea' ? e.getAttribute('placeholder') ?? '' : '');
 }
 
 function accessibleName(e, root) {
@@ -498,8 +520,14 @@ function setValue(e, value) {
 function commit(e) {
     if (e && e.__btpDirty) {
         e.__btpDirty = false;
-        e.__btpLastCommitted = e.value;
-        e.dispatchEvent(new Event('change', { bubbles: true }));
+        const before = e.__btpValueAtFocus;
+        e.__btpValueAtFocus = undefined;
+
+        // Like browsers: no change when the user put the original value back before leaving the field.
+        if (e.value !== before) {
+            e.__btpLastCommitted = e.value;
+            e.dispatchEvent(new Event('change', { bubbles: true }));
+        }
     }
 }
 
@@ -510,7 +538,8 @@ function edited(e) {
         changeOnBlur = true;
         document.addEventListener('focusout', ev => commit(ev.target), true);
     }
-    if (e.__btpValueAtFocus === undefined) e.__btpValueAtFocus = e.__btpLastCommitted ?? '';
+    // Called before each edit is applied, so the first call sees the value the field had when editing started.
+    if (e.__btpValueAtFocus === undefined) e.__btpValueAtFocus = e.value;
     e.__btpDirty = true;
 }
 
@@ -532,9 +561,14 @@ function tabOrder() {
     }).map(x => x.e);
 }
 
+// Where Tab continues from after a click on non-focusable content (the browser's sequential focus navigation start point).
+let navigationStart = null;
+
 function moveFocus(backwards) {
     const order = tabOrder();
-    const active = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
+    let active = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
+    if (!active && navigationStart && navigationStart.isConnected) active = navigationStart;
+    navigationStart = null;
     const index = active ? order.indexOf(active) : -1;
     let next;
     if (index < 0) {
@@ -581,6 +615,17 @@ function insertText(e, ch) {
     e.dispatchEvent(new InputEvent('input', { bubbles: true, data: ch, inputType: 'insertText' }));
 }
 
+/** Arrow keys in a radio group move to the next (or previous) enabled radio, focus and check it. */
+function moveInRadioGroup(radio, forward) {
+    if (!radio.name) return;
+    const group = Array.from(document.querySelectorAll('input[type=radio]'))
+        .filter(r => r.name === radio.name && r.form === radio.form && (r === radio || (!r.disabled && isVisible(r))));
+    if (group.length < 2) return;
+    const next = group[(group.indexOf(radio) + (forward ? 1 : -1) + group.length) % group.length];
+    next.focus();
+    next.click();
+}
+
 export function pressKey(k, mods) {
     const pressed = document.activeElement || document.body;
     const printable = (k.length === 1 || k === 'Space') && !(mods & (1 | 2 | 4));
@@ -588,12 +633,16 @@ export function pressKey(k, mods) {
 
     // A keydown handler that moves focus (roving tabindex, dialogs) redirects the rest of the key press.
     const target = document.activeElement || document.body;
-    if (printable) key(target, 'keypress', k, mods);
+    // Browsers fire the legacy keypress for character keys and for Enter.
+    if (printable || (k === 'Enter' && !(mods & (1 | 2 | 4)))) key(target, 'keypress', k, mods);
     if (notPrevented) {
         if (k === 'Tab') moveFocus(!!(mods & 8));
         else if (k === 'Enter') {
             if (isKeyboardClickable(target) || isLink(target)) target.click();
             else if (target.localName === 'input') submitImplicitly(target);
+            else if ((target.localName === 'textarea' || target.isContentEditable) && isEditable(target)) insertText(target, '\n');
+        } else if (['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(k) && target.localName === 'input' && target.type === 'radio') {
+            moveInRadioGroup(target, k === 'ArrowDown' || k === 'ArrowRight');
         } else if (isEditable(target) && printable) insertText(target, k === 'Space' ? ' ' : k);
         else if (isEditable(target) && k === 'Backspace' && (target.value || '').length > 0) {
             edited(target);
@@ -608,16 +657,20 @@ export function pressKey(k, mods) {
     if (notPrevented && space && document.activeElement === pressed && (isKeyboardClickable(pressed) || isCheckable(pressed))) pressed.click();
 }
 
+// MouseEvent.buttons for MouseEvent.button: primary 1, auxiliary (middle) 4, secondary (right) 2.
+const BUTTONS = { 0: 1, 1: 4, 2: 2 };
+
 function click(e, kind, mods, button) {
     e.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     mouse(e, 'pointerover', {}); mouse(e, 'mouseover', {});
     const clicks = kind === 'dblclick' ? 2 : 1;
     for (let i = 1; i <= clicks; i++) {
-        mouse(e, 'pointerdown', { button, buttons: 1, ...MODS(mods) });
-        mouse(e, 'mousedown', { button, buttons: 1, detail: i, ...MODS(mods) });
+        mouse(e, 'pointerdown', { button, buttons: BUTTONS[button] ?? 1, ...MODS(mods) });
+        mouse(e, 'mousedown', { button, buttons: BUTTONS[button] ?? 1, detail: i, ...MODS(mods) });
         let target = e;
         while (target && !isFocusable(target)) target = target.parentElement;
         if (target) target.focus(); else if (document.activeElement) { commit(document.activeElement); document.activeElement.blur(); }
+        navigationStart = target ? null : e;
         mouse(e, 'pointerup', { button, ...MODS(mods) });
         mouse(e, 'mouseup', { button, detail: i, ...MODS(mods) });
         if (button === 2) mouse(e, 'contextmenu', { button, detail: i, ...MODS(mods) });
@@ -743,14 +796,19 @@ export function perform(steps, action) {
             e.dispatchEvent(new Event('change', { bubbles: true }));
             return null;
         }
-        case 'pointerdown': mouse(e, 'pointerdown', { button, buttons: 1 }); mouse(e, 'mousedown', { button, buttons: 1 }); return null;
+        case 'pointerdown': mouse(e, 'pointerdown', { button, buttons: BUTTONS[button] ?? 1 }); mouse(e, 'mousedown', { button, buttons: BUTTONS[button] ?? 1 }); return null;
         case 'pointerup': mouse(e, 'pointerup', { button }); mouse(e, 'mouseup', { button }); return null;
         case 'drag': {
             const target = actionTarget(action.target, { kind: 'hover' });
             if (typeof target === 'string') return 'drop target: ' + target;
             const data = new DataTransfer();
             const drag = (el, type) => el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: data }));
-            drag(e, 'dragstart'); drag(target, 'dragenter'); drag(target, 'dragover'); drag(target, 'drop'); drag(e, 'dragend');
+            drag(e, 'dragstart'); drag(target, 'dragenter');
+
+            // A drop target must cancel dragover; otherwise the drag leaves it and nothing is dropped.
+            const accepted = !drag(target, 'dragover');
+            drag(target, accepted ? 'drop' : 'dragleave');
+            drag(e, 'dragend');
             return null;
         }
         case 'scroll': e.scrollIntoView({ block: 'center' }); return null;
@@ -771,16 +829,188 @@ export function settle() {
     return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))));
 }
 
+// ---- accessibility snapshot (AriaSnapshot) -------------------------------------------------------------------------
+
+const SNAPSHOT_SKIPPED = new Set(['script', 'style', 'template', 'head', 'noscript', 'meta', 'link', 'title']);
+const SNAPSHOT_FLATTENED = new Set(['generic', 'none', 'presentation']);
+
+function headingLevel(e) {
+    const level = /^\s*[+-]?\d+\s*$/.test(e.getAttribute('aria-level') ?? '') ? parseInt(e.getAttribute('aria-level'), 10) : NaN;
+    if (level >= 1) return level;
+    const match = /^h([1-6])$/.exec(e.localName);
+    return match ? Number(match[1]) : 2;
+}
+
+function snapshotLines(elements, root, depth, out) {
+    for (const e of elements) {
+        if (SNAPSHOT_SKIPPED.has(e.localName) || e.matches(OUTSIDE_STORY) || isExcluded(e)) continue;
+        const role = roleOf(e);
+        if (!role || SNAPSHOT_FLATTENED.has(role)) {
+            snapshotLines(e.children, root, depth, out);
+            continue;
+        }
+
+        let line = '  '.repeat(depth) + '- ' + role;
+        const name = accessibleName(e, root);
+        if (name) line += ' "' + name.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+        const states = [];
+        const checked = checkedState(e, role);
+        if (checked !== null) states.push(checked ? 'checked' : 'checked=false');
+        if (isDisabled(e)) states.push('disabled');
+        const expanded = (e.getAttribute('aria-expanded') ?? '').trim().toLowerCase();
+        if (expanded === 'true') states.push('expanded');
+        else if (expanded === 'false') states.push('expanded=false');
+        if (role === 'heading') states.push('level=' + headingLevel(e));
+        if (states.length) line += ' [' + states.join('] [') + ']';
+
+        const children = [];
+        snapshotLines(e.children, root, depth + 1, children);
+        out.push(children.length ? line + ':' : line, ...children);
+    }
+}
+
+/** AriaSnapshot.Of: the story's accessibility tree as text. */
+export function ariaSnapshot() {
+    const root = storyRoot();
+    if (!root) return '';
+    const out = [];
+    snapshotLines(root.children, root, 0, out);
+    return out.join('\n');
+}
+
+// ---- interaction recorder (workbench "Record") ---------------------------------------------------------------------
+// Turns what a person does in the story frame into play-function C#: the most readable locator that finds exactly the
+// element (role and name, test id, placeholder, then a CSS path), and the action the driver API offers for it.
+
+const csString = s => '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r/g, '\\r').replace(/\n/g, '\\n') + '"';
+const RECORDED_KEYS = new Set(['Enter', 'Escape', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', ' ', 'Backspace', 'Delete']);
+const FILLABLE = e => e.localName === 'textarea' || isTextInput(e) || isContentEditable(e);
+const TOGGLES = e => e.localName === 'input' && (e.type === 'checkbox' || e.type === 'radio');
+let recorder = null;
+
+function cssPath(e, root) {
+    const parts = [];
+    for (let current = e; current && current !== root; current = current.parentElement) {
+        const sameTag = Array.from(current.parentElement?.children ?? []).filter(c => c.localName === current.localName);
+        parts.unshift(sameTag.length > 1 ? `${current.localName}:nth-of-type(${sameTag.indexOf(current) + 1})` : current.localName);
+    }
+    return parts.join(' > ');
+}
+
+/** The most readable locator expression that resolves to exactly this element. */
+export function locatorFor(e) {
+    const root = storyRoot();
+    const unique = steps => {
+        const found = resolve(steps);
+        return found.length === 1 && found[0] === e;
+    };
+    const role = roleOf(e);
+    if (role && !SNAPSHOT_FLATTENED.has(role)) {
+        const name = accessibleName(e, root);
+        if (name && unique([{ kind: 'find', query: { type: 'role', role, name, exact: true } }])) return `ctx.GetByRole(${csString(role)}, ${csString(name)}, exact: true)`;
+        if (!name && unique([{ kind: 'find', query: { type: 'role', role } }])) return `ctx.GetByRole(${csString(role)})`;
+    }
+    const testId = e.getAttribute('data-testid');
+    if (testId && unique([{ kind: 'find', query: { type: 'testid', attribute: 'data-testid', value: testId } }])) return `ctx.GetByTestId(${csString(testId)})`;
+    const placeholder = e.getAttribute('placeholder');
+    if (placeholder && unique([{ kind: 'find', query: { type: 'placeholder', value: placeholder, exact: true } }])) return `ctx.GetByPlaceholder(${csString(placeholder)}, exact: true)`;
+    const path = cssPath(e, root);
+    const matches = resolve([{ kind: 'find', query: { type: 'css', selector: path } }]);
+    return matches.length === 1 ? `ctx.Locate(${csString(path)})` : `ctx.Locate(${csString(path)}).Nth(${matches.indexOf(e)})`;
+}
+
+function record(line) {
+    recorder.lines.push(line);
+}
+
+function flushFill() {
+    const pending = recorder.pendingFill;
+    recorder.pendingFill = null;
+    if (pending) record(`await ${pending.locator}.FillAsync(${csString(pending.element.isContentEditable ? pending.element.textContent : pending.element.value)});`);
+}
+
+function onInput(event) {
+    const e = event.target;
+    if (!event.isTrusted || !inStory(e, storyRoot()) || !FILLABLE(e)) return;
+    if (recorder.pendingFill && recorder.pendingFill.element !== e) flushFill();
+    recorder.pendingFill = { element: e, locator: recorder.pendingFill?.locator ?? locatorFor(e) };
+}
+
+function onChange(event) {
+    const e = event.target;
+    if (!event.isTrusted || !inStory(e, storyRoot())) return;
+    if (FILLABLE(e)) return flushFill();
+    flushFill();
+    if (TOGGLES(e)) record(`await ${locatorFor(e)}.${e.checked ? 'CheckAsync' : 'UncheckAsync'}();`);
+    else if (e.localName === 'select') record(`await ${locatorFor(e)}.SelectOptionAsync(${Array.from(e.selectedOptions).map(o => csString(o.value)).join(', ')});`);
+}
+
+function onClick(event) {
+    // Keyboard activation (Enter/Space) clicks with detail 0: the key press is recorded instead.
+    if (!event.isTrusted || event.detail === 0 || event.button !== 0) return;
+    const root = storyRoot();
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || !inStory(target, root)) return;
+    const control = target.closest('button, a[href], summary, select, textarea, input, label, [role], [tabindex]') ?? target;
+    if (!inStory(control, root) || TOGGLES(control) || FILLABLE(control) || control.localName === 'select' || control.localName === 'label') return;
+    flushFill();
+    record(`await ${locatorFor(control)}.ClickAsync();`);
+}
+
+function onKeyDown(event) {
+    if (!event.isTrusted || !RECORDED_KEYS.has(event.key)) return;
+    const e = event.target instanceof Element ? event.target : null;
+    const root = storyRoot();
+    if (e && TOGGLES(e) && event.key === ' ') return; // the change is recorded
+    flushFill();
+    const chord = [event.ctrlKey && 'Control', event.altKey && 'Alt', event.shiftKey && 'Shift', event.metaKey && 'Meta', event.key === ' ' ? 'Space' : event.key].filter(Boolean).join('+');
+    record(e && e !== document.body && inStory(e, root) ? `await ${locatorFor(e)}.PressAsync(${csString(chord)});` : `await ctx.PressAsync(${csString(chord)});`);
+}
+
+const RECORDER_EVENTS = { input: onInput, change: onChange, click: onClick, keydown: onKeyDown };
+
+/** Starts recording trusted user interactions in the story (restarts an earlier recording). */
+export function startRecording() {
+    stopRecording();
+    recorder = { lines: [], pendingFill: null };
+    for (const [type, handler] of Object.entries(RECORDER_EVENTS)) document.addEventListener(type, handler, true);
+    return true;
+}
+
+/** Stops recording; the lines stay readable. */
+export function stopRecording() {
+    if (!recorder) return false;
+    flushFill();
+    for (const [type, handler] of Object.entries(RECORDER_EVENTS)) document.removeEventListener(type, handler, true);
+    recorder.stopped = true;
+    return true;
+}
+
+/** The recorded play-function lines (a typed value counts once typing stops), as JSON. */
+export function recording() {
+    if (!recorder) return JSON.stringify({ recording: false, lines: [] });
+    const pending = recorder.pendingFill;
+    const lines = [...recorder.lines];
+    if (pending) lines.push(`await ${pending.locator}.FillAsync(${csString(pending.element.isContentEditable ? pending.element.textContent : pending.element.value)});`);
+    return JSON.stringify({ recording: !recorder.stopped, lines });
+}
+
 export function markup() {
     const root = document.querySelector(ROOT);
-    return root ? root.innerHTML : '';
+    if (!root) return '';
+
+    // Rejected arg overrides are listed inside the root by the workbench; they are not part of the story.
+    const copy = root.cloneNode(true);
+    copy.querySelectorAll('[data-btp-arg-errors]').forEach(e => e.remove());
+    return copy.innerHTML;
 }
 
 export function publishResult(storyId, result) {
     const root = document.querySelector(ROOT);
     if (root) root.setAttribute('data-btp-play-status', result.status);
     window.__btpPlayResult = result;
-    if (window.parent && window.parent !== window) window.parent.postMessage({ source: 'btp', type: 'play-result', storyId, ...result }, '*');
+    // Only the workbench shell, served from this origin, may read results (they quote the story's markup).
+    if (window.parent && window.parent !== window) window.parent.postMessage({ source: 'btp', type: 'play-result', storyId, ...result }, window.location.origin);
 }
 
 // JSON entry points (the .NET side passes and receives strings, which keeps interop trimming-safe).

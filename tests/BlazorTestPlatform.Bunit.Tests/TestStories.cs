@@ -47,6 +47,13 @@ public sealed class CounterStories : Stories<Counter>
             ctx.Require(DriverCapabilities.Layout, "measuring the button");
             return Task.CompletedTask;
         }));
+        stories.Add("Declares layout", s => s
+            .Requires(DriverCapabilities.Layout, "measuring the popover position")
+            .Play(_ => throw new InvalidOperationException("A driver without layout must not run this play function.")));
+        stories.Add("Declares fake time", s => s
+            .UseFakeTime(new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero))
+            .Requires(DriverCapabilities.FakeTime, "advancing the clock")
+            .Play(ctx => ctx.AdvanceTimeAsync(TimeSpan.FromSeconds(1))));
     }
 }
 
@@ -159,4 +166,32 @@ public sealed class FocusEventsStories : Stories<FocusEvents>
     public override string Title => "Tests/Focus events";
 
     protected override void Define(StoryCollectionBuilder<FocusEvents> stories) => stories.Add("Default");
+}
+
+public sealed class UnboundInputsStories : Stories<UnboundInputs>
+{
+    public override string Title => "Tests/Unbound inputs";
+
+    protected override void Define(StoryCollectionBuilder<UnboundInputs> stories) => stories.Add("Default");
+}
+
+public sealed class CrashesLaterStories : Stories<CrashesLater>
+{
+    public override string Title => "Tests/Crashes later";
+
+    protected override void Define(StoryCollectionBuilder<CrashesLater> stories) => stories.Add("Failing after await");
+}
+
+public sealed class EmulationExtrasStories : Stories<EmulationExtras>
+{
+    public override string Title => "Tests/Emulation extras";
+
+    protected override void Define(StoryCollectionBuilder<EmulationExtras> stories) => stories.Add("Default", s => s.Accessibility(a => a.Skip = true));
+}
+
+public sealed class InsertsBeforeFocusStories : Stories<InsertsBeforeFocus>
+{
+    public override string Title => "Tests/Inserts before focus";
+
+    protected override void Define(StoryCollectionBuilder<InsertsBeforeFocus> stories) => stories.Add("Default");
 }

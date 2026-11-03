@@ -36,6 +36,24 @@ public sealed class WorkbenchOptions
     public string? ReviewsDirectory { get; set; }
 
     /// <summary>
+    /// Whether the workbench pages (<c>/_workbench</c> and its story frames) respond. Null (the default) enables them
+    /// everywhere except in a host whose environment is <c>Production</c>, unless <c>BTP_WORKBENCH_ENABLED</c> says
+    /// otherwise. Story frames run play scripts, sign fake users in and replace services, so a production deployment
+    /// must opt in explicitly (<c>Enabled = true</c>), preferably together with <see cref="AuthorizationPolicy"/>.
+    /// Disabled pages answer 404.
+    /// </summary>
+    public bool? Enabled { get; set; }
+
+    /// <summary>
+    /// Authorization policy a user must satisfy to open workbench pages (evaluated on the server against the request's
+    /// user). Null: no authorization. Users that fail it get 404.
+    /// </summary>
+    public string? AuthorizationPolicy { get; set; }
+
+    /// <summary>Whether the pages respond in this host: <see cref="Enabled"/> resolved by <c>AddBlazorTestWorkbench</c>.</summary>
+    public bool IsEnabled { get; internal set; } = true;
+
+    /// <summary>
     /// Service types that stories register but that cannot apply per story in browsers, because the application consumes
     /// them once at start-up (hosted services, logger providers, startup filters, circuit handlers, HTTP handler-builder
     /// filters) or because the application registers no <c>IJSRuntime</c> to decorate. Populated by
@@ -43,7 +61,12 @@ public sealed class WorkbenchOptions
     /// </summary>
     public HashSet<Type> UnwrappableOverrides { get; } = [];
 
-    /// <summary>The service types <paramref name="story"/> registers that do not apply in browsers (see <see cref="UnwrappableOverrides"/>).</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyList<Type>> _unsupportedByStory = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The service types <paramref name="story"/> registers that do not apply in browsers (see <see cref="UnwrappableOverrides"/>).
+    /// Computed once per story: probing runs the story's service configuration.
+    /// </summary>
     public IReadOnlyList<Type> UnsupportedOverridesOf(Story story)
     {
         ArgumentNullException.ThrowIfNull(story);
@@ -52,20 +75,49 @@ public sealed class WorkbenchOptions
             return [];
         }
 
-        var found = new List<Type>();
-        if (story.JSInterop is not null && UnwrappableOverrides.Contains(typeof(Microsoft.JSInterop.IJSRuntime)))
+        return _unsupportedByStory.GetOrAdd(story.Id, _ =>
         {
-            found.Add(typeof(Microsoft.JSInterop.IJSRuntime));
+            var found = new List<Type>();
+            if (story.JSInterop is not null && UnwrappableOverrides.Contains(typeof(Microsoft.JSInterop.IJSRuntime)))
+            {
+                found.Add(typeof(Microsoft.JSInterop.IJSRuntime));
+            }
+
+            if (story.HasServiceOverrides)
+            {
+                foreach (var hostingModel in Microsoft.Extensions.DependencyInjection.WorkbenchServiceCollectionExtensions.ProbedHostingModels)
+                {
+                    var probe = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+                    story.ConfigureServices(probe, new FixtureContext(story, hostingModel));
+                    found.AddRange(probe.Select(d => d.ServiceType).Where(UnwrappableOverrides.Contains));
+                }
+            }
+
+            return found.Distinct().ToArray();
+        });
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime Stamp, BlazorTestPlatform.Accessibility.ComponentReview? Review)> _reviews = new(StringComparer.Ordinal);
+
+    /// <summary>The committed manual review of a component, re-read only when its file changes (server only).</summary>
+    internal BlazorTestPlatform.Accessibility.ComponentReview? LoadReview(string component)
+    {
+        if (ReviewsDirectory is null || OperatingSystem.IsBrowser())
+        {
+            return null;
         }
 
-        if (story.HasServiceOverrides)
+        var store = new BlazorTestPlatform.Accessibility.ManualReviewStore(ReviewsDirectory);
+        var path = store.PathFor(component);
+        var stamp = File.Exists(path) ? File.GetLastWriteTimeUtc(path) : DateTime.MinValue;
+        if (_reviews.TryGetValue(path, out var cached) && cached.Stamp == stamp)
         {
-            var probe = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-            story.ConfigureServices(probe, new FixtureContext(story, HostingModel.InteractiveServer));
-            found.AddRange(probe.Select(d => d.ServiceType).Where(UnwrappableOverrides.Contains).Distinct());
+            return cached.Review;
         }
 
-        return found;
+        var review = stamp == DateTime.MinValue ? null : store.Load(component);
+        _reviews[path] = (stamp, review);
+        return review;
     }
 
     /// <summary>Adds the assembly declaring <typeparamref name="T"/>.</summary>

@@ -26,8 +26,16 @@ public static class SnapshotNaming
 /// </summary>
 public sealed class SnapshotStore
 {
-    private readonly Lock _gate = new();
+    // One lock per baseline directory, shared by every store instance in the process: runners, tests and the CLI can
+    // each create their own store for the same directory.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lock> Gates = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly Lock _gate;
     private BaselineManifest? _manifest;
+
+    // The last baseline write per path, with what was there before it (null: nothing), so a run that fails afterwards
+    // can undo it.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte[]?> _written = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Creates a store.</summary>
     public SnapshotStore(string baselineDirectory, string outputDirectory, SnapshotUpdateMode updateMode)
@@ -37,6 +45,7 @@ public sealed class SnapshotStore
         BaselineDirectory = Path.GetFullPath(baselineDirectory);
         OutputDirectory = Path.GetFullPath(outputDirectory);
         UpdateMode = updateMode;
+        _gate = Gates.GetOrAdd(BaselineDirectory, _ => new Lock());
     }
 
     /// <summary>Creates a store from settings.</summary>
@@ -68,13 +77,28 @@ public sealed class SnapshotStore
     /// The renderer that took the screenshot. When given, <see cref="BaselineManifest"/> records it for new or revalidated
     /// baselines, and mismatches against baselines from another renderer carry a <see cref="VisualResult.Note"/>.
     /// </param>
-    public VisualResult Compare(string snapshotName, byte[] actualPng, ImageCompareOptions? options = null, int maxDiffPixels = 0, double maxDiffRatio = 0, RenderEnvironment? environment = null)
+    public VisualResult Compare(string snapshotName, byte[] actualPng, ImageCompareOptions? options = null, int maxDiffPixels = 0, double maxDiffRatio = 0, RenderEnvironment? environment = null) =>
+        Compare(snapshotName, actualPng, options, maxDiffPixels, maxDiffRatio, environment, outputQualifier: null);
+
+    /// <summary>Compares a PNG screenshot with its baseline, keeping the evidence of each run separate.</summary>
+    /// <param name="snapshotName">Snapshot name (see <see cref="SnapshotNaming"/>).</param>
+    /// <param name="actualPng">The captured PNG.</param>
+    /// <param name="options">Comparison options.</param>
+    /// <param name="maxDiffPixels">Tolerated differing pixels.</param>
+    /// <param name="maxDiffRatio">Tolerated differing ratio.</param>
+    /// <param name="environment">The renderer that took the screenshot (see the other overload).</param>
+    /// <param name="outputQualifier">
+    /// Distinguishes runs that share a baseline (for example <c>wasm.attempt-1</c>): their actual, expected and diff images
+    /// get separate names, so a later matching render mode or a passing retry never deletes the evidence of an earlier
+    /// mismatch. Null keeps one set of outputs per snapshot.
+    /// </param>
+    public VisualResult Compare(string snapshotName, byte[] actualPng, ImageCompareOptions? options, int maxDiffPixels, double maxDiffRatio, RenderEnvironment? environment, string? outputQualifier)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(snapshotName);
         ArgumentNullException.ThrowIfNull(actualPng);
         var baselinePath = BaselinePathFor(snapshotName);
         var actual = RgbaImage.FromPng(actualPng);
-        var output = Path.Combine(OutputDirectory, Normalize(snapshotName));
+        var output = Path.Combine(OutputDirectory, Normalize(snapshotName)) + (string.IsNullOrWhiteSpace(outputQualifier) ? string.Empty : "." + StoryId.Slugify(outputQualifier));
         var result = Compare(snapshotName, actualPng, actual, baselinePath, output, options, maxDiffPixels, maxDiffRatio, environment);
         return environment is null ? result : result with { RendererKey = environment.Key, PlaywrightVersion = environment.Playwright, BrowserVersion = environment.BrowserVersion };
     }
@@ -91,6 +115,7 @@ public sealed class SnapshotStore
                     return Result(snapshotName, VisualStatus.MissingBaseline, baselinePath, actual, actualPath: actualPath);
                 }
 
+                _written[baselinePath] = null;
                 WriteFile(baselinePath, actualPng);
                 Record(environment, revalidated: false);
                 return Result(snapshotName, VisualStatus.NewBaseline, baselinePath, actual);
@@ -111,6 +136,7 @@ public sealed class SnapshotStore
 
             if (UpdateMode == SnapshotUpdateMode.All || (UpdateMode == SnapshotUpdateMode.Changed && !withinTolerance))
             {
+                _written[baselinePath] = baselineBytes;
                 WriteFile(baselinePath, actualPng);
                 CleanOutputs(output);
                 Record(environment, revalidated: true);
@@ -138,6 +164,39 @@ public sealed class SnapshotStore
         }
     }
 
+    /// <summary>
+    /// Undoes the baseline this store wrote for <paramref name="result"/> (a new or updated baseline): the run that
+    /// produced it failed another check (accessibility, console errors...), so its screenshot must not become the
+    /// reference. Returns true when something was undone.
+    /// </summary>
+    public bool Revert(VisualResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (result.Status is not (VisualStatus.NewBaseline or VisualStatus.Updated) || result.BaselinePath is null)
+        {
+            return false;
+        }
+
+        lock (_gate)
+        {
+            if (!_written.TryRemove(result.BaselinePath, out var previous))
+            {
+                return false;
+            }
+
+            if (previous is null)
+            {
+                File.Delete(result.BaselinePath);
+            }
+            else
+            {
+                WriteFile(result.BaselinePath, previous);
+            }
+
+            return true;
+        }
+    }
+
     /// <summary>The renderer recorded for <paramref name="key"/> (<c>{browser}-{platform}</c>), or null.</summary>
     public RenderEnvironment? RecordedRenderer(string key)
     {
@@ -153,14 +212,16 @@ public sealed class SnapshotStore
     // empty slot, so adding one new story after an upgrade does not hide that the other baselines are older.
     private void Record(RenderEnvironment? environment, bool revalidated)
     {
-        if (environment is null || UpdateMode == SnapshotUpdateMode.None || (!revalidated && Manifest.Get(environment.Key) is not null))
+        if (environment is null || UpdateMode == SnapshotUpdateMode.None)
         {
             return;
         }
 
-        if (Manifest.Set(environment))
+        // Re-read under the directory lock: another store instance may have recorded a renderer since this one loaded.
+        var manifest = _manifest = BaselineManifest.Load(BaselineDirectory);
+        if ((revalidated || manifest.Get(environment.Key) is null) && manifest.Set(environment))
         {
-            Manifest.Save(BaselineDirectory);
+            manifest.Save(BaselineDirectory);
         }
     }
 
@@ -188,8 +249,63 @@ public sealed class SnapshotStore
             throw new InvalidOperationException($"Snapshot '{result.SnapshotName}' has no actual image to approve.");
         }
 
-        Directory.CreateDirectory(Path.GetDirectoryName(result.BaselinePath)!);
-        File.Copy(result.ActualPath, result.BaselinePath, overwrite: true);
+        Promote(result, result.ActualPath, result.BaselinePath);
+    }
+
+    /// <summary>
+    /// Accepts an actual image as the new baseline, trusting nothing in <paramref name="result"/> but the snapshot name:
+    /// the baseline is written to <c>{baselineDirectory}/{snapshot}.png</c>, and the actual image must be a PNG inside
+    /// <paramref name="resultsDirectory"/>. Results copied from another machine (a CI artifact) work: when the recorded
+    /// actual path does not exist, the image is looked up in <c>{resultsDirectory}/visual</c>. Used by <c>btp approve</c>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No actual image inside the results directory, or it is not a PNG.</exception>
+    public static void Approve(VisualResult result, string baselineDirectory, string resultsDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baselineDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(resultsDirectory);
+        var results = Path.GetFullPath(resultsDirectory);
+        var baseline = Path.Combine(Path.GetFullPath(baselineDirectory), Normalize(result.SnapshotName) + ".png");
+
+        string? actual = null;
+        if (result.ActualPath is { } recorded)
+        {
+            var candidates = new[]
+            {
+                Path.GetFullPath(recorded),
+                Path.Combine(results, "visual", Path.GetDirectoryName(Normalize(result.SnapshotName)) ?? string.Empty, Path.GetFileName(recorded.Replace('\\', '/'))),
+            };
+            actual = candidates.FirstOrDefault(c => IsInside(c, results) && File.Exists(c));
+        }
+
+        if (actual is null)
+        {
+            throw new InvalidOperationException($"Snapshot '{result.SnapshotName}' has no actual image inside '{results}' to approve.");
+        }
+
+        try
+        {
+            _ = PngCodec.Decode(File.ReadAllBytes(actual));
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new InvalidOperationException($"'{actual}' is not a valid PNG image: {ex.Message}", ex);
+        }
+
+        Promote(result, actual, baseline);
+    }
+
+    private static bool IsInside(string path, string directory)
+    {
+        var full = Path.GetFullPath(path);
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory)) + Path.DirectorySeparatorChar;
+        return full.StartsWith(root, OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+    }
+
+    private static void Promote(VisualResult result, string actualPath, string baselinePath)
+    {
+        WriteFile(baselinePath, File.ReadAllBytes(actualPath));
+        result = result with { BaselinePath = baselinePath };
 
         var relative = Normalize(result.SnapshotName) + ".png";
         if (result is not { RendererKey: { } key, PlaywrightVersion: { } playwright } || key.LastIndexOf('-') is not (> 0 and var dash)
@@ -228,10 +344,13 @@ public sealed class SnapshotStore
             Height = actual.Height,
         };
 
+    /// <summary>Writes through a temporary file, so a crash never leaves a truncated baseline or output.</summary>
     private static string WriteFile(string path, byte[] bytes)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllBytes(path, bytes);
+        var temp = $"{path}.{Environment.ProcessId}.{Environment.CurrentManagedThreadId}.tmp";
+        File.WriteAllBytes(temp, bytes);
+        File.Move(temp, path, overwrite: true);
         return path;
     }
 
@@ -247,5 +366,15 @@ public sealed class SnapshotStore
         }
     }
 
-    private static string Normalize(string name) => name.Replace('\\', '/').Trim('/').Replace('/', Path.DirectorySeparatorChar);
+    /// <summary>The relative path of a snapshot name. Rejects rooted names and <c>.</c>/<c>..</c> segments.</summary>
+    private static string Normalize(string name)
+    {
+        var segments = name.Replace('\\', '/').Trim('/').Split('/');
+        if (segments.Any(s => s.Length == 0 || s is "." or ".." || s.Contains(':', StringComparison.Ordinal)))
+        {
+            throw new ArgumentException($"Invalid snapshot name '{name}': it must be a relative path without '.', '..', ':' or empty segments.", nameof(name));
+        }
+
+        return string.Join(Path.DirectorySeparatorChar, segments);
+    }
 }

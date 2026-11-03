@@ -113,12 +113,92 @@ public sealed class PngCodecTests
         stream.Write(length);
         stream.Write(Encoding.ASCII.GetBytes(type));
         stream.Write(data);
-        stream.Write(new byte[4]); // CRC is not validated by the decoder.
+        var crc = new byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(crc, Crc32([.. Encoding.ASCII.GetBytes(type), .. data]));
+        stream.Write(crc);
+    }
+
+    internal static uint Crc32(ReadOnlySpan<byte> bytes)
+    {
+        var crc = 0xFFFFFFFFu;
+        foreach (var b in bytes)
+        {
+            crc ^= b;
+            for (var k = 0; k < 8; k++)
+            {
+                crc = (crc & 1) != 0 ? 0xEDB88320u ^ (crc >> 1) : crc >> 1;
+            }
+        }
+
+        return crc ^ 0xFFFFFFFFu;
+    }
+
+    [Fact]
+    public void Corrupt_chunks_are_rejected_by_their_crc()
+    {
+        var png = RawPng(2, 1, 8, colorType: 0, rows: [[0, 0, 255]]);
+        png[^20] ^= 0xFF; // inside the IDAT payload
+
+        var error = Assert.Throws<InvalidDataException>(() => PngCodec.Decode(png));
+        Assert.Contains("CRC", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0, 3)] // 3-bit gray does not exist
+    [InlineData(2, 4)] // RGB needs 8 or 16 bits
+    [InlineData(3, 16)] // palettes stop at 8 bits
+    public void Invalid_bit_depth_and_color_type_combinations_are_rejected(byte colorType, byte bitDepth) =>
+        Assert.Throws<InvalidDataException>(() => PngCodec.Decode(RawPng(1, 1, bitDepth, colorType, rows: [[0, 0, 0, 0, 0, 0, 0]], palette: [0, 0, 0])));
+
+    [Fact]
+    public void Huge_dimensions_are_rejected_before_allocating()
+    {
+        var error = Assert.Throws<InvalidDataException>(() => PngCodec.Decode(RawPng(100_000, 100_000, 8, colorType: 6, rows: [[0]])));
+        Assert.Contains("larger than", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Truncated_image_data_is_reported()
+    {
+        var error = Assert.Throws<InvalidDataException>(() => PngCodec.Decode(RawPng(4, 4, 8, colorType: 6, rows: [[0, 1, 2, 3]])));
+        Assert.Contains("truncated", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Decompression_bombs_inflate_only_what_the_header_announces()
+    {
+        // 1x1 gray image whose IDAT inflates to 64 MiB of zeros: only the 2 announced bytes are read.
+        var rows = Enumerable.Repeat(new byte[1 << 20], 64).ToArray();
+        var image = PngCodec.Decode(RawPng(1, 1, 8, colorType: 0, rows: rows));
+
+        Assert.Equal((1, 1), (image.Width, image.Height));
+    }
+
+    [Fact]
+    public void Short_headers_are_rejected()
+    {
+        using var png = new MemoryStream();
+        png.Write([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        Chunk(png, "IHDR", new byte[5]);
+        Chunk(png, "IEND", []);
+
+        Assert.Throws<InvalidDataException>(() => PngCodec.Decode(png.ToArray()));
     }
 }
 
 public sealed class ImageComparerTests
 {
+    [Fact]
+    public void Alpha_only_changes_are_differences()
+    {
+        var transparent = new RgbaImage(4, 4);
+        var white = new RgbaImage(4, 4);
+        white.FillRectangle(new PixelRectangle(0, 0, 4, 4), 255, 255, 255);
+
+        Assert.Equal(16, ImageComparer.Compare(white, transparent).DiffPixels);
+        Assert.Equal(0, ImageComparer.Compare(transparent, new RgbaImage(4, 4)).DiffPixels);
+    }
+
     private static RgbaImage Solid(int width, int height, byte r, byte g, byte b)
     {
         var image = new RgbaImage(width, height);
@@ -310,4 +390,110 @@ public sealed class SnapshotStoreTests
     [Fact]
     public void Snapshot_names_exclude_the_hosting_model() =>
         Assert.Equal("inputs-button--primary/desktop.dark.chromium-linux.initial", SnapshotNaming.For("inputs-button--primary", "desktop", "dark", "chromium", "linux", "Initial"));
+
+    [Fact]
+    public void A_later_matching_render_mode_keeps_the_evidence_of_an_earlier_mismatch()
+    {
+        var (store, _) = NewStore(SnapshotUpdateMode.Missing);
+        store.Compare("story/desktop", Png(10));
+
+        var wasm = store.Compare("story/desktop", Png(250), null, 0, 0, null, outputQualifier: "wasm.attempt-1");
+        var server = store.Compare("story/desktop", Png(10), null, 0, 0, null, outputQualifier: "server.attempt-1");
+        var retry = store.Compare("story/desktop", Png(10), null, 0, 0, null, outputQualifier: "wasm.attempt-2");
+
+        Assert.Equal(VisualStatus.Mismatched, wasm.Status);
+        Assert.Equal(VisualStatus.Matched, server.Status);
+        Assert.Equal(VisualStatus.Matched, retry.Status);
+        Assert.True(File.Exists(wasm.ActualPath));
+        Assert.True(File.Exists(wasm.DiffPath));
+        Assert.Contains("wasm-attempt-1", wasm.ActualPath, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("../outside")]
+    [InlineData("story/../../outside")]
+    [InlineData("C:/windows/x")]
+    [InlineData("a//b")]
+    public void Snapshot_names_cannot_leave_the_baseline_directory(string name)
+    {
+        var (store, _) = NewStore(SnapshotUpdateMode.Missing);
+
+        Assert.Throws<ArgumentException>(() => store.Compare(name, Png(10)));
+    }
+
+    [Fact]
+    public void Approval_writes_only_into_the_baseline_directory_from_the_results_directory()
+    {
+        var (store, root) = NewStore(SnapshotUpdateMode.None);
+        var baselines = Path.Combine(root, "baselines");
+        var results = Path.Combine(root, "results");
+        var ci = new SnapshotStore(baselines, Path.Combine(results, "visual"), SnapshotUpdateMode.None);
+        var missing = ci.Compare("story/desktop", Png(10));
+
+        // A tampered result names a baseline outside the project: the snapshot name decides where it goes.
+        var tampered = missing with { BaselinePath = Path.Combine(root, "evil.png") };
+        SnapshotStore.Approve(tampered, baselines, results);
+
+        Assert.False(File.Exists(Path.Combine(root, "evil.png")));
+        Assert.Equal(VisualStatus.Matched, store.Compare("story/desktop", Png(10)).Status);
+    }
+
+    [Fact]
+    public void Approval_refuses_images_outside_the_results_directory()
+    {
+        var (_, root) = NewStore(SnapshotUpdateMode.None);
+        var secret = Path.Combine(root, "secret.png");
+        Directory.CreateDirectory(root);
+        File.WriteAllBytes(secret, Png(1));
+        var result = new BlazorTestPlatform.Results.VisualResult { SnapshotName = "story/desktop", Status = BlazorTestPlatform.Results.VisualStatus.MissingBaseline, ActualPath = secret };
+
+        Assert.Throws<InvalidOperationException>(() => SnapshotStore.Approve(result, Path.Combine(root, "baselines"), Path.Combine(root, "results")));
+        Assert.False(Directory.Exists(Path.Combine(root, "baselines")));
+    }
+
+    [Fact]
+    public void Approval_finds_actual_images_of_results_copied_from_another_machine()
+    {
+        var (_, root) = NewStore(SnapshotUpdateMode.None);
+        var results = Path.Combine(root, "downloaded");
+        var ci = new SnapshotStore(Path.Combine(root, "ci-baselines"), Path.Combine(results, "visual"), SnapshotUpdateMode.None);
+        var missing = ci.Compare("story/desktop", Png(10), null, 0, 0, null, outputQualifier: "server.attempt-1");
+
+        // The results JSON records the CI machine's absolute path.
+        var fromCi = missing with { ActualPath = "/__w/app/TestResults/btp/visual/story/" + Path.GetFileName(missing.ActualPath) };
+        SnapshotStore.Approve(fromCi, Path.Combine(root, "baselines"), results);
+
+        Assert.True(File.Exists(Path.Combine(root, "baselines", "story", "desktop.png")));
+    }
+
+    [Fact]
+    public void Baselines_written_by_a_failed_run_are_reverted()
+    {
+        var (missing, root) = NewStore(SnapshotUpdateMode.Missing);
+        var created = missing.Compare("story/new", Png(10));
+        Assert.Equal(VisualStatus.NewBaseline, created.Status);
+
+        Assert.True(missing.Revert(created));
+        Assert.False(File.Exists(created.BaselinePath));
+        Assert.False(missing.Revert(created));
+
+        var changed = new SnapshotStore(Path.Combine(root, "baselines"), Path.Combine(root, "out"), SnapshotUpdateMode.Changed);
+        changed.Compare("story/kept", Png(10));
+        var original = File.ReadAllBytes(Path.Combine(root, "baselines", "story", "kept.png"));
+        var updated = changed.Compare("story/kept", Png(250));
+        Assert.Equal(VisualStatus.Updated, updated.Status);
+
+        Assert.True(changed.Revert(updated));
+        Assert.Equal(original, File.ReadAllBytes(updated.BaselinePath!));
+    }
+
+    [Fact]
+    public void Writes_leave_no_temporary_files()
+    {
+        var (store, root) = NewStore(SnapshotUpdateMode.Missing);
+        store.Compare("story/desktop", Png(10));
+        store.Compare("story/desktop", Png(250));
+
+        Assert.Empty(Directory.GetFiles(root, "*.tmp", SearchOption.AllDirectories));
+    }
 }

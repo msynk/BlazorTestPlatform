@@ -65,6 +65,25 @@ public sealed class JSInteropMocks
         return this;
     }
 
+    /// <summary>
+    /// Mocks a JavaScript property read (<c>JS.GetValueAsync&lt;T&gt;(identifier)</c>), recorded as <c>get identifier</c>.
+    /// </summary>
+    public JSInteropMocks SetupGet<TResult>(string identifier, TResult value)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(identifier);
+        return Setup("get " + identifier, value);
+    }
+
+    /// <summary>
+    /// Mocks a JavaScript property write (<c>JS.SetValueAsync(identifier, value)</c>), for any value or only the given
+    /// one. Recorded as <c>set identifier</c>.
+    /// </summary>
+    public JSInteropMocks SetupSet(string identifier, params object?[] value)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(identifier);
+        return SetupVoid("set " + identifier, value);
+    }
+
     /// <summary>Configures calls on a JavaScript module imported by the component.</summary>
     public JSInteropMocks Module(string moduleName, Action<JSInteropMocks> configure)
     {
@@ -72,7 +91,7 @@ public sealed class JSInteropMocks
         ArgumentNullException.ThrowIfNull(configure);
         var module = new JSInteropMocks();
         configure(module);
-        _modules.Add((moduleName, module));
+        AddModule(moduleName, module);
         return this;
     }
 
@@ -121,7 +140,30 @@ public sealed class JSInteropMocks
         Strict |= other.Strict;
         InBrowsers |= other.InBrowsers;
         _mocks.AddRange(other._mocks);
-        _modules.AddRange(other._modules);
+        foreach (var (name, module) in other._modules)
+        {
+            AddModule(name, module);
+        }
+    }
+
+    /// <summary>
+    /// Setups for a module accumulate like global ones: collection defaults and the story can both configure
+    /// <c>./chart.js</c>, and later setups win for the same identifier. Copies are kept, so merging never changes
+    /// another story's mocks.
+    /// </summary>
+    private void AddModule(string moduleName, JSInteropMocks module)
+    {
+        var index = _modules.FindIndex(m => string.Equals(m.Module, moduleName, StringComparison.Ordinal));
+        if (index < 0)
+        {
+            var copy = new JSInteropMocks();
+            copy.MergeFrom(module);
+            _modules.Add((moduleName, copy));
+        }
+        else
+        {
+            _modules[index].Mocks.MergeFrom(module);
+        }
     }
 }
 

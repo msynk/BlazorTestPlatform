@@ -1,0 +1,14 @@
+@* Clicking "Reveal" inserts content before the focused button: focus must stay on it, as in a browser. *@
+<div>
+    @if (shown)
+    {
+        <p>Inserted above</p>
+        <button type="button">Inserted button</button>
+    }
+    <button type="button" @onclick="() => shown = true">Reveal</button>
+    <button type="button">Next</button>
+</div>
+
+@code {
+    private bool shown;
+}

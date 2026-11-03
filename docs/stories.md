@@ -95,6 +95,20 @@ stories.AddVariants(v => v
 
 This adds six stories, named like `Variant=Primary, Size=Small`.
 
+**Pairwise variants.** Every combination grows fast: four parameters with four values each are 256 stories. Most rendering and interaction defects involve one or two parameters, so covering every *pair* of values keeps most of the value at a fraction of the cost:
+
+```csharp
+stories.AddVariants(v => v
+    .Vary(c => c.Size, Size.Small, Size.Medium, Size.Large)
+    .Vary(c => c.Tone, Tone.Neutral, Tone.Danger, Tone.Success)
+    .Vary(c => c.Disabled, false, true)
+    .Vary(c => c.Dense, false, true)
+    .Where(c => !(c.Get(x => x.Tone) == Tone.Danger && c.Get(x => x.Disabled)))   // combinations the component does not support
+    .Pairwise());
+```
+
+`Pairwise()` selects combinations in which every pair of values of any two parameters appears at least once (the In-Parameter-Order strategy). The selection is deterministic, so story ids and baselines never change between runs; with fewer than three parameters it is the full product. `Where(...)` removes combinations from either mode; under `Pairwise()`, pairs that only occur in removed combinations are left uncovered. The same algorithm is public as `Combinatorics.Pairwise(...)` for your own data-driven tests, and `Combinatorics.MissingPairs(...)` checks any set of rows for gaps. A parameter can be varied once per `AddVariants` call; listing it twice is an error.
+
 ## Defaults
 
 * **Collection defaults:** `stories.Defaults(s => ...)` applies to every story in the collection, before the story's own configuration.
@@ -109,7 +123,7 @@ public sealed class Defaults : IStoryConfiguration
 
 ## Tags and filtering
 
-`.Tags("smoke", "!visual")` adds `smoke` and removes `visual`. Filter catalogs in tests with `catalog.WithTag("smoke")`, `WithoutTag`, `WithPlay()`, `ForComponent<T>()` or `Matching("inputs-*")`.
+`.Tags("smoke", "!visual")` adds `smoke` and removes `visual`. Filter catalogs in tests with `catalog.WithTag("smoke")`, `WithoutTag`, `WithPlay()`, `ForComponent<T>()` or `Matching("inputs-*")`. The [test framework packages](test-frameworks.md) turn tags into test categories, and `StoryImpact` selects the stories a change can affect ([CI](ci.md#test-impact-analysis)).
 
 ## Quality-gate options
 
@@ -122,8 +136,17 @@ s.Visual(v => { v.Masks.Add(".timestamp"); v.Threshold = 0.2; v.FullPage = true;
  .ExcludeHostingModels(HostingModel.StaticServer)
  .Prerender(false)          // for stories whose first render never completes (pending loads); honoured by every browser run
  .Timeout(TimeSpan.FromSeconds(10))  // whole-run limit; BunitStoryOptions.Timeout and BrowserRunOptions.Timeout override it
+ .BrowserBudget(b => { b.MaxLayoutShift = 0.1; b.MaxDomNodes = 400; })   // real-browser runtime metrics
+ .Geolocation(52.37, 4.89)  // browser emulation: real browsers only (see interactions)
  .Skip("Waiting for API v2");
 ```
+
+Options are read-only once a story is built: catalogs are cached and shared by every test, so a test that changed a
+story's `Visual`, `Accessibility`, `Performance` or `BrowserBudget` options would change them for all the others. Setting
+one throws `InvalidOperationException`; pass run options (`BunitStoryOptions`, `BrowserRunOptions`) instead.
+
+Every story knows where its collection is declared (`Story.SourceFile`, `Story.SourceLine`, also on results): reports,
+SARIF logs and impact analysis point at that file. The source generator records it for every collection it discovers.
 
 ## Compile-time checks
 

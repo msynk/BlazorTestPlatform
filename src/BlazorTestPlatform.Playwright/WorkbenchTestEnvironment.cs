@@ -40,9 +40,18 @@ public sealed class WorkbenchTestEnvironment : IAsyncDisposable
     public static async Task<WorkbenchTestEnvironment> StartAsync(IWorkbenchHost host, BrowserRunOptions? runOptions = null, BrowserLaunchSettings? launchSettings = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(host);
-        await host.StartAsync(cancellationToken).ConfigureAwait(false);
-        var browser = await WorkbenchBrowser.LaunchAsync(host.BaseAddress, launchSettings).ConfigureAwait(false);
-        return new WorkbenchTestEnvironment(host, browser, new BrowserStoryRunner(browser, runOptions));
+        try
+        {
+            await host.StartAsync(cancellationToken).ConfigureAwait(false);
+            var browser = await WorkbenchBrowser.LaunchAsync(host.BaseAddress, launchSettings).ConfigureAwait(false);
+            return new WorkbenchTestEnvironment(host, browser, new BrowserStoryRunner(browser, runOptions));
+        }
+        catch
+        {
+            // The caller never gets an environment to dispose, so a started host must be stopped here.
+            await host.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     /// <summary>Runs a cell and throws on failure.</summary>
@@ -54,7 +63,13 @@ public sealed class WorkbenchTestEnvironment : IAsyncDisposable
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        await Browser.DisposeAsync().ConfigureAwait(false);
-        await Host.DisposeAsync().ConfigureAwait(false);
+        try
+        {
+            await Browser.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            await Host.DisposeAsync().ConfigureAwait(false);
+        }
     }
 }

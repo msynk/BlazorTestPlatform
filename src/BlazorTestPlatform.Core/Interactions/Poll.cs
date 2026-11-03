@@ -11,8 +11,8 @@ public static class Poll
     private static readonly int[] Intervals = [0, 20, 50, 100, 100, 250, 500];
 
     /// <summary>
-    /// Calls <paramref name="probe"/> until it reports success or the timeout elapses.
-    /// Returns the last probe result in both cases.
+    /// Calls <paramref name="probe"/> until it reports success or the timeout elapses (<see cref="Timeout.InfiniteTimeSpan"/>:
+    /// until success or cancellation). Returns the last probe result in both cases.
     /// </summary>
     public static async Task<(bool Success, T Value)> UntilAsync<T>(
         Func<CancellationToken, Task<(bool Success, T Value)>> probe,
@@ -20,6 +20,12 @@ public static class Poll
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(probe);
+        var infinite = timeout == Timeout.InfiniteTimeSpan;
+        if (!infinite && timeout < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout), timeout, "Use a non-negative timeout or Timeout.InfiniteTimeSpan.");
+        }
+
         var clock = Stopwatch.StartNew();
         var attempt = 0;
         (bool Success, T Value) last;
@@ -32,7 +38,7 @@ public static class Poll
                 return last;
             }
 
-            var remaining = timeout - clock.Elapsed;
+            var remaining = infinite ? TimeSpan.MaxValue : timeout - clock.Elapsed;
             if (remaining <= TimeSpan.Zero)
             {
                 return last;

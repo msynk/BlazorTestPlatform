@@ -73,9 +73,16 @@ public sealed class DeterministicRandom
     /// <summary>Returns a double in <c>[0, 1)</c>.</summary>
     public double NextDouble() => (NextUInt64() >> 11) * (1.0 / (1UL << 53));
 
-    /// <summary>Returns a decimal in <c>[min, max)</c> rounded to <paramref name="decimals"/> places.</summary>
-    public decimal NextDecimal(decimal min, decimal max, int decimals = 2) =>
-        Math.Round(min + (max - min) * (decimal)NextDouble(), decimals, MidpointRounding.ToZero);
+    /// <summary>
+    /// Returns a decimal in <c>[min, max)</c>, truncated down to <paramref name="decimals"/> places (values below
+    /// <paramref name="min"/> after truncation are raised to the first step at or above it). For ranges that do not go
+    /// below zero the sequence is the same as in earlier versions.
+    /// </summary>
+    public decimal NextDecimal(decimal min, decimal max, int decimals = 2)
+    {
+        var value = Math.Round(min + (max - min) * (decimal)NextDouble(), decimals, MidpointRounding.ToNegativeInfinity);
+        return value >= min ? value : Math.Round(min, decimals, MidpointRounding.ToPositiveInfinity);
+    }
 
     /// <summary>Returns true with the given probability.</summary>
     public bool NextBool(double probabilityOfTrue = 0.5) => NextDouble() < probabilityOfTrue;

@@ -1,3 +1,4 @@
+using BlazorTestPlatform.Workbench;
 using Contoso.UI.Stories;
 
 namespace Contoso.UI.Tests;
@@ -10,7 +11,8 @@ public sealed class CrossHostingTests(WorkbenchFixture workbench)
 {
     public static readonly TestMatrix Matrix = TestMatrix.CrossHosting();
 
-    public static TheoryData<string> Cases => new(Matrix.Expand(ComponentStoryTests.Catalog.WithPlay()).Select(c => c.Key));
+    // BTP_SHARD=2/4 runs a quarter of the cells, so CI can spread the matrix over parallel jobs.
+    public static TheoryData<string> Cases => new(Matrix.Expand(ComponentStoryTests.Catalog.WithPlay()).InShard(Shard.FromEnvironment()).Select(c => c.Key));
 
     [Theory]
     [MemberData(nameof(Cases))]
@@ -33,6 +35,7 @@ public sealed class VisualTests(WorkbenchFixture workbench)
     public static TheoryData<string> Cases => new(Matrix
         .Expand(ComponentStoryTests.Catalog.Where(s => !s.Visual.Skip && (!s.HasTag("visual-matrix") || s.Name.Contains("Primary", StringComparison.Ordinal))))
         .Where(c => c.Viewport == Viewport.Desktop || c.Theme == ThemeDefinition.Light)
+        .InShard(Shard.FromEnvironment())
         .Select(c => c.Key));
 
     [Theory]
@@ -56,6 +59,7 @@ public sealed class CrossBrowserTests(WorkbenchFixture workbench)
 
     public static TheoryData<string> Cases => new(Matrix
         .Expand(ComponentStoryTests.Catalog.Where(s => !s.HasTag("visual-matrix") || s.Name.Contains("Primary", StringComparison.Ordinal)))
+        .InShard(Shard.FromEnvironment())
         .Select(c => c.Key));
 
     [Theory]
@@ -76,7 +80,10 @@ public sealed class InAppPlayTests(WorkbenchFixture workbench)
         .WithHostingModels(HostingModel.InteractiveServer, HostingModel.InteractiveWebAssembly)
         .WithBrowsers(Browsers.Chromium);
 
-    public static TheoryData<string> Cases => new(Matrix.Expand(ComponentStoryTests.Catalog.WithPlay()).Select(c => c.Key));
+    // Stories that declare capabilities the in-app driver lacks (browser emulation) are reported as skipped there.
+    public static TheoryData<string> Cases => new(Matrix
+        .Expand(ComponentStoryTests.Catalog.WithPlay().Where(s => s.CanRunOn(InAppStoryDriver.CapabilitiesFor(s))))
+        .Select(c => c.Key));
 
     [Theory]
     [MemberData(nameof(Cases))]
@@ -105,5 +112,41 @@ public sealed class TransientFailureTests
         Assert.True(BlazorTestPlatform.Playwright.TransientFailures.IsInfrastructureFailure(Failed("2 console errors", "WebSocket connection failed: net::ERR_NO_BUFFER_SPACE")));
         Assert.False(BlazorTestPlatform.Playwright.TransientFailures.IsInfrastructureFailure(Failed("Expected role=button to be focused")));
         Assert.False(BlazorTestPlatform.Playwright.TransientFailures.IsInfrastructureFailure(Failed("Visual snapshot differs", "Failed to load resource: 500")));
+    }
+}
+
+/// <summary>Real browsers report runtime metrics with every result, and stories can set budgets on them.</summary>
+public sealed class BrowserMetricsTests(WorkbenchFixture workbench)
+{
+    [Theory]
+    [InlineData(Browsers.Chromium)]
+    [InlineData(Browsers.Firefox)]
+    public async Task Results_carry_the_metrics_the_browser_reports(string browser)
+    {
+        var matrix = new TestMatrix()
+            .WithViewports(Viewport.Desktop)
+            .WithThemes(ThemeDefinition.Light)
+            .WithHostingModels(HostingModel.InteractiveServer)
+            .WithBrowsers(browser);
+        var cell = matrix.Expand(ComponentStoryTests.Catalog.Where(s => s.Id == "testing-browser-emulation--geolocation")).Single();
+
+        var result = await workbench.Environment.VerifyAsync(cell, TestContext.Current.CancellationToken);
+
+        var metrics = Assert.IsType<BlazorTestPlatform.Performance.BrowserMetrics>(result.BrowserMetrics);
+        Assert.InRange(metrics.DomNodes, 5, 20);
+        if (browser == Browsers.Chromium)
+        {
+            // Chromium reports every metric; the budget on layout shift was checked, not skipped.
+            Assert.NotNull(metrics.CumulativeLayoutShift);
+            Assert.NotNull(metrics.LongTasks);
+            Assert.NotNull(metrics.JSHeapBytes);
+            Assert.DoesNotContain(result.Steps.SelectMany(s => s.Children.Prepend(s)), s => s.Title.StartsWith("not checked", StringComparison.Ordinal));
+        }
+        else
+        {
+            // Firefox has no layout-shift entries: the limit is reported as not checked instead of passing silently.
+            Assert.Null(metrics.CumulativeLayoutShift);
+            Assert.Contains(result.Steps.SelectMany(s => s.Children.Prepend(s)), s => s.Title.Contains("Cumulative layout shift", StringComparison.Ordinal));
+        }
     }
 }

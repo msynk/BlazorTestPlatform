@@ -272,9 +272,22 @@ public static class ManualReviewGate
                 continue;
             }
 
-            if (review.Fingerprint is not null && !string.Equals(review.Fingerprint, fingerprint, StringComparison.Ordinal))
+            // A review without a fingerprint can never be proven current, so it is stale rather than approved forever.
+            if (string.IsNullOrWhiteSpace(review.Fingerprint))
+            {
+                entries.Add(new(component, ReviewGateState.Stale, $"The review records no fingerprint, so it cannot be checked against the component. Set \"fingerprint\": \"{fingerprint}\" after re-checking it.", fingerprint));
+                continue;
+            }
+
+            if (!string.Equals(review.Fingerprint, fingerprint, StringComparison.Ordinal))
             {
                 entries.Add(new(component, ReviewGateState.Stale, $"Accessibility structure changed since the review on {review.ReviewedAt:yyyy-MM-dd} ({review.Fingerprint} -> {fingerprint}).", fingerprint));
+                continue;
+            }
+
+            if (review.Items.Count == 0)
+            {
+                entries.Add(new(component, ReviewGateState.Incomplete, "The review lists no checks. Start from the template (btp a11y init).", fingerprint));
                 continue;
             }
 

@@ -64,6 +64,31 @@ public sealed class DriverParityStories : Stories<DriverParityPanel>
                 });
             }));
 
+        // One tree for every driver: roles, names and states computed by the C# engine (bUnit) and its JS port (browsers).
+        stories.Add("Accessibility tree", s => s
+            .Arg(p => p.Section, DriverParitySection.Landmarks)
+            .Play(ctx => ctx.ExpectAriaSnapshotAsync("""
+                - banner:
+                  - heading "Driver parity" [level=1]
+                - main:
+                  - region "Account":
+                    - heading "Upgrade" [level=2]
+                    - table:
+                      - rowgroup:
+                        - row "Plan Team":
+                          - rowheader "Plan"
+                          - cell "Team"
+                    - meter "Storage used"
+                    - search:
+                      - searchbox "Search people"
+                    - graphics-document
+                    - button "Save"
+                    - button "Send"
+                    - textbox "Nickname"
+                    - checkbox "Remember me" [checked=false]
+                - contentinfo
+                """)));
+
         stories.Add("Text", s => s
             .Arg(p => p.Section, DriverParitySection.Text)
             .Play(async ctx =>

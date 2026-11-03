@@ -74,46 +74,48 @@ public class StoryJSRuntime : IJSRuntime
         InvokeCoreAsync<TValue>(identifier, args, cancellationToken, hasToken: true);
 
     /// <inheritdoc />
-    public ValueTask<IJSObjectReference> InvokeConstructorAsync(string identifier, object?[]? args)
-    {
-        Log.Add("new " + identifier, null, args, mocked: false);
-        return Inner.InvokeConstructorAsync(identifier, args);
-    }
+    public ValueTask<IJSObjectReference> InvokeConstructorAsync(string identifier, object?[]? args) =>
+        TryAnswerMember<IJSObjectReference>(Mocks, Mode, Mocks.Strict, "new " + identifier, null, args ?? [], Log, out var mocked)
+            ? ValueTask.FromResult(mocked)
+            : Inner.InvokeConstructorAsync(identifier, args);
 
     /// <inheritdoc />
-    public ValueTask<IJSObjectReference> InvokeConstructorAsync(string identifier, CancellationToken cancellationToken, object?[]? args)
-    {
-        Log.Add("new " + identifier, null, args, mocked: false);
-        return Inner.InvokeConstructorAsync(identifier, cancellationToken, args);
-    }
+    public ValueTask<IJSObjectReference> InvokeConstructorAsync(string identifier, CancellationToken cancellationToken, object?[]? args) =>
+        TryAnswerMember<IJSObjectReference>(Mocks, Mode, Mocks.Strict, "new " + identifier, null, args ?? [], Log, out var mocked)
+            ? ValueTask.FromResult(mocked)
+            : Inner.InvokeConstructorAsync(identifier, cancellationToken, args);
 
     /// <inheritdoc />
-    public ValueTask<TValue> GetValueAsync<[DynamicallyAccessedMembers(JsonSerialized)] TValue>(string identifier)
-    {
-        Log.Add("get " + identifier, null, null, mocked: false);
-        return Inner.GetValueAsync<TValue>(identifier);
-    }
+    public ValueTask<TValue> GetValueAsync<[DynamicallyAccessedMembers(JsonSerialized)] TValue>(string identifier) =>
+        TryAnswerMember<TValue>(Mocks, Mode, Mocks.Strict, "get " + identifier, null, [], Log, out var mocked)
+            ? ValueTask.FromResult(mocked)
+            : Inner.GetValueAsync<TValue>(identifier);
 
     /// <inheritdoc />
-    public ValueTask<TValue> GetValueAsync<[DynamicallyAccessedMembers(JsonSerialized)] TValue>(string identifier, CancellationToken cancellationToken)
-    {
-        Log.Add("get " + identifier, null, null, mocked: false);
-        return Inner.GetValueAsync<TValue>(identifier, cancellationToken);
-    }
+    public ValueTask<TValue> GetValueAsync<[DynamicallyAccessedMembers(JsonSerialized)] TValue>(string identifier, CancellationToken cancellationToken) =>
+        TryAnswerMember<TValue>(Mocks, Mode, Mocks.Strict, "get " + identifier, null, [], Log, out var mocked)
+            ? ValueTask.FromResult(mocked)
+            : Inner.GetValueAsync<TValue>(identifier, cancellationToken);
 
     /// <inheritdoc />
-    public ValueTask SetValueAsync<[DynamicallyAccessedMembers(JsonSerialized)] TValue>(string identifier, TValue value)
-    {
-        Log.Add("set " + identifier, null, [value], mocked: false);
-        return Inner.SetValueAsync(identifier, value);
-    }
+    public ValueTask SetValueAsync<[DynamicallyAccessedMembers(JsonSerialized)] TValue>(string identifier, TValue value) =>
+        TryAnswerMember<IJSVoidResult>(Mocks, Mode, Mocks.Strict, "set " + identifier, null, [value], Log, out _)
+            ? ValueTask.CompletedTask
+            : Inner.SetValueAsync(identifier, value);
 
     /// <inheritdoc />
-    public ValueTask SetValueAsync<[DynamicallyAccessedMembers(JsonSerialized)] TValue>(string identifier, TValue value, CancellationToken cancellationToken)
-    {
-        Log.Add("set " + identifier, null, [value], mocked: false);
-        return Inner.SetValueAsync(identifier, value, cancellationToken);
-    }
+    public ValueTask SetValueAsync<[DynamicallyAccessedMembers(JsonSerialized)] TValue>(string identifier, TValue value, CancellationToken cancellationToken) =>
+        TryAnswerMember<IJSVoidResult>(Mocks, Mode, Mocks.Strict, "set " + identifier, null, [value], Log, out _)
+            ? ValueTask.CompletedTask
+            : Inner.SetValueAsync(identifier, value, cancellationToken);
+
+    /// <summary>
+    /// Property reads (<c>get x</c>), writes (<c>set x</c>) and constructor calls (<c>new X</c>): recorded and checked by
+    /// strict mode like calls, and answered from the story's mocks in every mode that answers — bUnit's interop cannot
+    /// answer them, so the wrapper does even when bUnit answers ordinary calls.
+    /// </summary>
+    internal static bool TryAnswerMember<TValue>(JSInteropMocks? mocks, JSMockMode mode, bool strict, string identifier, string? module, object?[] args, JSCallLog log, out TValue result) =>
+        TryAnswer(mocks, mode == JSMockMode.AnsweredByInner ? JSMockMode.Answer : mode, strict, identifier, module, args, log, out result);
 
     /// <summary>True for Blazor's own interop (<c>Blazor._internal...</c>), which mocks and strict mode never touch.</summary>
     internal static bool IsFrameworkCall(string identifier) => identifier.StartsWith("Blazor.", StringComparison.Ordinal);
@@ -195,6 +197,11 @@ public class StoryJSRuntime : IJSRuntime
         {
             IJSInProcessObjectReference inProcess => new InProcessStoryJSObjectReference(inProcess, path, moduleMocks, Mode, strict, Log),
             IJSObjectReference reference => new StoryJSObjectReference(reference, path, moduleMocks, Mode, strict, Log),
+
+            // A mocked module that does not exist, asked for as an in-process reference (WebAssembly components).
+            null when moduleMocks is not null && Mode == JSMockMode.Answer && typeof(TValue).IsAssignableFrom(typeof(InProcessStoryJSObjectReference))
+                && !typeof(TValue).IsAssignableFrom(typeof(StoryJSObjectReference))
+                => new InProcessStoryJSObjectReference(null, path, moduleMocks, Mode, strict, Log),
             null when moduleMocks is not null && Mode == JSMockMode.Answer && typeof(TValue).IsAssignableFrom(typeof(StoryJSObjectReference))
                 => new StoryJSObjectReference(null, path, moduleMocks, Mode, strict, Log),
             _ => null,
@@ -216,24 +223,22 @@ internal sealed class InProcessStoryJSRuntime(IJSInProcessRuntime inner, JSInter
     }
 
     [RequiresUnreferencedCode(StoryJSRuntime.InProcessMessage)]
-    public IJSInProcessObjectReference InvokeConstructor(string identifier, object?[]? args)
-    {
-        Log.Add("new " + identifier, null, args, mocked: false);
-        return inner.InvokeConstructor(identifier, args);
-    }
+    public IJSInProcessObjectReference InvokeConstructor(string identifier, object?[]? args) =>
+        TryAnswerMember<IJSInProcessObjectReference>(Mocks, Mode, Mocks.Strict, "new " + identifier, null, args ?? [], Log, out var mocked)
+            ? mocked
+            : inner.InvokeConstructor(identifier, args);
 
     [RequiresUnreferencedCode(StoryJSRuntime.InProcessMessage)]
-    public TValue GetValue<[DynamicallyAccessedMembers(JsonSerialized)] TValue>(string identifier)
-    {
-        Log.Add("get " + identifier, null, null, mocked: false);
-        return inner.GetValue<TValue>(identifier);
-    }
+    public TValue GetValue<[DynamicallyAccessedMembers(JsonSerialized)] TValue>(string identifier) =>
+        TryAnswerMember<TValue>(Mocks, Mode, Mocks.Strict, "get " + identifier, null, [], Log, out var mocked) ? mocked : inner.GetValue<TValue>(identifier);
 
     [RequiresUnreferencedCode(StoryJSRuntime.InProcessMessage)]
     public void SetValue<[DynamicallyAccessedMembers(JsonSerialized)] TValue>(string identifier, TValue value)
     {
-        Log.Add("set " + identifier, null, [value], mocked: false);
-        inner.SetValue(identifier, value);
+        if (!TryAnswerMember<IJSVoidResult>(Mocks, Mode, Mocks.Strict, "set " + identifier, null, [value], Log, out _))
+        {
+            inner.SetValue(identifier, value);
+        }
     }
 }
 
@@ -258,41 +263,35 @@ internal class StoryJSObjectReference(IJSObjectReference? real, string module, J
     public ValueTask<TValue> InvokeAsync<[DynamicallyAccessedMembers(StoryJSRuntime.JsonSerialized)] TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
         InvokeCoreAsync<TValue>(identifier, args, cancellationToken, hasToken: true);
 
-    public ValueTask<IJSObjectReference> InvokeConstructorAsync(string identifier, object?[]? args)
-    {
-        log.Add("new " + identifier, module, args, mocked: false);
-        return RealOrThrow(identifier).InvokeConstructorAsync(identifier, args);
-    }
+    public ValueTask<IJSObjectReference> InvokeConstructorAsync(string identifier, object?[]? args) =>
+        StoryJSRuntime.TryAnswerMember<IJSObjectReference>(mocks, mode, strict, "new " + identifier, module, args ?? [], log, out var mocked)
+            ? ValueTask.FromResult(mocked)
+            : RealOrThrow(identifier).InvokeConstructorAsync(identifier, args);
 
-    public ValueTask<IJSObjectReference> InvokeConstructorAsync(string identifier, CancellationToken cancellationToken, object?[]? args)
-    {
-        log.Add("new " + identifier, module, args, mocked: false);
-        return RealOrThrow(identifier).InvokeConstructorAsync(identifier, cancellationToken, args);
-    }
+    public ValueTask<IJSObjectReference> InvokeConstructorAsync(string identifier, CancellationToken cancellationToken, object?[]? args) =>
+        StoryJSRuntime.TryAnswerMember<IJSObjectReference>(mocks, mode, strict, "new " + identifier, module, args ?? [], log, out var mocked)
+            ? ValueTask.FromResult(mocked)
+            : RealOrThrow(identifier).InvokeConstructorAsync(identifier, cancellationToken, args);
 
-    public ValueTask<TValue> GetValueAsync<[DynamicallyAccessedMembers(StoryJSRuntime.JsonSerialized)] TValue>(string identifier)
-    {
-        log.Add("get " + identifier, module, null, mocked: false);
-        return RealOrThrow(identifier).GetValueAsync<TValue>(identifier);
-    }
+    public ValueTask<TValue> GetValueAsync<[DynamicallyAccessedMembers(StoryJSRuntime.JsonSerialized)] TValue>(string identifier) =>
+        StoryJSRuntime.TryAnswerMember<TValue>(mocks, mode, strict, "get " + identifier, module, [], log, out var mocked)
+            ? ValueTask.FromResult(mocked)
+            : RealOrThrow(identifier).GetValueAsync<TValue>(identifier);
 
-    public ValueTask<TValue> GetValueAsync<[DynamicallyAccessedMembers(StoryJSRuntime.JsonSerialized)] TValue>(string identifier, CancellationToken cancellationToken)
-    {
-        log.Add("get " + identifier, module, null, mocked: false);
-        return RealOrThrow(identifier).GetValueAsync<TValue>(identifier, cancellationToken);
-    }
+    public ValueTask<TValue> GetValueAsync<[DynamicallyAccessedMembers(StoryJSRuntime.JsonSerialized)] TValue>(string identifier, CancellationToken cancellationToken) =>
+        StoryJSRuntime.TryAnswerMember<TValue>(mocks, mode, strict, "get " + identifier, module, [], log, out var mocked)
+            ? ValueTask.FromResult(mocked)
+            : RealOrThrow(identifier).GetValueAsync<TValue>(identifier, cancellationToken);
 
-    public ValueTask SetValueAsync<[DynamicallyAccessedMembers(StoryJSRuntime.JsonSerialized)] TValue>(string identifier, TValue value)
-    {
-        log.Add("set " + identifier, module, [value], mocked: false);
-        return RealOrThrow(identifier).SetValueAsync(identifier, value);
-    }
+    public ValueTask SetValueAsync<[DynamicallyAccessedMembers(StoryJSRuntime.JsonSerialized)] TValue>(string identifier, TValue value) =>
+        StoryJSRuntime.TryAnswerMember<IJSVoidResult>(mocks, mode, strict, "set " + identifier, module, [value], log, out _)
+            ? ValueTask.CompletedTask
+            : RealOrThrow(identifier).SetValueAsync(identifier, value);
 
-    public ValueTask SetValueAsync<[DynamicallyAccessedMembers(StoryJSRuntime.JsonSerialized)] TValue>(string identifier, TValue value, CancellationToken cancellationToken)
-    {
-        log.Add("set " + identifier, module, [value], mocked: false);
-        return RealOrThrow(identifier).SetValueAsync(identifier, value, cancellationToken);
-    }
+    public ValueTask SetValueAsync<[DynamicallyAccessedMembers(StoryJSRuntime.JsonSerialized)] TValue>(string identifier, TValue value, CancellationToken cancellationToken) =>
+        StoryJSRuntime.TryAnswerMember<IJSVoidResult>(mocks, mode, strict, "set " + identifier, module, [value], log, out _)
+            ? ValueTask.CompletedTask
+            : RealOrThrow(identifier).SetValueAsync(identifier, value, cancellationToken);
 
     public ValueTask DisposeAsync() => real?.DisposeAsync() ?? ValueTask.CompletedTask;
 
@@ -320,36 +319,50 @@ internal class StoryJSObjectReference(IJSObjectReference? real, string module, J
 }
 
 /// <summary><see cref="StoryJSObjectReference"/> over an in-process (WebAssembly) module.</summary>
-internal sealed class InProcessStoryJSObjectReference(IJSInProcessObjectReference real, string module, JSInteropMocks? mocks, JSMockMode mode, bool strict, JSCallLog log)
+internal sealed class InProcessStoryJSObjectReference(IJSInProcessObjectReference? real, string module, JSInteropMocks? mocks, JSMockMode mode, bool strict, JSCallLog log)
     : StoryJSObjectReference(real, module, mocks, mode, strict, log), IJSInProcessObjectReference
 {
     [RequiresUnreferencedCode(StoryJSRuntime.InProcessMessage)]
     public TValue Invoke<[DynamicallyAccessedMembers(StoryJSRuntime.JsonSerialized)] TValue>(string identifier, params object?[]? args)
     {
         args ??= [];
-        return StoryJSRuntime.TryAnswer<TValue>(Mocks, Mode, Strict, identifier, Module, args, Log, out var mocked) ? mocked : real.Invoke<TValue>(identifier, args);
+        if (StoryJSRuntime.TryAnswer<TValue>(Mocks, Mode, Strict, identifier, Module, args, Log, out var mocked))
+        {
+            return mocked;
+        }
+
+        if (real is null)
+        {
+            // Mocked module that does not exist: unmocked calls behave like bUnit's loose mode.
+            return Strict ? throw new InvalidOperationException($"The JS call '{Module}:{identifier}' has no setup.") : default!;
+        }
+
+        return real.Invoke<TValue>(identifier, args);
     }
 
     [RequiresUnreferencedCode(StoryJSRuntime.InProcessMessage)]
-    public IJSInProcessObjectReference InvokeConstructor(string identifier, object?[]? args)
-    {
-        Log.Add("new " + identifier, Module, args, mocked: false);
-        return real.InvokeConstructor(identifier, args);
-    }
+    public IJSInProcessObjectReference InvokeConstructor(string identifier, object?[]? args) =>
+        StoryJSRuntime.TryAnswerMember<IJSInProcessObjectReference>(Mocks, Mode, Strict, "new " + identifier, Module, args ?? [], Log, out var mocked)
+            ? mocked
+            : InProcessOrThrow(identifier).InvokeConstructor(identifier, args);
 
     [RequiresUnreferencedCode(StoryJSRuntime.InProcessMessage)]
-    public TValue GetValue<[DynamicallyAccessedMembers(StoryJSRuntime.JsonSerialized)] TValue>(string identifier)
-    {
-        Log.Add("get " + identifier, Module, null, mocked: false);
-        return real.GetValue<TValue>(identifier);
-    }
+    public TValue GetValue<[DynamicallyAccessedMembers(StoryJSRuntime.JsonSerialized)] TValue>(string identifier) =>
+        StoryJSRuntime.TryAnswerMember<TValue>(Mocks, Mode, Strict, "get " + identifier, Module, [], Log, out var mocked)
+            ? mocked
+            : InProcessOrThrow(identifier).GetValue<TValue>(identifier);
 
     [RequiresUnreferencedCode(StoryJSRuntime.InProcessMessage)]
     public void SetValue<[DynamicallyAccessedMembers(StoryJSRuntime.JsonSerialized)] TValue>(string identifier, TValue value)
     {
-        Log.Add("set " + identifier, Module, [value], mocked: false);
-        real.SetValue(identifier, value);
+        if (!StoryJSRuntime.TryAnswerMember<IJSVoidResult>(Mocks, Mode, Strict, "set " + identifier, Module, [value], Log, out _))
+        {
+            InProcessOrThrow(identifier).SetValue(identifier, value);
+        }
     }
 
-    public void Dispose() => real.Dispose();
+    public void Dispose() => real?.Dispose();
+
+    private IJSInProcessObjectReference InProcessOrThrow(string identifier) =>
+        real ?? throw new InvalidOperationException($"The mocked module '{Module}' could not be loaded, so '{identifier}' needs a setup in the story's MockJS(...).");
 }

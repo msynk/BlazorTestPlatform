@@ -7,17 +7,42 @@ namespace BlazorTestPlatform.Workbench.Services;
 /// Per-scope (circuit, WebAssembly app or SSR request) holder of the active story's service overrides.
 /// Frames are full page loads, so each story gets a fresh scope and its own overrides.
 /// </summary>
+/// <remarks>
+/// The story's registrations live in their own container, but their dependencies resolve as in bUnit: from the story
+/// first, then from the application (a fake service can take an <c>ILogger&lt;T&gt;</c>, <c>NavigationManager</c> or
+/// an application service). Application instances are only borrowed: the story container never owns, and so never
+/// disposes, them.
+/// </remarks>
 public sealed class StoryServiceScope : IAsyncDisposable
 {
     private readonly Dictionary<object, object> _instances = [];
     private readonly Lock _gate = new();
+    private readonly IServiceProvider? _application;
     private ServiceProvider? _overrides;
+    private IServiceProvider? _resolver;
+    private bool _disposed;
+
+    /// <summary>Creates a scope whose story services can only depend on each other.</summary>
+    public StoryServiceScope()
+    {
+    }
+
+    /// <summary>Creates a scope whose story services can also depend on the application's services.</summary>
+    /// <param name="application">The application's provider for this scope (circuit, WebAssembly app or request).</param>
+    [ActivatorUtilitiesConstructor]
+    public StoryServiceScope(IServiceProvider application) => _application = application;
 
     /// <summary>The active story, if any.</summary>
     public Story? Story { get; private set; }
 
     /// <summary>Provider holding the story's overrides.</summary>
     public IServiceProvider? Overrides => _overrides;
+
+    /// <summary>
+    /// Resolves the story's services first and the application's otherwise (what fixtures and story services see).
+    /// Null before a story is activated.
+    /// </summary>
+    public IServiceProvider? Services => _resolver;
 
     /// <summary>JavaScript-interop calls of the active story (recorded when it declares JS mocks).</summary>
     public JSCallLog JSCalls { get; private set; } = new();
@@ -26,6 +51,7 @@ public sealed class StoryServiceScope : IAsyncDisposable
     public async Task ActivateAsync(Story story, HostingModel hostingModel, FakeAuthenticationStateProvider? authentication)
     {
         ArgumentNullException.ThrowIfNull(story);
+        ObjectDisposedException.ThrowIf(_disposed, this);
         await ReleaseAsync().ConfigureAwait(false);
 
         var services = new ServiceCollection();
@@ -37,10 +63,70 @@ public sealed class StoryServiceScope : IAsyncDisposable
             services.AddSingleton(authentication);
         }
 
-        _overrides = services.BuildServiceProvider();
+        var resolver = new FallbackServiceProvider(_application);
+        IServiceCollection container = new ServiceCollection();
+        foreach (var descriptor in services)
+        {
+            container.Add(Rewrite(descriptor, resolver));
+        }
+
+        _overrides = container.BuildServiceProvider();
+        resolver.Story = _overrides;
+        _resolver = resolver;
         JSCalls = new JSCallLog();
         Story = story;
-        await story.InitializeFixturesAsync(_overrides, fixtureContext).ConfigureAwait(false);
+        await story.InitializeFixturesAsync(resolver, fixtureContext).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Story registrations are created against <paramref name="resolver"/>, so their dependencies can come from the
+    /// application. Instances and open generics stay as registered (open generics then only see the story's services).
+    /// </summary>
+    private static ServiceDescriptor Rewrite(ServiceDescriptor descriptor, IServiceProvider resolver)
+    {
+        if (descriptor.IsKeyedService || descriptor.ImplementationInstance is not null || descriptor.ServiceType.IsGenericTypeDefinition)
+        {
+            return descriptor;
+        }
+
+        if (descriptor.ImplementationFactory is { } factory)
+        {
+            return new ServiceDescriptor(descriptor.ServiceType, _ => factory(resolver), descriptor.Lifetime);
+        }
+
+        return descriptor.ImplementationType is null
+            ? descriptor
+            : new ServiceDescriptor(descriptor.ServiceType, _ => ActivatorUtilities.CreateInstance(resolver, descriptor.ImplementationType), descriptor.Lifetime);
+    }
+
+    /// <summary>The story's container first, then the application's provider for this scope.</summary>
+    private sealed class FallbackServiceProvider(IServiceProvider? application) : IServiceProvider, IServiceProviderIsService
+    {
+        public IServiceProvider? Story { get; set; }
+
+        public object? GetService(Type serviceType)
+        {
+            if (serviceType == typeof(IServiceProvider) || serviceType == typeof(IServiceProviderIsService))
+            {
+                return this;
+            }
+
+            var own = Story?.GetService(serviceType);
+
+            // An enumerable the story has nothing for comes back empty, not null: then the application's apply.
+            if (own is not null && !(own is System.Collections.IEnumerable items && serviceType.IsGenericType
+                && serviceType.GetGenericTypeDefinition() == typeof(IEnumerable<>) && !items.GetEnumerator().MoveNext()))
+            {
+                return own;
+            }
+
+            return application?.GetService(serviceType) ?? own;
+        }
+
+        public bool IsService(Type serviceType) =>
+            serviceType == typeof(IServiceProvider)
+            || Story?.GetService(typeof(IServiceProviderIsService)) is IServiceProviderIsService story && story.IsService(serviceType)
+            || application?.GetService(typeof(IServiceProviderIsService)) is IServiceProviderIsService app && app.IsService(serviceType);
     }
 
     /// <summary>Resolves an override, or null when the story does not override the type.</summary>
@@ -59,6 +145,8 @@ public sealed class StoryServiceScope : IAsyncDisposable
     {
         lock (_gate)
         {
+            // An instance created after disposal would never be disposed.
+            ObjectDisposedException.ThrowIf(_disposed, this);
             if (_instances.TryGetValue(key, out var existing))
             {
                 return (T)existing;
@@ -71,7 +159,15 @@ public sealed class StoryServiceScope : IAsyncDisposable
     }
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync() => ReleaseAsync();
+    public async ValueTask DisposeAsync()
+    {
+        lock (_gate)
+        {
+            _disposed = true;
+        }
+
+        await ReleaseAsync().ConfigureAwait(false);
+    }
 
     private async ValueTask ReleaseAsync()
     {
@@ -98,6 +194,11 @@ public sealed class StoryServiceScope : IAsyncDisposable
         {
             await _overrides.DisposeAsync().ConfigureAwait(false);
             _overrides = null;
+            _resolver = null;
         }
+
+        // Nothing of the released story may leak into the next one (or into resolutions after disposal).
+        Story = null;
+        JSCalls = new JSCallLog();
     }
 }

@@ -185,4 +185,203 @@ public sealed class BrowserFidelityTests
         var focused = await session.Driver.GetFocusedElementAsync(CancellationToken.None);
         Assert.Contains(focused?.Text ?? "nothing", new[] { "Ping", "Pong" });
     }
+    [Fact]
+    public async Task Typed_text_survives_renders_of_components_that_do_not_bind_it()
+    {
+        await using var session = await RenderAsync("tests-unbound-inputs--default");
+        var ctx = session.StoryContext;
+
+        await ctx.GetByLabel("Search").TypeAsync("abc");
+
+        await ctx.Expect(ctx.GetByTestId("typed")).ToHaveTextAsync("abc");
+        await ctx.Expect(ctx.GetByLabel("Search")).ToHaveValueAsync("abc");
+    }
+
+    [Fact]
+    public async Task Unbound_checkboxes_keep_their_state()
+    {
+        await using var session = await RenderAsync("tests-unbound-inputs--default");
+        var ctx = session.StoryContext;
+
+        await ctx.GetByLabel("Agree").CheckAsync();
+        await ctx.Expect(ctx.GetByTestId("agreed")).ToHaveTextAsync("True");
+        await ctx.Expect(ctx.GetByLabel("Agree")).ToBeCheckedAsync();
+
+        await ctx.GetByLabel("Agree").UncheckAsync();
+        await ctx.Expect(ctx.GetByTestId("agreed")).ToHaveTextAsync("False");
+    }
+
+    [Fact]
+    public async Task Enter_fires_keypress_like_browsers()
+    {
+        await using var session = await RenderAsync("tests-unbound-inputs--default");
+        var ctx = session.StoryContext;
+
+        await ctx.GetByLabel("Command").PressAsync(Keys.Enter);
+
+        await ctx.Expect(ctx.GetByTestId("submitted")).ToHaveTextAsync("1");
+    }
+
+    [Fact]
+    public async Task Checking_a_radio_unchecks_the_rest_of_its_group()
+    {
+        await using var session = await RenderAsync("tests-unbound-inputs--default");
+        var ctx = session.StoryContext;
+
+        await ctx.GetByRole("radio", "Small").CheckAsync();
+
+        await ctx.Expect(ctx.GetByRole("radio", "Small")).ToBeCheckedAsync();
+        await ctx.Expect(ctx.GetByRole("radio", "Large")).Not.ToBeCheckedAsync();
+    }
+
+    [Fact]
+    public async Task Values_the_component_renders_replace_the_typed_ones()
+    {
+        await using var session = await RenderAsync("tests-unbound-inputs--default");
+        var ctx = session.StoryContext;
+        var bound = ctx.GetByLabel("Bound");
+
+        await bound.FillAsync("typed");
+        await ctx.Expect(bound).ToHaveValueAsync("typed");
+
+        await ctx.GetByRole("button", "Reset bound").ClickAsync();
+        await ctx.Expect(bound).ToHaveValueAsync(string.Empty);
+    }
+    [Fact]
+    public async Task Activating_a_summary_toggles_its_details()
+    {
+        await using var session = await RenderAsync("tests-emulation-extras--default");
+        var ctx = session.StoryContext;
+
+        await ctx.Expect(ctx.GetByText("Hidden detail")).ToBeHiddenAsync();
+        await ctx.GetByText("More", exact: true).ClickAsync();
+        await ctx.Expect(ctx.GetByText("Hidden detail")).ToBeVisibleAsync();
+        await ctx.Expect(ctx.GetByTestId("toggles")).ToHaveTextAsync("1");
+
+        await ctx.GetByText("More", exact: true).PressAsync(Keys.Enter);
+        await ctx.Expect(ctx.GetByText("Hidden detail")).ToBeHiddenAsync();
+    }
+
+    [Fact]
+    public async Task Arrow_keys_move_through_a_radio_group_skipping_disabled_radios()
+    {
+        await using var session = await RenderAsync("tests-emulation-extras--default");
+        var ctx = session.StoryContext;
+
+        await ctx.GetByRole("radio", "Basic").FocusAsync();
+        await ctx.PressAsync(Keys.ArrowDown);
+        await ctx.Expect(ctx.GetByRole("radio", "Pro")).ToBeCheckedAsync();
+        await ctx.Expect(ctx.GetByRole("radio", "Pro")).ToBeFocusedAsync();
+        await ctx.Expect(ctx.GetByRole("radio", "Basic")).Not.ToBeCheckedAsync();
+
+        await ctx.PressAsync(Keys.ArrowRight);
+        await ctx.Expect(ctx.GetByRole("radio", "Team")).ToBeCheckedAsync();
+        await ctx.Expect(ctx.GetByTestId("picked")).ToHaveTextAsync("d");
+
+        await ctx.PressAsync(Keys.ArrowDown);
+        await ctx.Expect(ctx.GetByRole("radio", "Basic")).ToBeCheckedAsync();
+        await ctx.PressAsync(Keys.ArrowUp);
+        await ctx.Expect(ctx.GetByRole("radio", "Team")).ToBeFocusedAsync();
+    }
+
+    [Fact]
+    public async Task Enter_in_a_textarea_inserts_a_line_break()
+    {
+        await using var session = await RenderAsync("tests-emulation-extras--default");
+        var ctx = session.StoryContext;
+
+        await ctx.GetByLabel("Notes").TypeAsync("a");
+        await ctx.PressAsync(Keys.Enter);
+        await ctx.PressAsync("b");
+
+        await ctx.Expect(ctx.GetByTestId("notes")).ToHaveTextAsync("a|b");
+    }
+
+    [Fact]
+    public async Task A_cancelled_click_does_not_toggle_a_checkbox()
+    {
+        await using var session = await RenderAsync("tests-emulation-extras--default");
+        var ctx = session.StoryContext;
+
+        await ctx.GetByLabel("Locked").ClickAsync();
+
+        await ctx.Expect(ctx.GetByLabel("Locked")).Not.ToBeCheckedAsync();
+        await ctx.Expect(ctx.GetByTestId("changes")).ToHaveTextAsync("0");
+    }
+
+    [Fact]
+    public async Task Labels_forward_to_their_first_labelable_control_not_hidden_inputs()
+    {
+        await using var session = await RenderAsync("tests-emulation-extras--default");
+        var ctx = session.StoryContext;
+
+        await ctx.GetByText("Remember me").ClickAsync();
+
+        await ctx.Expect(ctx.GetByRole("checkbox", "Remember me")).ToBeCheckedAsync();
+    }
+
+    [Fact]
+    public async Task Fill_waits_for_a_read_only_field_to_become_editable()
+    {
+        await using var session = await RenderAsync("tests-emulation-extras--default");
+        var ctx = session.StoryContext;
+
+        await ctx.GetByLabel("Code").FillAsync("1234");
+
+        await ctx.Expect(ctx.GetByLabel("Code")).ToHaveValueAsync("1234");
+    }
+
+    [Fact]
+    public async Task Tab_continues_from_where_non_focusable_content_was_clicked()
+    {
+        await using var session = await RenderAsync("tests-emulation-extras--default");
+        var ctx = session.StoryContext;
+
+        await ctx.GetByText("Plain text to click").ClickAsync();
+        await ctx.PressAsync(Keys.Tab);
+
+        await ctx.Expect(ctx.GetByRole("button", "After text")).ToBeFocusedAsync();
+    }
+
+    [Fact]
+    public async Task Only_targets_that_cancel_dragover_receive_drops()
+    {
+        await using var session = await RenderAsync("tests-emulation-extras--default");
+        var ctx = session.StoryContext;
+
+        await ctx.GetByTestId("card").DragToAsync(ctx.GetByTestId("no-drop"));
+        await ctx.Expect(ctx.GetByTestId("drops")).ToHaveTextAsync("0/1");
+
+        await ctx.GetByTestId("card").DragToAsync(ctx.GetByTestId("target"));
+        await ctx.Expect(ctx.GetByTestId("drops")).ToHaveTextAsync("1/1");
+    }
+
+    [Theory]
+    [InlineData(BlazorTestPlatform.Drivers.MouseButton.Left, "1")]
+    [InlineData(BlazorTestPlatform.Drivers.MouseButton.Right, "2")]
+    [InlineData(BlazorTestPlatform.Drivers.MouseButton.Middle, "4")]
+    public async Task Mouse_buttons_report_the_dom_bitmask(BlazorTestPlatform.Drivers.MouseButton button, string expected)
+    {
+        await using var session = await RenderAsync("tests-emulation-extras--default");
+        var ctx = session.StoryContext;
+
+        await ctx.GetByTestId("mouse").ClickAsync(button: button);
+
+        await ctx.Expect(ctx.GetByTestId("buttons")).ToHaveTextAsync(expected);
+    }
+
+    [Fact]
+    public async Task Focus_survives_content_inserted_before_the_focused_element()
+    {
+        await using var session = await RenderAsync("tests-inserts-before-focus--default");
+        var ctx = session.StoryContext;
+        var reveal = ctx.GetByRole("button", "Reveal");
+
+        await reveal.ClickAsync();
+        await ctx.Expect(ctx.GetByText("Inserted above")).ToBeVisibleAsync();
+
+        await ctx.Expect(reveal).ToBeFocusedAsync();
+        await ctx.PressAsync(Keys.Tab);
+        await ctx.Expect(ctx.GetByRole("button", "Next")).ToBeFocusedAsync();
+    }
 }

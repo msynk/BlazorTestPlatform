@@ -35,6 +35,86 @@ public sealed class AssertionTests
         await Assert.ThrowsAsync<StoryAssertionException>(() => ctx.Expect(ctx.GetByRole("listitem")).Not.ToHaveTextAsync("Other"));
     }
 
+    public static TheoryData<string> NegatedStateAssertions => ["disabled", "enabled", "checked", "focused", "editable", "contain"];
+
+    [Theory]
+    [MemberData(nameof(NegatedStateAssertions))]
+    public async Task Negated_state_assertions_fail_on_missing_or_ambiguous_elements(string assertion)
+    {
+        foreach (var matches in new[] { 0, 2 })
+        {
+            var ctx = new StoryContext(Story, new FixedDriver(matches), TimeSpan.FromMilliseconds(50));
+            var not = ctx.Expect(ctx.GetByRole("listitem")).Not;
+            Task Run() => assertion switch
+            {
+                "disabled" => not.ToBeDisabledAsync(),
+                "enabled" => not.ToBeEnabledAsync(),
+                "checked" => not.ToBeCheckedAsync(),
+                "focused" => not.ToBeFocusedAsync(),
+                "editable" => not.ToBeEditableAsync(),
+                _ => not.ToContainTextAsync("zzz"),
+            };
+
+            var error = await Assert.ThrowsAsync<StoryAssertionException>(Run);
+            Assert.Contains(matches == 0 ? "not found" : "strict mode violation", error.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task Negated_state_assertions_pass_on_one_element_in_the_other_state()
+    {
+        var ctx = new StoryContext(Story, new FixedDriver(1), TimeSpan.FromMilliseconds(50));
+
+        await ctx.Expect(ctx.GetByRole("listitem")).Not.ToBeDisabledAsync();
+        await ctx.Expect(ctx.GetByRole("listitem")).Not.ToBeCheckedAsync();
+        await ctx.Expect(ctx.GetByRole("listitem")).Not.ToContainTextAsync("zzz");
+    }
+
+    [Fact]
+    public async Task Visibility_assertions_are_strict_but_a_missing_element_is_hidden()
+    {
+        var two = new StoryContext(Story, new FixedDriver(2), TimeSpan.FromMilliseconds(50));
+        var none = new StoryContext(Story, new FixedDriver(0), TimeSpan.FromMilliseconds(50));
+
+        await Assert.ThrowsAsync<StoryAssertionException>(() => two.Expect(two.GetByRole("listitem")).ToBeVisibleAsync());
+        await Assert.ThrowsAsync<StoryAssertionException>(() => two.Expect(two.GetByRole("listitem")).Not.ToBeVisibleAsync());
+        await Assert.ThrowsAsync<StoryAssertionException>(() => two.Expect(two.GetByRole("listitem")).ToBeHiddenAsync());
+        Assert.False(await two.GetByRole("listitem").IsVisibleAsync());
+
+        await none.Expect(none.GetByRole("listitem")).ToBeHiddenAsync();
+        await none.Expect(none.GetByRole("listitem")).Not.ToBeVisibleAsync();
+        await Assert.ThrowsAsync<StoryAssertionException>(() => none.Expect(none.GetByRole("listitem")).ToBeVisibleAsync());
+    }
+
+    [Fact]
+    public async Task Zero_times_waits_for_idle_like_the_not_form()
+    {
+        var driver = new FixedDriver(0);
+        var ctx = new StoryContext(Story, driver, TimeSpan.FromMilliseconds(50));
+
+        await ctx.ExpectAction("OnPing").ToHaveBeenCalledAsync(times: 0);
+
+        Assert.Equal(1, driver.IdleWaits);
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => ctx.ExpectAction("OnPing").ToHaveBeenCalledAsync(times: -1));
+    }
+
+    [Fact]
+    public void JS_arguments_format_collections_and_objects_by_content()
+    {
+        Assert.Equal("[1, 2, 3]", JSCallLog.Format(new[] { 1, 2, 3 }));
+        Assert.NotEqual(JSCallLog.Format(new[] { 1, 2, 3 }), JSCallLog.Format(new[] { 9 }));
+        Assert.Equal("[\"a, b\"]", JSCallLog.Format(new[] { "a, b" }));
+        Assert.Equal("[\"a\", \"b\"]", JSCallLog.Format(new List<string> { "a", "b" }));
+        Assert.Equal("{\"x\": 1, \"y\": [true, null]}", JSCallLog.Format(new Dictionary<string, object?> { ["x"] = 1, ["y"] = new object?[] { true, null } }));
+        Assert.Equal("{\"width\":10,\"label\":\"w\"}", JSCallLog.Format(new Size(10, "w")));
+        Assert.Equal("plain", JSCallLog.Format("plain"));
+        Assert.Equal("1.5", JSCallLog.Format(1.5));
+        Assert.Equal("true", JSCallLog.Format(true));
+        Assert.Null(JSCallLog.Format(null));
+    }
+
+    private sealed record Size(int Width, string Label);
+
     [Fact]
     public void Failure_messages_end_with_the_timeline()
     {
@@ -79,7 +159,13 @@ public sealed class AssertionTests
 
         public Task<IReadOnlyList<ActionRecord>> GetActionsAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<ActionRecord>>([]);
 
-        public Task WaitForIdleAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public int IdleWaits { get; private set; }
+
+        public Task WaitForIdleAsync(CancellationToken cancellationToken)
+        {
+            IdleWaits++;
+            return Task.CompletedTask;
+        }
 
         public Task AdvanceTimeAsync(TimeSpan delta, CancellationToken cancellationToken) => Task.CompletedTask;
 

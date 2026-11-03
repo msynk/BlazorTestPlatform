@@ -24,9 +24,18 @@ public sealed class InAppStoryDriver : IStoryDriver
         _renderContext = renderContext ?? throw new ArgumentNullException(nameof(renderContext));
         _services = services ?? throw new ArgumentNullException(nameof(services));
         Name = $"in-app ({renderer})";
-        Capabilities = DriverCapabilities.RealBrowser | DriverCapabilities.Layout | DriverCapabilities.Css | DriverCapabilities.JavaScript | DriverCapabilities.NativeFocus
-            | (services.Overrides?.GetService<FakeTimeProvider>() is not null ? DriverCapabilities.FakeTime : DriverCapabilities.None);
+        Capabilities = Common | (services.Overrides?.GetService<FakeTimeProvider>() is not null ? DriverCapabilities.FakeTime : DriverCapabilities.None);
     }
+
+    private const DriverCapabilities Common =
+        DriverCapabilities.RealBrowser | DriverCapabilities.Layout | DriverCapabilities.Css | DriverCapabilities.JavaScript | DriverCapabilities.NativeFocus;
+
+    /// <summary>
+    /// What the in-app driver offers a story (fake time when the story uses it), for test data sources that leave out
+    /// stories it cannot run (<see cref="Story.CanRunOn"/>). It cannot emulate browser APIs or capture screenshots.
+    /// </summary>
+    public static DriverCapabilities CapabilitiesFor(Story story) =>
+        Common | ((story ?? throw new ArgumentNullException(nameof(story))).FakeTimeStart is not null ? DriverCapabilities.FakeTime : DriverCapabilities.None);
 
     /// <inheritdoc />
     public string Name { get; }
@@ -122,6 +131,9 @@ public sealed class InAppStoryDriver : IStoryDriver
 
     /// <inheritdoc />
     public async Task<string> GetMarkupAsync(CancellationToken cancellationToken) => await _module.InvokeAsync<string>("markup", cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<string> GetAriaSnapshotAsync(CancellationToken cancellationToken) => await _module.InvokeAsync<string>("ariaSnapshot", cancellationToken);
 
     /// <inheritdoc />
     public Task<IReadOnlyList<HttpRequestRecord>> GetHttpRequestsAsync(CancellationToken cancellationToken) =>

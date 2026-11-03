@@ -139,4 +139,70 @@ public sealed class CssVisibilityTests
         Assert.Single(DomFacts.TabOrder(scope));
         Assert.Empty(new MarkupAccessibilityAnalyzer().Analyze(DomScope.Parse("<div class='closed'><button></button></div>", CssVisibility.Parse(".closed { display: none }"))).Violations);
     }
+
+    [Fact]
+    public void Rules_inside_cascade_layers_apply()
+    {
+        // Tailwind v4 emits its utilities inside @layer utilities.
+        const string css = "@layer theme, base, components, utilities; @layer utilities { .hidden { display: none } }";
+
+        Assert.True(Hidden(css, "<div class='hidden'><span id='x'>x</span></div>", "x"));
+        Assert.True(Hidden("@layer { .h { display: none } }", "<p id='x' class='h'>x</p>", "x"));
+        Assert.True(Hidden("@media (min-width: 1px) { @layer a { .h { display: none } } }", "<p id='x' class='h'>x</p>", "x"));
+    }
+
+    [Theory]
+    [InlineData("@layer a { #x { display: none } } .s { display: block }", false)] // unlayered beats any layer, even with lower specificity
+    [InlineData("@layer a, b; @layer b { .s { display: none } } @layer a { #x { display: block } }", true)] // later layer wins
+    [InlineData("@layer a, b; @layer a { .s { display: none !important } } @layer b { .s { display: block !important } }", true)] // !important: earlier layer wins
+    [InlineData("@layer a { .s { display: none !important } } .s { display: block !important }", true)] // !important: layered beats unlayered
+    [InlineData("@layer a { @layer inner { .s { display: block } } .s { display: none } }", true)] // a layer's own rules beat its sub-layers
+    public void Layer_order_decides_before_specificity(string css, bool hidden) =>
+        Assert.Equal(hidden, Hidden(css, "<p id='x' class='s'>x</p>", "x"));
+
+    [Fact]
+    public void Container_queries_are_evaluated_against_the_viewport()
+    {
+        const string css = "@container card (max-width: 600px) { .wide { display: none } } @container (min-width: 1px) { .always { display: none } } @container style(--dark: 1) { .styled { display: none } }";
+        var html = "<p id='w' class='wide'>w</p><p id='a' class='always'>a</p><p id='s' class='styled'>s</p>";
+
+        var desktop = DomScope.Parse(html, CssVisibility.Parse([css], MediaEnvironment.For(BlazorTestPlatform.Viewport.Desktop)));
+        var mobile = DomScope.Parse(html, CssVisibility.Parse([css], MediaEnvironment.For(BlazorTestPlatform.Viewport.Mobile)));
+
+        Assert.False(DomFacts.IsHidden(desktop.GetElementById("w")!, desktop));
+        Assert.True(DomFacts.IsHidden(mobile.GetElementById("w")!, mobile));
+        Assert.True(DomFacts.IsHidden(desktop.GetElementById("a")!, desktop));
+        Assert.False(DomFacts.IsHidden(desktop.GetElementById("s")!, desktop));
+    }
+
+    [Fact]
+    public void Each_selector_of_a_list_keeps_its_own_specificity()
+    {
+        // ".a.b" (0,2,0) beats ".a" (0,1,0); the list's "#zz" never matched and must not lend its specificity.
+        Assert.False(Hidden(".a.b { display: block } #zz, .a { display: none }", "<p id='x' class='a b'>x</p>", "x"));
+        Assert.True(Hidden(".a.b { display: block } #x, .a { display: none }", "<p id='x' class='a b'>x</p>", "x"));
+    }
+
+    [Fact]
+    public void Visibility_inherit_takes_the_parent_value()
+    {
+        Assert.True(Hidden(".p { visibility: hidden } .c { visibility: inherit }", "<div class='p'><span id='x' class='c'>x</span></div>", "x"));
+        Assert.False(Hidden(".p { visibility: hidden } .c { visibility: visible }", "<div class='p'><span id='x' class='c'>x</span></div>", "x"));
+        Assert.False(Hidden(".p { visibility: hidden } .c { visibility: initial }", "<div class='p'><span id='x' class='c'>x</span></div>", "x"));
+    }
+
+    [Fact]
+    public void Author_display_overrides_the_hidden_attribute()
+    {
+        Assert.False(Hidden(".shown { display: flex }", "<div id='x' class='shown' hidden>x</div>", "x"));
+        Assert.True(Hidden(".other { display: flex }", "<div id='x' hidden>x</div>", "x"));
+        Assert.False(Hidden(string.Empty, "<div id='x' hidden style='display: block'>x</div>", "x"));
+    }
+
+    [Fact]
+    public void Boolean_media_features_follow_the_environment()
+    {
+        Assert.True(Hidden("@media (prefers-reduced-motion) { .anim { display: none } }", "<p id='x' class='anim'>x</p>", "x"));
+        Assert.False(Hidden("@media (forced-colors) { .fc { display: none } }", "<p id='x' class='fc'>x</p>", "x"));
+    }
 }

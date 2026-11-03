@@ -26,8 +26,16 @@
                                                             │ StoryServiceScope (overrides)    │
                                                             │ InAppStoryDriver (in-frame play) │
                                                             └──────────────────────────────────┘
-               BlazorTestPlatform.Reporting (HTML · JUnit · Markdown · flake history · PR comment) ◀── results JSON ──▶ btp CLI
+               BlazorTestPlatform.Reporting (HTML · JUnit · Markdown · SARIF · flake history · PR comment) ◀── results JSON ──▶ btp CLI
+               BlazorTestPlatform.Xunit / .NUnit / .MSTest / .TUnit (data rows, skip reporting) ── StoryTestCase ──▶ Core
 ```
+
+Core also holds the cross-cutting services every runner shares: `BtpTelemetry` (an `ActivitySource` and a `Meter`
+named `BlazorTestPlatform`), `StoryImpact` (changed files to stories), `BrowserEmulation` and `BrowserBudget` (applied
+by the Playwright runner) and the driver contract's accessibility snapshot (`GetAriaSnapshotAsync`, computed by
+`AriaSnapshot` in bUnit and by its port in `btp-driver.js` in browsers). The Core package ships two analyzer
+assemblies under `analyzers/dotnet/cs`: the source generator with the story analyzers, and their code fixes
+(`BlazorTestPlatform.CodeFixes`, separate because analyzers must not load Workspaces).
 
 ## Discovery without reflection
 
@@ -83,4 +91,4 @@ Task<IReadOnlyList<JSCallRecord>> GetJSCallsAsync(CancellationToken ct);
 
 To support JS mocks and `ExpectJSCall`, wrap the `IJSRuntime` your host gives components with `StoryJSRuntime.Create(runtime, story.JSInterop, log, mode)` when the story declares mocks (`story.JSInterop` is null otherwise). `JSMockMode.Answer` answers mocks in the wrapper, `AnsweredByInner` lets a mocking runtime such as bUnit's answer them and only records, and `RecordOnly` records while real JavaScript answers.
 
-Then run stories through `new StoryContext(story, driver)` and, for stories that have one (`story.HasPlay`), `story.Play!(context)`. `BlazorTestPlatform.Accessibility.Dom.DomQueries` resolves locator chains against any AngleSharp DOM.
+Then run stories through `new StoryContext(story, driver)` and, for stories that have one (`story.HasPlay`), `story.Play!(context)`. Before rendering, skip stories whose declared requirements the driver does not meet: `story.UnsupportedReason(driver.Capabilities, driver.Name)` returns the reason to report (null when the story can run). Claim only capabilities the driver really has; an emulated or approximated behaviour (the bUnit driver's focus, CSS and JavaScript) is not a capability, so stories that need the real thing are skipped instead of passing against an approximation. `BlazorTestPlatform.Accessibility.Dom.DomQueries` resolves locator chains against any AngleSharp DOM.

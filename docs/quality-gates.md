@@ -33,6 +33,8 @@ There are two engines, both reporting axe rule ids:
 | Markup rules (`btp-markup`) | bUnit, in milliseconds | 37 rules: names (buttons, links, inputs, images, frames, dialogs...), ARIA validity (roles, attributes, values, required attributes, required children and parents), `aria-hidden` focusability, nested interactive elements, tabindex, duplicate ids, list and definition-list structure, heading order, multiple labels |
 | axe-core (bundled) | Every browser cell, scoped to the story root (`[data-btp-root]`) | Every axe rule with the policy's tags, including color contrast, target size and scrollable regions. Page-level rules (such as `landmark-one-main`) find no page around a story, so they effectively don't apply. |
 
+The markup rules follow axe-core where it does not fail markup: empty id references, `aria-controls` on collapsed disclosures and unselected tabs (whose panels are not rendered), `aria-owns` on collapsed comboboxes, missing `aria-labelledby`/`aria-describedby` targets (axe reports them for review), empty lists, listboxes, menus, tablists, trees and grids, and hidden elements are not violations; `nested-interactive` only checks roles whose children are presentational (buttons, checkboxes, tabs, options...), so links and APG tree items may contain focusable content. The markup engine checks structure only; color contrast, target size and anything else that needs layout run in browsers through axe-core.
+
 **Policy** (`btp.json` → `accessibility`, or `AccessibilityPolicy` in code):
 
 * `failOn`: the minimum impact that fails the build. Default `serious`.
@@ -72,6 +74,34 @@ s.Performance(p =>
 * Baselines (`__baselines__/performance.json`) catch drift. Render counts are compared exactly. Allocations get +10% and 4 KiB of slack. Timing gets +50% and 5 ms, and only warns by default because shared CI agents are noisy. A missing baseline is written on local runs; on CI it isn't written and doesn't fail the build, and the report shows that the story has no baseline. Set `TrackBaseline = false` in `Performance(...)` to check the absolute budgets only.
 * Accept intended changes with `BTP_UPDATE_PERF=1` or `btp perf approve`.
 * Timing is the noisy metric: for stable durations, run performance stories in a non-parallel test collection.
+
+## Browser runtime metrics
+
+Every real-browser run records what the browser reports through the Performance Timeline (`StoryResult.BrowserMetrics`):
+cumulative layout shift, largest contentful paint, long tasks (count and total time), the element count of the story
+root and the JS heap size. Browsers report different sets: Chromium all of them, Firefox the largest contentful paint
+(no layout shifts, long tasks or heap size), WebKit fewer still; a metric a browser does not report is null, never 0.
+
+```csharp
+s.BrowserBudget(b =>
+{
+    b.MaxLayoutShift = 0.1;                                   // Core Web Vitals "good"
+    b.MaxLargestContentfulPaint = TimeSpan.FromSeconds(2.5);
+    b.MaxLongTaskDuration = TimeSpan.FromMilliseconds(200);   // main-thread blocking during render and play
+    b.MaxDomNodes = 400;
+});
+```
+
+Budgets are checked after the play function and fail the run when exceeded (the violations are on the result and in the
+report). A limit on a metric the browser does not report is listed in the timeline as not checked, so Firefox and WebKit
+runs never pass a layout-shift budget silently. Metrics cover the story frame: render, hydration and play, not the
+workbench shell.
+
+## Accessibility tree snapshots
+
+`ctx.ExpectAriaSnapshotAsync(...)` asserts the roles, names and states of a story as a tree, identically under bUnit,
+Playwright and the in-app driver ([interactions](interactions.md#accessibility-tree-snapshots)). Use it for structure
+that matters to screen-reader users (landmarks, heading levels, control names), next to axe for rule violations.
 
 ## Story state coverage
 

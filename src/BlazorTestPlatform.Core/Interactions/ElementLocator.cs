@@ -145,11 +145,11 @@ public sealed class ElementLocator
     /// <summary>Waits for one match and returns its value.</summary>
     public async Task<string?> InputValueAsync() => (await InfoAsync().ConfigureAwait(false)).Value;
 
-    /// <summary>True when exactly one match is visible now.</summary>
+    /// <summary>True when exactly one element matches now and it is visible (no waiting).</summary>
     public async Task<bool> IsVisibleAsync()
     {
         var all = await AllAsync().ConfigureAwait(false);
-        return all.Count > 0 && all.All(e => e.IsVisible);
+        return all.Count == 1 && all[0].IsVisible;
     }
 
     /// <summary>True when the single match is enabled.</summary>

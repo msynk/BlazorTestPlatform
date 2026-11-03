@@ -1,4 +1,5 @@
 using BlazorTestPlatform.Configuration;
+using BlazorTestPlatform.Drivers;
 using BlazorTestPlatform.Results;
 
 namespace BlazorTestPlatform.Bunit.Tests;
@@ -75,6 +76,90 @@ public sealed class BunitDriverTests
 
         Assert.Equal(StoryOutcome.Skipped, result.Outcome);
         Assert.Contains("Layout", result.SkipReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Exceptions_thrown_after_an_await_fail_the_story()
+    {
+        var result = await BunitStoryRunner.RunAsync(Catalog.Get("tests-crashes-later--failing-after-await"), Options);
+
+        Assert.Equal(StoryOutcome.Failed, result.Outcome);
+        Assert.Contains("boom after await", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Caller_cancellation_is_not_reported_as_a_timeout()
+    {
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => BunitStoryRunner.RunAsync(Catalog.Get("tests-counter--clicks-twice"), Options, cancelled.Token));
+    }
+
+    [Fact]
+    public async Task Story_timeouts_are_reported_as_failures()
+    {
+        var options = Options;
+        options.Timeout = TimeSpan.FromMilliseconds(1);
+
+        var result = await BunitStoryRunner.RunAsync(Catalog.Get("tests-counter--failing-play"), options);
+
+        Assert.Equal(StoryOutcome.Failed, result.Outcome);
+        Assert.Contains("timed out", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Runs_with_another_viewport_get_their_own_result_key()
+    {
+        var mobile = Options;
+        mobile.Viewport = Viewport.Mobile;
+
+        var desktopResult = await BunitStoryRunner.RunAsync(Catalog.Get("tests-counter--default"), Options);
+        var mobileResult = await BunitStoryRunner.RunAsync(Catalog.Get("tests-counter--default"), mobile);
+
+        Assert.Equal("tests-counter--default|bunit", desktopResult.Key);
+        Assert.Equal("tests-counter--default|bunit|mobile", mobileResult.Key);
+    }
+
+    [Fact]
+    public void Medians_average_the_middle_pair()
+    {
+        Assert.Equal(2.5, BunitStoryRunner.Median([1, 2, 3, 4]));
+        Assert.Equal(3, BunitStoryRunner.Median([1, 3, 9]));
+    }
+
+    [Fact]
+    public async Task Declared_requirements_skip_before_rendering_with_the_reason()
+    {
+        var result = await BunitStoryRunner.RunAsync(Catalog.Get("tests-counter--declares-layout"), Options);
+
+        Assert.Equal(StoryOutcome.Skipped, result.Outcome);
+        Assert.Contains("Layout (measuring the popover position)", result.SkipReason, StringComparison.Ordinal);
+        Assert.Contains("'bunit'", result.SkipReason, StringComparison.Ordinal);
+        Assert.Empty(result.Steps);
+    }
+
+    [Fact]
+    public async Task Declared_requirements_the_driver_meets_run_normally()
+    {
+        var story = Catalog.Get("tests-counter--declares-fake-time");
+        var result = await BunitStoryRunner.RunAsync(story, Options);
+
+        Assert.Equal(StoryOutcome.Passed, result.Outcome);
+        Assert.True(story.CanRunOn(BunitStoryDriver.CapabilitiesFor(story)));
+    }
+
+    [Fact]
+    public void Catalogs_select_the_stories_a_driver_can_run()
+    {
+        var inMemory = Catalog.Supporting(DriverCapabilities.None);
+        var browser = Catalog.Supporting(DriverCapabilities.RealBrowser | DriverCapabilities.Layout | DriverCapabilities.FakeTime);
+
+        Assert.DoesNotContain("tests-counter--declares-layout", inMemory.Ids);
+        Assert.DoesNotContain("tests-counter--declares-fake-time", inMemory.Ids);
+        Assert.Contains("tests-counter--declares-layout", browser.Ids);
+        Assert.Contains("tests-counter--declares-fake-time", browser.Ids);
+        Assert.Equal(DriverCapabilities.Layout, Catalog.Get("tests-counter--declares-layout").RequiredCapabilities);
     }
 
     [Fact]

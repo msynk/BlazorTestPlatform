@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Globalization;
 using BlazorTestPlatform;
 using BlazorTestPlatform.Accessibility;
+using BlazorTestPlatform.Cli;
 using BlazorTestPlatform.Configuration;
 using BlazorTestPlatform.Coverage;
 using BlazorTestPlatform.Performance;
@@ -38,15 +39,22 @@ var prComment = new Option<bool>("--pr-comment") { Description = "Post the Markd
 var pullRequest = new Option<int?>("--pr") { Description = "Pull request number for --pr-comment (default: from the GitHub Actions event)." };
 var repository = new Option<string?>("--repository") { Description = "Repository (owner/name) for --pr-comment (default: GITHUB_REPOSITORY)." };
 var reportUrl = new Option<string?>("--report-url") { Description = "Link to the published HTML report, added to the Markdown summary (default: the GitHub Actions run)." };
+var sarif = new Option<string?>("--sarif") { Description = "Also write a SARIF 2.1.0 log (accessibility violations, failures, visual and performance regressions) for code scanning." };
+var sourceRoot = new Option<string?>("--source-root") { Description = "Repository root that SARIF locations are relative to (default: the current directory)." };
 var report = new Command("report", "Aggregate results into an HTML report (plus optional JUnit, Markdown, flake history and a pull-request comment).")
 {
-    results, output, junit, markdown, githubSummary, history, runId, failOnFailures, prComment, pullRequest, repository, reportUrl,
+    results, output, junit, markdown, githubSummary, history, runId, failOnFailures, prComment, pullRequest, repository, reportUrl, sarif, sourceRoot,
 };
 report.SetAction(async (parse, cancellationToken) =>
 {
     var settings = Settings(parse);
     var directories = ResultDirectories(parse, settings);
-    var summary = RunSummary.From(Read(directories));
+    var summary = RunSummary.From(Read(directories, out var unreadable));
+    foreach (var problem in unreadable)
+    {
+        Console.Error.WriteLine($"warning: unreadable result {problem}");
+    }
+
     if (summary.Total == 0)
     {
         Console.Error.WriteLine($"No results found in: {string.Join(", ", directories)}");
@@ -56,7 +64,12 @@ report.SetAction(async (parse, cancellationToken) =>
     FlakeReport? flakes = null;
     if (parse.GetValue(history) is { } historyPath)
     {
-        var flakeHistory = FlakeHistory.Load(historyPath);
+        var flakeHistory = FlakeHistory.Load(historyPath, out var historyProblem);
+        if (historyProblem is not null)
+        {
+            Console.Error.WriteLine($"warning: {historyProblem}");
+        }
+
         flakeHistory.Add(parse.GetValue(runId) ?? Environment.GetEnvironmentVariable("GITHUB_RUN_ID") ?? Environment.GetEnvironmentVariable("BUILD_BUILDID") ?? DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture), summary.Results);
         flakeHistory.Save(historyPath);
         flakes = flakeHistory.Analyze();
@@ -71,6 +84,12 @@ report.SetAction(async (parse, cancellationToken) =>
     {
         JUnitReportWriter.Write(summary, junitPath);
         Console.WriteLine($"JUnit XML:   {Path.GetFullPath(junitPath)}");
+    }
+
+    if (parse.GetValue(sarif) is { } sarifPath)
+    {
+        SarifReportWriter.Write(summary, sarifPath, new SarifOptions { SourceRoot = parse.GetValue(sourceRoot) });
+        Console.WriteLine($"SARIF:       {Path.GetFullPath(sarifPath)}");
     }
 
     var link = parse.GetValue(reportUrl) ?? GitHubRunUrl();
@@ -88,33 +107,39 @@ report.SetAction(async (parse, cancellationToken) =>
 
     if (parse.GetValue(prComment))
     {
-        // A missing token or a read-only one (pull requests from forks) must not fail the build: the report is still there.
-        using var http = new HttpClient();
-        var comment = GitHubPullRequestComment.FromEnvironment(http, out var problem, parse.GetValue(pullRequest), parse.GetValue(repository));
-        if (comment is null)
+        // A missing token, a read-only one (pull requests from forks), a timeout or a malformed API URL must not fail
+        // the build: the report is still there.
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        try
         {
-            Console.WriteLine($"PR comment:  skipped. {problem}");
-        }
-        else
-        {
-            try
+            var comment = GitHubPullRequestComment.FromEnvironment(http, out var problem, parse.GetValue(pullRequest), parse.GetValue(repository));
+            if (comment is null)
+            {
+                Console.WriteLine($"PR comment:  skipped. {problem}");
+            }
+            else
             {
                 var posted = await comment.UpsertAsync(md, cancellationToken);
                 Console.WriteLine($"PR comment:  {(posted.Created ? "posted" : "updated")} {posted.Url}");
             }
-            catch (HttpRequestException ex)
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or UriFormatException or System.Text.Json.JsonException or InvalidOperationException && !cancellationToken.IsCancellationRequested)
+        {
+            Console.WriteLine($"PR comment:  skipped. {ex.Message}");
+            if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") is { Length: > 0 })
             {
-                Console.WriteLine($"PR comment:  skipped. {ex.Message}");
-                if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") is { Length: > 0 })
-                {
-                    Console.WriteLine($"::warning title=BlazorTestPlatform::Could not comment on the pull request. {ex.Message.ReplaceLineEndings(" ")}");
-                }
+                Console.WriteLine($"::warning title=BlazorTestPlatform::Could not comment on the pull request. {ex.Message.ReplaceLineEndings(" ")}");
             }
         }
     }
 
     PrintSummary(summary);
-    return parse.GetValue(failOnFailures) && !summary.Success ? 1 : 0;
+    if (unreadable.Count > 0)
+    {
+        Console.WriteLine($"  {unreadable.Count} result file(s) could not be read; they may hide failures.");
+    }
+
+    return parse.GetValue(failOnFailures) && (!summary.Success || unreadable.Count > 0) ? 1 : 0;
 });
 root.Add(report);
 
@@ -126,10 +151,11 @@ approve.SetAction(parse =>
 {
     var settings = Settings(parse);
     var pattern = parse.GetValue(filter);
-    var candidates = Read(ResultDirectories(parse, settings))
-        .Where(r => r.Visual is { ActualPath: not null } v && v.Status is VisualStatus.Mismatched or VisualStatus.SizeMismatch or VisualStatus.MissingBaseline)
-        .Where(r => pattern is null || GlobMatch(r.StoryId, pattern) || GlobMatch(r.Visual!.SnapshotName, pattern))
-        .GroupBy(r => r.Visual!.SnapshotName, StringComparer.Ordinal)
+    var candidates = ResultDirectories(parse, settings)
+        .SelectMany(directory => new ResultsStore(directory).ReadAll().Select(result => (Result: result, Directory: directory)))
+        .Where(c => c.Result.Visual is { ActualPath: not null } v && v.Status is VisualStatus.Mismatched or VisualStatus.SizeMismatch or VisualStatus.MissingBaseline)
+        .Where(c => pattern is null || GlobMatch(c.Result.StoryId, pattern) || GlobMatch(c.Result.Visual!.SnapshotName, pattern))
+        .GroupBy(c => c.Result.Visual!.SnapshotName, StringComparer.Ordinal)
         .Select(g => g.First())
         .ToArray();
 
@@ -139,18 +165,35 @@ approve.SetAction(parse =>
         return 0;
     }
 
-    foreach (var result in candidates)
+    // Baselines are written into this project's snapshot directory only, from images inside the results directory the
+    // result was read from: a results file (for example a downloaded CI artifact) cannot point the copy anywhere else.
+    var approved = 0;
+    var failed = 0;
+    foreach (var (result, directory) in candidates)
     {
         var visual = result.Visual!;
-        Console.WriteLine($"{(parse.GetValue(dryRun) ? "would approve" : "approved")}  {visual.SnapshotName}  ({visual.Status}, {visual.DiffPixels:N0} px)");
-        if (!parse.GetValue(dryRun))
+        if (parse.GetValue(dryRun))
         {
-            SnapshotStore.Approve(visual);
+            Console.WriteLine($"would approve  {visual.SnapshotName}  ({visual.Status}, {visual.DiffPixels:N0} px)");
+            approved++;
+            continue;
+        }
+
+        try
+        {
+            SnapshotStore.Approve(visual, settings.SnapshotDirectoryPath, directory);
+            Console.WriteLine($"approved  {visual.SnapshotName}  ({visual.Status}, {visual.DiffPixels:N0} px)");
+            approved++;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"skipped   {visual.SnapshotName}: {ex.Message}");
+            failed++;
         }
     }
 
-    Console.WriteLine(parse.GetValue(dryRun) ? $"{candidates.Length} snapshot(s) would be approved." : $"{candidates.Length} baseline(s) updated. Review and commit them.");
-    return 0;
+    Console.WriteLine(parse.GetValue(dryRun) ? $"{approved} snapshot(s) would be approved." : $"{approved} baseline(s) updated. Review and commit them.");
+    return failed == 0 ? 0 : 1;
 });
 root.Add(approve);
 
@@ -162,7 +205,7 @@ perfApprove.SetAction(parse =>
     var settings = Settings(parse);
     var store = new PerformanceBaselineStore(parse.GetValue(baselineFile) ?? settings.PerformanceBaselineFilePath);
     var pattern = parse.GetValue(filter);
-    var measured = Read(ResultDirectories(parse, settings))
+    var measured = ReadResults(ResultDirectories(parse, settings))
         .Where(r => r.Performance is not null && (pattern is null || GlobMatch(r.StoryId, pattern)))
         .ToArray();
     foreach (var result in measured)
@@ -249,19 +292,79 @@ flaky.SetAction(parse =>
     Console.WriteLine($"{analysis.Runs} runs analysed.");
     foreach (var entry in analysis.Entries.Take(25))
     {
-        Console.WriteLine($"{entry.FlakeRate,6:P0}  {entry.Unstable,3}/{entry.Runs,-3}  {entry.Key}");
+        Console.WriteLine($"{entry.FlakeRate,6:P0}  {entry.Unstable,3}/{entry.Runs,-3}  flips {entry.Flips,-3}  {entry.Key}");
     }
 
     return 0;
 });
 root.Add(flaky);
 
+// btp init
+var framework = new Option<TestFramework>("--framework", "-f") { Description = "Test framework of the project: xunit, nunit, mstest or tunit.", DefaultValueFactory = _ => TestFramework.Xunit };
+var ci = new Option<CiSystem>("--ci") { Description = "Also write a CI pipeline: github, azure, gitlab or none.", DefaultValueFactory = _ => CiSystem.None };
+var component = new Option<string?>("--component") { Description = "Write a first story for this component (type name, optionally namespace-qualified)." };
+var scaffoldNamespace = new Option<string?>("--namespace") { Description = "Namespace of the generated classes (default: from the project directory name)." };
+var overwrite = new Option<bool>("--force") { Description = "Overwrite files that already exist." };
+var init = new Command("init", "Scaffold btp.json, a story test class for xUnit, NUnit, MSTest or TUnit, a first story and a CI pipeline.")
+{
+    framework, ci, component, scaffoldNamespace, overwrite,
+};
+init.SetAction(parse =>
+{
+    var directory = Path.GetFullPath(parse.GetValue(project) ?? Environment.CurrentDirectory);
+    if (!Directory.Exists(directory))
+    {
+        Console.Error.WriteLine($"Project directory not found: {directory}");
+        return 1;
+    }
+
+    var chosen = parse.GetValue(framework);
+    var options = new ScaffoldOptions
+    {
+        ProjectDirectory = directory,
+        Namespace = parse.GetValue(scaffoldNamespace) is { Length: > 0 } explicitNamespace ? explicitNamespace : NamespaceFor(Path.GetFileName(directory)),
+        Framework = chosen,
+        Ci = parse.GetValue(ci),
+        Component = parse.GetValue(component),
+        RepositoryRoot = RepositoryRoot(directory),
+    };
+
+    foreach (var (path, content) in Scaffolding.Plan(options))
+    {
+        if (File.Exists(path) && !parse.GetValue(overwrite))
+        {
+            Console.WriteLine($"  kept     {Display(path)} (exists; --force overwrites)");
+            continue;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content);
+        Console.WriteLine($"  created  {Display(path)}");
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("Next: add the packages the generated code uses, then run the tests.");
+    Console.WriteLine($"  dotnet add \"{directory}\" package BlazorTestPlatform.Bunit --prerelease");
+    Console.WriteLine($"  dotnet add \"{directory}\" package {Scaffolding.AdapterPackage(chosen)} --prerelease");
+    return 0;
+});
+root.Add(init);
+
 // btp clean
 var clean = new Command("clean", "Delete the results directory (baselines are kept).");
 clean.SetAction(parse =>
 {
     var settings = Settings(parse);
-    settings.CreateResultsStore().Clear();
+    try
+    {
+        settings.CreateResultsStore().Clear();
+    }
+    catch (InvalidOperationException ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        return 1;
+    }
+
     Console.WriteLine($"Deleted {settings.ResultsDirectoryPath}");
     return 0;
 });
@@ -274,6 +377,33 @@ BtpSettings Settings(ParseResult parse) => BtpSettings.Load(Path.GetFullPath(par
 string[] ResultDirectories(ParseResult parse, BtpSettings settings) =>
     parse.GetValue(results) is { Length: > 0 } explicitDirectories ? explicitDirectories.Select(Path.GetFullPath).ToArray() : [settings.ResultsDirectoryPath];
 
+// Relative to the current directory when inside it, else the full path.
+string Display(string path) => Path.GetRelativePath(Environment.CurrentDirectory, path) is var relative && !relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative) ? relative : path;
+
+// A valid C# namespace from a directory name: "My App.Tests" -> "My_App.Tests".
+string NamespaceFor(string name)
+{
+    var parts = name.Split('.', StringSplitOptions.RemoveEmptyEntries).Select(part =>
+    {
+        var identifier = new string(part.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_').ToArray());
+        return identifier.Length == 0 || char.IsDigit(identifier[0]) ? "_" + identifier : identifier;
+    }).ToArray();
+    return parts.Length == 0 ? "Stories" : string.Join('.', parts);
+}
+
+string? RepositoryRoot(string directory)
+{
+    for (var current = new DirectoryInfo(directory); current is not null; current = current.Parent)
+    {
+        if (Directory.Exists(Path.Combine(current.FullName, ".git")) || File.Exists(Path.Combine(current.FullName, ".git")))
+        {
+            return current.FullName;
+        }
+    }
+
+    return null;
+}
+
 string? GitHubRunUrl() =>
     Environment.GetEnvironmentVariable("GITHUB_SERVER_URL") is { Length: > 0 } server
     && Environment.GetEnvironmentVariable("GITHUB_REPOSITORY") is { Length: > 0 } repo
@@ -281,7 +411,21 @@ string? GitHubRunUrl() =>
         ? $"{server}/{repo}/actions/runs/{run}"
         : null;
 
-IReadOnlyList<StoryResult> Read(IEnumerable<string> directories) => directories.SelectMany(d => new ResultsStore(d).ReadAll()).ToArray();
+IReadOnlyList<StoryResult> Read(IEnumerable<string> directories, out IReadOnlyList<string> unreadable)
+{
+    var all = new List<StoryResult>();
+    var problems = new List<string>();
+    foreach (var directory in directories)
+    {
+        all.AddRange(new ResultsStore(directory).ReadAll(out var skipped));
+        problems.AddRange(skipped);
+    }
+
+    unreadable = problems;
+    return all;
+}
+
+IReadOnlyList<StoryResult> ReadResults(IEnumerable<string> directories) => Read(directories, out _);
 
 bool GlobMatch(string input, string pattern) =>
     System.Text.RegularExpressions.Regex.IsMatch(input, "^" + System.Text.RegularExpressions.Regex.Escape(pattern).Replace("\\*", ".*", StringComparison.Ordinal).Replace("\\?", ".", StringComparison.Ordinal) + "$", System.Text.RegularExpressions.RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1));

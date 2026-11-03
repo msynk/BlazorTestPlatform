@@ -35,13 +35,23 @@ public sealed class LocatorAssertions
     public Task ToHaveCountAsync(int count, TimeSpan? timeout = null) =>
         CheckAsync($"to have count {count}", all => (all.Count == count, $"{all.Count} match(es)"), timeout);
 
-    /// <summary>The element is visible.</summary>
+    /// <summary>The element is visible. Strict: more than one match fails, negated or not.</summary>
     public Task ToBeVisibleAsync(TimeSpan? timeout = null) =>
-        CheckAsync("to be visible", all => (all.Count > 0 && all.All(e => e.IsVisible), all.Count == 0 ? "not found" : all.All(e => e.IsVisible) ? "visible" : "hidden"), timeout);
+        CheckAsync("to be visible", all => all.Count switch
+        {
+            0 => (false, "not found"),
+            1 => (all[0].IsVisible, all[0].IsVisible ? "visible" : "hidden"),
+            _ => (false, StrictViolation(all.Count)),
+        }, timeout, strictness: Strictness.AllowMissing);
 
-    /// <summary>The element is hidden or absent.</summary>
+    /// <summary>The element is hidden or absent. Strict: more than one match fails, negated or not.</summary>
     public Task ToBeHiddenAsync(TimeSpan? timeout = null) =>
-        CheckAsync("to be hidden", all => (all.Count == 0 || all.All(e => !e.IsVisible), all.Count == 0 ? "not found" : all.All(e => !e.IsVisible) ? "hidden" : "visible"), timeout);
+        CheckAsync("to be hidden", all => all.Count switch
+        {
+            0 => (true, "not found"),
+            1 => (!all[0].IsVisible, all[0].IsVisible ? "visible" : "hidden"),
+            _ => (false, StrictViolation(all.Count)),
+        }, timeout, strictness: Strictness.AllowMissing);
 
     /// <summary>Whole text equals the expected text (whitespace-normalized).</summary>
     public Task ToHaveTextAsync(string expected, TimeSpan? timeout = null) =>
@@ -104,10 +114,25 @@ public sealed class LocatorAssertions
         {
             0 => (false, "element not found"),
             1 => evaluate(all[0]),
-            _ => (false, $"strict mode violation: {all.Count} elements match"),
-        }, timeout, describeFocus, single: true);
+            _ => (false, StrictViolation(all.Count)),
+        }, timeout, describeFocus, Strictness.Single);
 
-    private Task CheckAsync(string description, Func<IReadOnlyList<ElementInfo>, (bool Pass, string Actual)> evaluate, TimeSpan? timeout, bool describeFocus = false, bool single = false)
+    private static string StrictViolation(int count) => $"strict mode violation: {count} elements match";
+
+    /// <summary>Which match counts an assertion refuses in both polarities.</summary>
+    private enum Strictness
+    {
+        /// <summary>Any count can pass (count and attachment assertions).</summary>
+        None,
+
+        /// <summary>More than one match fails, negated or not (visibility: a missing element is hidden).</summary>
+        AllowMissing,
+
+        /// <summary>Anything but exactly one match fails, negated or not (element state, text, attributes).</summary>
+        Single,
+    }
+
+    private Task CheckAsync(string description, Func<IReadOnlyList<ElementInfo>, (bool Pass, string Actual)> evaluate, TimeSpan? timeout, bool describeFocus = false, Strictness strictness = Strictness.None)
     {
         var effectiveTimeout = timeout ?? _context.DefaultTimeout;
         var title = $"expect {_locator} {(_negate ? "not " : string.Empty)}{description}";
@@ -120,8 +145,9 @@ public sealed class LocatorAssertions
                     var (pass, actual) = evaluate(all);
                     var ok = pass != _negate;
 
-                    // A negated single-element assertion must not pass merely because the element is missing or ambiguous.
-                    if (_negate && single && all.Count != 1 && description.StartsWith("to have", StringComparison.Ordinal))
+                    // A negated assertion must not pass merely because the element is missing or ambiguous (as in Playwright:
+                    // not.toBeDisabled() on a typo'd locator fails instead of passing vacuously).
+                    if ((strictness == Strictness.Single && all.Count != 1) || (strictness == Strictness.AllowMissing && all.Count > 1))
                     {
                         ok = false;
                     }
@@ -174,9 +200,21 @@ public sealed class ActionAssertions
         _name = name;
     }
 
-    /// <summary>The callback was invoked (exactly <paramref name="times"/> times when given).</summary>
-    public Task ToHaveBeenCalledAsync(int? times = null, TimeSpan? timeout = null) =>
-        CheckAsync(times is null ? "to have been called" : $"to have been called {times} time(s)", calls => times is null ? calls.Count > 0 : calls.Count == times, timeout);
+    /// <summary>
+    /// The callback was invoked (exactly <paramref name="times"/> times when given). <c>times: 0</c> behaves like
+    /// <see cref="NotToHaveBeenCalledAsync"/>: it lets the story settle first instead of passing on the first probe.
+    /// </summary>
+    public Task ToHaveBeenCalledAsync(int? times = null, TimeSpan? timeout = null)
+    {
+        if (times is < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(times), times, "Cannot be negative.");
+        }
+
+        return times == 0
+            ? NotToHaveBeenCalledAsync()
+            : CheckAsync(times is null ? "to have been called" : $"to have been called {times} time(s)", calls => times is null ? calls.Count > 0 : calls.Count == times, timeout);
+    }
 
     /// <summary>The callback was never invoked (checked after a short settle period).</summary>
     public async Task NotToHaveBeenCalledAsync()
@@ -238,9 +276,21 @@ public sealed class HttpRequestAssertions
         _pattern = pattern;
     }
 
-    /// <summary>A matching request was made (exactly <paramref name="times"/> times when given).</summary>
-    public Task ToHaveBeenMadeAsync(int? times = null, TimeSpan? timeout = null) =>
-        CheckAsync(times is null ? "to have been made" : $"to have been made {times} time(s)", requests => times is null ? requests.Count > 0 : requests.Count == times, timeout);
+    /// <summary>
+    /// A matching request was made (exactly <paramref name="times"/> times when given). <c>times: 0</c> behaves like
+    /// <see cref="NotToHaveBeenMadeAsync"/>: it lets the story settle first instead of passing on the first probe.
+    /// </summary>
+    public Task ToHaveBeenMadeAsync(int? times = null, TimeSpan? timeout = null)
+    {
+        if (times is < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(times), times, "Cannot be negative.");
+        }
+
+        return times == 0
+            ? NotToHaveBeenMadeAsync()
+            : CheckAsync(times is null ? "to have been made" : $"to have been made {times} time(s)", requests => times is null ? requests.Count > 0 : requests.Count == times, timeout);
+    }
 
     /// <summary>No matching request was made (checked after the story settles).</summary>
     public async Task NotToHaveBeenMadeAsync()

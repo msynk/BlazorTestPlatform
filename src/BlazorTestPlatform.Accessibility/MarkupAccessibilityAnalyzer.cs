@@ -218,7 +218,7 @@ public sealed class MarkupAccessibilityAnalyzer
 
             Rule("aria-dialog-name", AccessibilityImpact.Serious, "Ensures every ARIA dialog and alertdialog node has an accessible name", "ARIA dialog and alertdialog nodes should have an accessible name",
                 ["cat.aria", "best-practice"],
-                c => Unnamed(c, e => c.Role(e) is "dialog" or "alertdialog", "Reference the dialog title with aria-labelledby.")),
+                c => Unnamed(c, e => AriaRoles.GetExplicitRole(e) is "dialog" or "alertdialog", "Reference the dialog title with aria-labelledby.")),
 
             Rule("role-img-alt", AccessibilityImpact.Serious, "Ensures [role=\"img\"] elements have alternate text", "[role=\"img\"] elements must have an alternative text",
                 ["cat.text-alternatives", "wcag2a", "wcag111", "section508"],
@@ -234,8 +234,7 @@ public sealed class MarkupAccessibilityAnalyzer
 
             Rule("summary-name", AccessibilityImpact.Serious, "Ensures summary elements have discernible text", "Summary elements must have discernible text",
                 ["cat.name-role-value", "wcag2a", "wcag412", "section508"],
-                c => c.Visible.Where(e => e.LocalName == "summary" && e.ParentElement?.LocalName == "details" && string.IsNullOrWhiteSpace(DomFacts.TextOf(e)) && string.IsNullOrWhiteSpace(e.GetAttribute("aria-label")))
-                    .Select(e => (e, "Add text content to the summary."))),
+                c => Unnamed(c, e => e.LocalName == "summary" && e.ParentElement?.LocalName == "details" && e.ParentElement.QuerySelector("summary") == e, "Add text content to the summary.")),
 
             Rule("aria-roles", AccessibilityImpact.Critical, "Ensures all elements with a role attribute use a valid value", "ARIA roles used must conform to valid values",
                 ["cat.aria", "wcag2a", "wcag412"],
@@ -252,7 +251,7 @@ public sealed class MarkupAccessibilityAnalyzer
                 ["cat.aria", "wcag2a", "wcag412"],
                 c => c.Elements.SelectMany(e => e.Attributes
                     .Where(a => AriaAttributes.All.Contains(a.Name))
-                    .Select(a => (Attribute: a, Problem: AriaAttributes.Validate(a.Name, a.Value, c.Scope, e)))
+                    .Select(a => (Attribute: a, Problem: c.Hidden(e) ? null : AriaAttributes.Validate(a.Name, a.Value, c.Scope, e)))
                     .Where(x => x.Problem is not null)
                     .Select(x => (e, x.Problem!)))),
 
@@ -282,7 +281,9 @@ public sealed class MarkupAccessibilityAnalyzer
 
             Rule("nested-interactive", AccessibilityImpact.Serious, "Ensures interactive controls are not nested", "Interactive controls must not be nested",
                 ["cat.keyboard", "wcag2a", "wcag412"],
-                c => c.Visible.Where(e => c.Role(e) is "button" or "link" or "checkbox" or "radio" or "switch" or "tab" or "menuitem" or "option" or "treeitem")
+                // Like axe-core: only roles whose children are presentational. Links, menu items and tree items may
+                // contain focusable content (an APG tree item owns a group of tree items).
+                c => c.Visible.Where(e => c.Role(e) is "button" or "checkbox" or "radio" or "switch" or "tab" or "option" or "menuitemcheckbox" or "menuitemradio" or "slider" or "scrollbar" or "progressbar" or "meter" or "img")
                     .Where(e => e.QuerySelectorAll("*").Any(d => DomFacts.IsFocusable(d, c.Scope) && !DomFacts.IsHidden(d, c.Scope)))
                     .Select(e => (e, "Interactive element contains focusable descendants that screen readers will not announce."))),
 

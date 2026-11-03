@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>BlazorTestPlatform.NUnit</RootNamespace>
+    <Description>NUnit integration for BlazorTestPlatform: stories and matrix cells as TestCaseData with names, categories and ignore reasons, and story results that report skips as ignored tests.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- PrivateAssets="none": consumers of this package also get the story generator and analyzers that ship in Core. -->
+    <ProjectReference Include="..\BlazorTestPlatform.Core\BlazorTestPlatform.Core.csproj" PrivateAssets="none" />
+    <PackageReference Include="NUnit" />
+  </ItemGroup>
+
+</Project>

@@ -15,6 +15,9 @@ public sealed class DiagnosticsRecorder
     private const int MaxEntries = 1000;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private readonly ConcurrentQueue<ConsoleEntry> _console = new();
+
+    // Errors are kept apart from the bounded log: chatty logging after an early error must not evict it from the gate.
+    private readonly ConcurrentQueue<ConsoleEntry> _errors = new();
     private readonly ConcurrentQueue<NetworkEntry> _network = new();
     private readonly ConcurrentDictionary<IRequest, double> _pending = new();
     private readonly ConcurrentDictionary<IRequest, int> _statuses = new();
@@ -24,14 +27,14 @@ public sealed class DiagnosticsRecorder
     public DiagnosticsRecorder(IPage page)
     {
         ArgumentNullException.ThrowIfNull(page);
-        page.Console += (_, message) => Add(_console, new ConsoleEntry
+        page.Console += (_, message) => Log(new ConsoleEntry
         {
             Level = message.Type,
             Text = message.Text,
             Location = message.Location,
             AtMilliseconds = Now,
         });
-        page.PageError += (_, error) => Add(_console, new ConsoleEntry { Level = "pageerror", Text = error, AtMilliseconds = Now });
+        page.PageError += (_, error) => Log(new ConsoleEntry { Level = "pageerror", Text = error, AtMilliseconds = Now });
         page.Request += (_, request) => _pending[request] = Now;
         page.Response += (_, response) => _statuses[response.Request] = response.Status;
         page.RequestFinished += (_, request) => Complete(request, failure: null);
@@ -58,13 +61,21 @@ public sealed class DiagnosticsRecorder
     public IReadOnlyList<ConsoleEntry> Errors(IEnumerable<string> ignoredPatterns)
     {
         var ignored = ignoredPatterns.ToArray();
-        return Console
-            .Where(c => c.Level is "error" or "pageerror")
+        return _errors
             .Where(c => !ignored.Any(p => c.Text.Contains(p, StringComparison.OrdinalIgnoreCase)))
             .ToArray();
     }
 
     private double Now => _clock.Elapsed.TotalMilliseconds;
+
+    private void Log(ConsoleEntry entry)
+    {
+        Add(_console, entry);
+        if (entry.Level is "error" or "pageerror")
+        {
+            Add(_errors, entry);
+        }
+    }
 
     private void Complete(IRequest request, string? failure)
     {

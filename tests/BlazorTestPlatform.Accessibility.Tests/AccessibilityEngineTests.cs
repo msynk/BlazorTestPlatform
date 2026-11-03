@@ -25,6 +25,8 @@ public sealed class RoleAndNameTests
     [InlineData("<div role='tab'>T</div>", "tab")]
     [InlineData("<div role='bogus tab'>T</div>", "tab")]
     [InlineData("<div role='none' tabindex='0'>T</div>", "generic")]
+    [InlineData("<input type='file'>", "button")]
+    [InlineData("<li role='none' aria-current='page'>x</li>", "listitem")]
     public void Roles_are_computed(string html, string role)
     {
         var scope = DomScope.Parse(html);
@@ -45,6 +47,13 @@ public sealed class RoleAndNameTests
     [InlineData("<button title='More options'></button>", "button", "More options")]
     [InlineData("<fieldset><legend>Shipping</legend></fieldset>", "fieldset", "Shipping")]
     [InlineData("<div>Not named from content</div>", "div", "")]
+    [InlineData("<button id='del' aria-labelledby='del file'>Delete</button><span id='file'>report.pdf</span>", "button", "Delete report.pdf")]
+    [InlineData("<span id='l' hidden><b>Close</b> dialog</span><button aria-labelledby='l'>x</button>", "button", "Close dialog")]
+    [InlineData("<div id='a' role='group' aria-labelledby='b'>A <span id='c' aria-labelledby='a'>C</span></div><span id='b' aria-labelledby='a'>B</span>", "#a", "B")]
+    [InlineData("<button aria-labelledby='t c'>x</button><span id='t'>Delete</span><input id='c' value='5' aria-label='count'>", "button", "Delete 5")]
+    [InlineData("<label>Size <input id='a'> <input id='b'></label>", "#b", "")]
+    [InlineData("<label>Size <input id='a'> <input id='b'></label>", "#a", "Size")]
+    [InlineData("<input title='' placeholder='Search'>", "input", "Search")]
     public void Accessible_names_are_computed(string html, string selector, string expected)
     {
         var scope = DomScope.Parse(html);
@@ -173,10 +182,13 @@ public sealed class MarkupRuleTests
     [InlineData("<div role='buton'>x</div>", "aria-roles")]
     [InlineData("<div aria-lable='x'>x</div>", "aria-valid-attr")]
     [InlineData("<div aria-hidden='yes'>x</div>", "aria-valid-attr-value")]
-    [InlineData("<div aria-labelledby='missing'>x</div>", "aria-valid-attr-value")]
+    [InlineData("<button aria-controls='missing'>x</button>", "aria-valid-attr-value")]
+    [InlineData("<button aria-expanded='true' aria-controls='missing'>x</button>", "aria-valid-attr-value")]
     [InlineData("<div role='checkbox' aria-label='Agree'></div>", "aria-required-attr")]
-    [InlineData("<div role='tablist'><div>x</div></div>", "aria-required-children")]
+    [InlineData("<div role='tablist'><span role='button'>x</span></div>", "aria-required-children")]
+    [InlineData("<div role='row'></div>", "aria-required-children")]
     [InlineData("<div role='tab'>x</div>", "aria-required-parent")]
+    [InlineData("<header role='heading'>x</header>", "aria-required-attr")]
     [InlineData("<div aria-hidden='true'><button>x</button></div>", "aria-hidden-focus")]
     [InlineData("<button>Open <a href='/x'>link</a></button>", "nested-interactive")]
     [InlineData("<button tabindex='3'>x</button>", "tabindex")]
@@ -192,6 +204,22 @@ public sealed class MarkupRuleTests
     [InlineData("<details><summary></summary>x</details>", "summary-name")]
     [InlineData("<div role='presentation' aria-label='x'>x</div>", "presentation-role-conflict")]
     public void Rules_detect_violations(string html, string rule) => Assert.Contains(rule, Violations(html));
+
+    /// <summary>Markup axe-core accepts (or only reports for review): the in-memory rules must not fail it either.</summary>
+    [Theory]
+    [InlineData("<div role='tablist' aria-label='T'><button role='tab' aria-selected='false' aria-controls='not-rendered'>Two</button></div>", "aria-valid-attr-value")]
+    [InlineData("<button aria-expanded='false' aria-controls='collapsed'>Menu</button>", "aria-valid-attr-value")]
+    [InlineData("<input aria-label='Search' role='combobox' aria-expanded='false' aria-owns='popup' aria-controls='popup'>", "aria-valid-attr-value")]
+    [InlineData("<input aria-label='Name' aria-describedby=''>", "aria-valid-attr-value")]
+    [InlineData("<div aria-labelledby='missing'>x</div>", "aria-valid-attr-value")]
+    [InlineData("<div hidden><span aria-hidden='yes'>x</span></div>", "aria-valid-attr-value")]
+    [InlineData("<ul role='listbox' aria-label='Results'></ul>", "aria-required-children")]
+    [InlineData("<div role='tablist' aria-label='Empty'></div>", "aria-required-children")]
+    [InlineData("<ul role='tree' aria-label='Files'><li role='treeitem' aria-expanded='true' tabindex='0'>src<ul role='group'><li role='treeitem' tabindex='-1'>a.cs</li></ul></li></ul>", "nested-interactive")]
+    [InlineData("<a href='/x'>Open <span tabindex='-1'>details</span></a>", "nested-interactive")]
+    [InlineData("<dialog open>Hi</dialog>", "aria-dialog-name")]
+    [InlineData("<details><summary><img src='m.png' alt='More'></summary>x</details>", "summary-name")]
+    public void Rules_follow_axe_core_where_it_does_not_fail(string html, string rule) => Assert.DoesNotContain(rule, Violations(html));
 
     [Fact]
     public void Accessible_markup_passes_every_rule()

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Not xUnit: tests/Directory.Build.props leaves out its xUnit packages. -->
+    <BtpTestFramework>mstest</BtpTestFramework>
+    <EnableMSTestRunner>true</EnableMSTestRunner>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MSTest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.MSTest\BlazorTestPlatform.MSTest.csproj" />
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.Bunit\BlazorTestPlatform.Bunit.csproj" />
+    <Compile Include="..\Shared\FrameworkStories.cs" Link="FrameworkStories.cs" />
+  </ItemGroup>
+
+</Project>

@@ -26,7 +26,11 @@ Presets: `TestMatrix.Default()` (desktop and mobile, light, Server) and `TestMat
 4. Runs the play script. Static SSR cannot handle events, so play is skipped there, and the snapshot uses the `initial` baseline.
 5. Takes a visual snapshot. Baselines exclude the render mode, so every mode is compared against the **same** image.
 6. Runs an axe-core scan.
-7. Fails the run on uncaught page errors, console errors (configurable allow-list) or a visible `#blazor-error-ui`.
+7. Fails the run on uncaught page errors, console errors (configurable allow-list), a visible `#blazor-error-ui`, or an error the story's own error boundary caught (`[data-btp-error]`, also after hydration).
+
+**Timeouts and cancellation.** Each attempt has a hard limit (`BrowserRunOptions.Timeout`, else the story's `.Timeout(...)`, else 60 s) that covers navigation, play, snapshot and axe, not just the play script: a story that blocks the browser (for example an endless loop in WebAssembly) fails as *timed out* instead of hanging the test run. Cancelling the run (the test framework's token) is not a failure: the runner stops retrying, records nothing and throws `OperationCanceledException`. A browser that crashed is relaunched for the next cell, and failure diagnostics (screenshot, DOM, trace) are each bounded to 10 s, so a hung page still produces a result.
+
+**Visual evidence.** Every render mode and attempt keeps its own actual and diff images (`TestResults/btp/visual/{story}/{name}.{mode}-attempt-{n}.actual.png`), so a mismatch under WebAssembly stays in the report when Server then matches, and a flaky run keeps the images of its failed attempt.
 
 Each interaction then round-trips through the frame bridge (`window.__btp.waitForIdle()`), so Server render batches and WebAssembly renders are applied before the next step.
 

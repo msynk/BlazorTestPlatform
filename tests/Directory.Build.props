@@ -9,13 +9,11 @@
     <NoWarn>$(NoWarn);CA1707;CA1515;CA2007;CA1822;CA1861;xUnit1051</NoWarn>
   </PropertyGroup>
 
-  <ItemGroup>
+  <!-- Test projects use xUnit unless they set BtpTestFramework (the NUnit, MSTest and TUnit integration tests). -->
+  <ItemGroup Condition="'$(BtpTestFramework)' == ''">
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
-  </ItemGroup>
-
-  <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 

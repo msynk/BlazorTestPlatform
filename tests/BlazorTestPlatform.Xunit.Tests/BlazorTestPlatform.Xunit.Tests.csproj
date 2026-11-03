@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.Xunit\BlazorTestPlatform.Xunit.csproj" />
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.Bunit\BlazorTestPlatform.Bunit.csproj" />
+    <Compile Include="..\Shared\FrameworkStories.cs" Link="FrameworkStories.cs" />
+  </ItemGroup>
+
+</Project>

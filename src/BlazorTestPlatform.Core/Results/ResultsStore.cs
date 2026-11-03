@@ -65,15 +65,24 @@ public sealed class ResultsStore
         ArgumentNullException.ThrowIfNull(result);
         System.IO.Directory.CreateDirectory(ResultsDirectory);
         var path = Path.Combine(ResultsDirectory, SafeFileName(result.Key) + ".json");
-        var temp = path + "." + Environment.ProcessId + ".tmp";
+        var temp = $"{path}.{Environment.ProcessId}.{Environment.CurrentManagedThreadId}.tmp";
         File.WriteAllText(temp, BtpJson.Serialize(result));
         File.Move(temp, path, overwrite: true);
         return path;
     }
 
-    /// <summary>Reads every result.</summary>
-    public IReadOnlyList<StoryResult> ReadAll()
+    /// <summary>Reads every result. Files that cannot be read are skipped; use the other overload to learn which.</summary>
+    public IReadOnlyList<StoryResult> ReadAll() => ReadAll(out _);
+
+    /// <summary>
+    /// Reads every result, and lists the files that could not be read (a crashed run's partial file, a result written by
+    /// an incompatible version). Callers that gate on results should treat unreadable files as failures: a failed story
+    /// whose result cannot be read must not let the run pass.
+    /// </summary>
+    public IReadOnlyList<StoryResult> ReadAll(out IReadOnlyList<string> unreadable)
     {
+        var problems = new List<string>();
+        unreadable = problems;
         if (!System.IO.Directory.Exists(ResultsDirectory))
         {
             return [];
@@ -86,12 +95,22 @@ public sealed class ResultsStore
             {
                 if (BtpJson.Deserialize<StoryResult>(File.ReadAllText(file)) is { } result)
                 {
+                    if (result.SchemaVersion > StoryResult.CurrentSchemaVersion)
+                    {
+                        problems.Add($"{file}: written by a newer version (result schema {result.SchemaVersion}; this version reads up to {StoryResult.CurrentSchemaVersion})");
+                        continue;
+                    }
+
                     results.Add(result);
                 }
+                else
+                {
+                    problems.Add($"{file}: empty result");
+                }
             }
-            catch (JsonException)
+            catch (Exception ex) when (ex is JsonException or IOException or NotSupportedException)
             {
-                // A partially written file from a crashed run must not break reporting.
+                problems.Add($"{file}: {ex.Message}");
             }
         }
 
@@ -99,12 +118,59 @@ public sealed class ResultsStore
     }
 
     /// <summary>Deletes previous results and artifacts.</summary>
+    /// <exception cref="InvalidOperationException">
+    /// The directory does not look like a results directory: it is a drive root or a git repository, contains the
+    /// current directory, or holds project, solution or <c>btp.json</c> files. A misconfigured results path must never
+    /// delete sources.
+    /// </exception>
     public void Clear()
     {
-        if (System.IO.Directory.Exists(Directory))
+        if (!System.IO.Directory.Exists(Directory))
         {
-            System.IO.Directory.Delete(Directory, recursive: true);
+            return;
         }
+
+        if (ProtectedReason(Directory) is { } reason)
+        {
+            throw new InvalidOperationException(
+                $"Refusing to delete '{Directory}': {reason}. Point the results directory (BTP_RESULTS_DIR or btp.json resultsDirectory) at a folder that only holds test output.");
+        }
+
+        System.IO.Directory.Delete(Directory, recursive: true);
+    }
+
+    private static readonly string[] SourceMarkers = ["*.csproj", "*.fsproj", "*.vbproj", "*.sln", "*.slnx", "btp.json", "Directory.Build.props", "global.json"];
+
+    /// <summary>Why <paramref name="directory"/> must not be deleted recursively, or null when it may.</summary>
+    internal static string? ProtectedReason(string directory)
+    {
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        if (Path.GetPathRoot(full) is { Length: > 0 } root && string.Equals(full, Path.TrimEndingDirectorySeparator(root), StringComparison.OrdinalIgnoreCase))
+        {
+            return "it is a drive root";
+        }
+
+        if (System.IO.Directory.Exists(Path.Combine(full, ".git")) || File.Exists(Path.Combine(full, ".git")))
+        {
+            return "it is a git repository";
+        }
+
+        foreach (var marker in SourceMarkers)
+        {
+            if (System.IO.Directory.EnumerateFiles(full, marker, SearchOption.TopDirectoryOnly).FirstOrDefault() is { } file)
+            {
+                return $"it contains {Path.GetFileName(file)}";
+            }
+        }
+
+        var current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Environment.CurrentDirectory));
+        if (string.Equals(current, full, StringComparison.OrdinalIgnoreCase)
+            || current.StartsWith(full + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            return "it contains the current directory";
+        }
+
+        return null;
     }
 
     /// <summary>Converts a key into a portable file name.</summary>
@@ -119,6 +185,12 @@ public sealed class ResultsStore
         }
 
         var name = builder.ToString();
+        if (name.Trim('.').Length == 0)
+        {
+            // "." and ".." are not file names: they would address the directory or its parent.
+            name = name.Replace('.', '_');
+        }
+
         if (name.Length > 150)
         {
             name = name[..120] + "~" + DeterministicRandom.StableHash(key).ToString("x16", System.Globalization.CultureInfo.InvariantCulture);

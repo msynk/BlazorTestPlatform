@@ -2,6 +2,8 @@
 // 1. Renders the result of an in-frame play run (▶ Run interactions).
 // 2. Live arg controls: edits re-render interactive frames in place through window.__btp.setArgs, reload static
 //    frames, and keep the shell URL (arg.Name=value) shareable. Without JavaScript the form still works (Apply).
+// 3. The inspector: the frame's actions, mocked requests, JS calls, console and accessibility tree, and a recorder that
+//    turns interactions in the frame into play-function code.
 const panel = document.getElementById('btp-play-panel');
 
 function render(steps, list) {
@@ -34,6 +36,9 @@ function render(steps, list) {
 
 if (panel) {
     window.addEventListener('message', event => {
+        // Results come only from this workbench's own story frame: other windows and origins cannot fake a pass.
+        const frame = document.querySelector('.btp-stage iframe');
+        if (event.origin !== window.location.origin || !frame || event.source !== frame.contentWindow) return;
         const data = event.data;
         if (!data || data.source !== 'btp' || data.type !== 'play-result' || data.storyId !== panel.dataset.story) return;
         const status = panel.querySelector('.btp-play__status');
@@ -41,6 +46,7 @@ if (panel) {
         status.textContent = data.status + (data.renderer ? ' · ' + data.renderer : '');
         const list = panel.querySelector('.btp-play__steps');
         list.replaceChildren();
+        panel.querySelectorAll('.btp-play__error').forEach(previous => previous.remove());
         if (data.error) {
             const error = document.createElement('p');
             error.className = 'btp-play__error';
@@ -133,4 +139,81 @@ if (controls) {
         event.preventDefault();
         schedule(0);
     });
+}
+
+const inspector = document.getElementById('btp-inspector');
+
+function frameBridge() {
+    const frame = document.querySelector('.btp-stage iframe');
+    try {
+        const bridge = frame && frame.contentWindow && frame.contentWindow.__btp;
+        return bridge && bridge.storyId === inspector.dataset.story ? bridge : null;
+    } catch {
+        return null;
+    }
+}
+
+function fillList(name, items, describe) {
+    inspector.querySelector(`[data-btp-count="${name}"]`).textContent = String(items.length);
+    inspector.querySelector(`[data-btp-list="${name}"]`)
+        .replaceChildren(...items.map(item => Object.assign(document.createElement('li'), { textContent: describe(item) })));
+}
+
+const playCode = lines => lines.length === 0
+    ? ''
+    : 'stories.Add("Recorded", s => s.Play(async ctx =>\n{\n' + lines.map(line => '    ' + line).join('\n') + '\n}));';
+
+async function readJson(read, fallback) {
+    try {
+        return JSON.parse(await read()) ?? fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+async function refreshInspector() {
+    const status = inspector.querySelector('[data-btp-inspector-status]');
+    const bridge = frameBridge();
+    if (!bridge) {
+        status.textContent = 'Waiting for the story to become interactive…';
+        return;
+    }
+
+    status.textContent = '';
+    fillList('actions', await readJson(bridge.getActions, []), a => `${a.name}(${a.argumentJson ?? ''})`);
+    fillList('requests', await readJson(bridge.getRequests, []), r => `${r.method} ${r.relativeUrl} → ${r.statusCode || '(no response)'}`);
+    fillList('js', await readJson(bridge.getJSCalls, []), c => `${c.module ? c.module + ': ' : ''}${c.identifier}(${(c.arguments || []).join(', ')})${c.mocked ? '' : ' (not mocked)'}`);
+    fillList('console', await readJson(bridge.getConsole, []), m => `[${m.level}] ${m.text}`);
+    if (inspector.querySelector('[data-btp-aria-section]').open) {
+        inspector.querySelector('[data-btp-aria]').textContent = (await bridge.getAriaSnapshot()) || '(no elements with a role)';
+    }
+
+    const recorded = await readJson(bridge.getRecording, { recording: false, lines: [] });
+    const record = inspector.querySelector('[data-btp-record]');
+    record.setAttribute('aria-pressed', recorded.recording ? 'true' : 'false');
+    record.textContent = recorded.recording ? 'Stop recording' : 'Record';
+    const code = playCode(recorded.lines);
+    inspector.querySelector('[data-btp-recording]').textContent = code || (recorded.recording ? 'Recording… use the story in the frame.' : 'Press Record, then use the story in the frame.');
+    inspector.querySelector('[data-btp-copy]').disabled = code.length === 0;
+}
+
+if (inspector) {
+    inspector.querySelector('[data-btp-record]').addEventListener('click', async event => {
+        const bridge = frameBridge();
+        if (!bridge) return;
+        await (event.currentTarget.getAttribute('aria-pressed') === 'true' ? bridge.stopRecording() : bridge.startRecording());
+        await refreshInspector();
+    });
+    inspector.querySelector('[data-btp-copy]').addEventListener('click', async () => {
+        const status = inspector.querySelector('[data-btp-inspector-status]');
+        try {
+            await navigator.clipboard.writeText(inspector.querySelector('[data-btp-recording]').textContent);
+            status.textContent = 'Copied.';
+        } catch {
+            status.textContent = 'Copying is blocked here: select the code and copy it.';
+        }
+    });
+    inspector.querySelector('[data-btp-aria-section]').addEventListener('toggle', () => refreshInspector());
+    setInterval(() => { if (!document.hidden) refreshInspector(); }, 1000);
+    refreshInspector();
 }

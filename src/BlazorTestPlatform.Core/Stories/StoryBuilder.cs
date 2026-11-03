@@ -61,6 +61,28 @@ public interface IStoryBuilder
 
     /// <summary>Attaches metadata for extensions.</summary>
     IStoryBuilder Metadata(string key, object? value);
+
+    /// <summary>
+    /// Declares driver capabilities the story needs (for example <see cref="Drivers.DriverCapabilities.Layout"/> for a
+    /// story that measures geometry). Runners whose driver lacks them report the story as skipped, with the reason,
+    /// before rendering it, and <see cref="Story.CanRunOn"/> lets test data sources leave it out.
+    /// </summary>
+    IStoryBuilder Requires(Drivers.DriverCapabilities capabilities, string reason) =>
+        throw new NotSupportedException($"{GetType().Name} does not support capability requirements.");
+
+    /// <summary>
+    /// Emulates browser APIs and network conditions in real browsers (geolocation, permissions, latency). The story then
+    /// requires <see cref="Drivers.DriverCapabilities.BrowserEmulation"/>: bUnit and the in-app driver skip it.
+    /// </summary>
+    IStoryBuilder Emulate(Func<BrowserEmulation, BrowserEmulation> configure) =>
+        throw new NotSupportedException($"{GetType().Name} does not support browser emulation.");
+
+    /// <summary>
+    /// Sets limits on the runtime metrics real browsers report (layout shift, largest contentful paint, long tasks, DOM
+    /// size). Checked by the browser runner; bUnit and the in-app driver ignore them.
+    /// </summary>
+    IStoryBuilder BrowserBudget(Action<Performance.BrowserBudget> configure) =>
+        throw new NotSupportedException($"{GetType().Name} does not support browser budgets.");
 }
 
 /// <summary>Fluent builder for one story of <typeparamref name="TComponent"/>.</summary>
@@ -87,6 +109,9 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
     private TimeSpan? _timeout;
     private string? _skipReason;
     private bool _autoActions = true;
+    private readonly List<CapabilityRequirement> _requirements = [];
+    private BrowserEmulation _emulation = BrowserEmulation.None;
+    private Performance.BrowserBudget? _browserBudget;
 
     internal StoryBuilder(string name)
     {
@@ -444,6 +469,15 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
         return this;
     }
 
+    /// <inheritdoc cref="IStoryBuilder.BrowserBudget" />
+    public StoryBuilder<TComponent> BrowserBudget(Action<Performance.BrowserBudget> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        _browserBudget ??= new Performance.BrowserBudget();
+        configure(_browserBudget);
+        return this;
+    }
+
     /// <inheritdoc cref="IStoryBuilder.Matrix" />
     public StoryBuilder<TComponent> Matrix(Action<MatrixFilter> configure)
     {
@@ -482,10 +516,58 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
         return this;
     }
 
+    /// <inheritdoc cref="IStoryBuilder.Requires" />
+    public StoryBuilder<TComponent> Requires(Drivers.DriverCapabilities capabilities, string reason)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        if (capabilities == Drivers.DriverCapabilities.None)
+        {
+            throw new ArgumentException("Name at least one capability.", nameof(capabilities));
+        }
+
+        _requirements.Add(new CapabilityRequirement(capabilities, reason));
+        return this;
+    }
+
+    /// <inheritdoc cref="IStoryBuilder.Emulate" />
+    public StoryBuilder<TComponent> Emulate(Func<BrowserEmulation, BrowserEmulation> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        var emulation = configure(_emulation) ?? throw new InvalidOperationException("The emulation callback returned null.");
+        if (emulation.Latency < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(configure), emulation.Latency, "Latency cannot be negative.");
+        }
+
+        _emulation = emulation with
+        {
+            Geolocation = emulation.Geolocation?.Validated(),
+            Permissions = [.. emulation.Permissions.Where(p => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.Ordinal)],
+        };
+        return this;
+    }
+
+    /// <summary>
+    /// Makes <c>navigator.geolocation</c> report a position and grants the <c>geolocation</c> permission (real browsers
+    /// only; see <see cref="Emulate"/>).
+    /// </summary>
+    public StoryBuilder<TComponent> Geolocation(double latitude, double longitude, double accuracy = 0) =>
+        Emulate(e => e with { Geolocation = new GeoPosition(latitude, longitude, accuracy) });
+
+    /// <summary>Grants permissions by their Permissions API names (real browsers only; see <see cref="Emulate"/>).</summary>
+    public StoryBuilder<TComponent> GrantPermissions(params string[] permissions)
+    {
+        ArgumentNullException.ThrowIfNull(permissions);
+        return Emulate(e => e with { Permissions = [.. e.Permissions, .. permissions] });
+    }
+
+    /// <summary>Adds latency to every HTTP request the page makes (real browsers only; see <see cref="Emulate"/>).</summary>
+    public StoryBuilder<TComponent> NetworkLatency(TimeSpan latency) => Emulate(e => e with { Latency = latency });
+
     internal StoryBuilder<TComponent> SetValueArg(string name, object? value, Type valueType) =>
         SetArg(new StoryArg(name, KindOf(valueType), valueType, value, _ => value, StoryArg.Describe(value)));
 
-    internal Story Build(string title, Type? collectionType, int order)
+    internal Story Build(string title, Type? collectionType, int order, (string? File, int Line) source = default)
     {
         var args = _args.ToList();
         if (_autoActions)
@@ -534,7 +616,14 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
             Timeout = _timeout,
             SkipReason = _skipReason,
             Metadata = new Dictionary<string, object?>(_metadata),
+            Requirements = _emulation.IsEmpty
+                ? _requirements.ToArray()
+                : [.. _requirements, new CapabilityRequirement(Drivers.DriverCapabilities.BrowserEmulation, "emulates browser APIs or network conditions")],
+            Emulation = _emulation,
+            BrowserBudget = _browserBudget?.Clone(),
             CollectionType = collectionType,
+            SourceFile = source.File,
+            SourceLine = source.Line,
             Order = order,
         });
     }
@@ -580,4 +669,10 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
     IStoryBuilder IStoryBuilder.AutoActions(bool enabled) => AutoActions(enabled);
 
     IStoryBuilder IStoryBuilder.Metadata(string key, object? value) => Metadata(key, value);
+
+    IStoryBuilder IStoryBuilder.Requires(Drivers.DriverCapabilities capabilities, string reason) => Requires(capabilities, reason);
+
+    IStoryBuilder IStoryBuilder.Emulate(Func<BrowserEmulation, BrowserEmulation> configure) => Emulate(configure);
+
+    IStoryBuilder IStoryBuilder.BrowserBudget(Action<Performance.BrowserBudget> configure) => BrowserBudget(configure);
 }

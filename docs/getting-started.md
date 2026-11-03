@@ -24,7 +24,7 @@ Why stories get their own project:
 |---|---|
 | Stories | `BlazorTestPlatform.Core`, `BlazorTestPlatform.Workbench` (for the shared `WorkbenchSetup`) |
 | Workbench host + client | project reference to Stories (brings the workbench) |
-| Tests | `BlazorTestPlatform.Bunit`, `BlazorTestPlatform.Playwright`, `Microsoft.AspNetCore.Mvc.Testing`, your test framework |
+| Tests | `BlazorTestPlatform.Bunit`, `BlazorTestPlatform.Playwright`, `Microsoft.AspNetCore.Mvc.Testing`, your test framework and its integration package (`BlazorTestPlatform.Xunit`, `.NUnit`, `.MSTest` or `.TUnit`; see [test frameworks](test-frameworks.md)) |
 | Tooling | `dotnet tool install -g BlazorTestPlatform.Cli --prerelease` |
 
 The stories project must be browser-compatible:
@@ -123,19 +123,39 @@ Requirements for the host's `App.razor`:
 * Do **not** set a global render mode. The frame chooses a render mode for each story.
 * Keep `#blazor-error-ui` hidden by CSS. Browser runs fail when Blazor shows it.
 
+**Security.** Story frames sign fake users in, replace services and run play scripts, so the workbench is a development and CI tool. It is **off in the `Production` environment** unless you opt in, and its pages then answer 404:
+
+```csharp
+builder.Services.AddBlazorTestWorkbench(o =>
+{
+    WorkbenchSetup.Configure(o);
+    o.Enabled = true;                       // a host that exists only to serve the workbench (preview, CI publish)
+    o.AuthorizationPolicy = "Workbench";    // optional: who may open /_workbench (users that fail it get 404)
+});
+```
+
+`BTP_WORKBENCH_ENABLED=true|false` decides when `Enabled` is not set in code. Links to the workbench can override parameters (`?arg.Title=...`), but values from links cannot contain `<` or be `javascript:`, `vbscript:` or `data:` URLs; values typed into the controls are not restricted. Play results are posted only to the workbench page of the same origin.
+
 Run the host and open `/_workbench`. **Controls** edits the story's parameters live (see [live controls](stories.md#live-controls)), and the URL keeps the edits shareable. For stories with a play function, **▶ Run interactions** runs the script inside the frame under the selected render mode and shows its timeline next to the preview.
 
 ## 5. Tests
+
+`btp init -p tests/MyDesignSystem.Tests -f xunit --ci github` writes the files below (and a CI pipeline) for xUnit,
+NUnit, MSTest or TUnit; see [test frameworks](test-frameworks.md#scaffolding-btp-init).
 
 In-memory tests need no browser:
 
 ```csharp
 public static readonly StoryCatalog Catalog = StoryCatalog.FromAssemblyOf<AlertStories>();
-public static TheoryData<string> Stories => new(Catalog.Ids);
+public static TheoryData<string> Stories => StoryTheoryData.From(Catalog);   // BlazorTestPlatform.Xunit
 
 [Theory, MemberData(nameof(Stories))]
-public Task Story_passes(string id) => BunitStoryRunner.VerifyAsync(Catalog.Get(id));
+public async Task Story_passes(string id) => StoryTheoryData.Passed(await BunitStoryRunner.RunAsync(Catalog.Get(id)));
 ```
+
+`StoryTheoryData` names each row after the story, turns tags into categories and reports a story that cannot run in
+memory (one that needs layout or browser emulation) as skipped rather than passed. Without the package,
+`new TheoryData<string>(Catalog.Ids)` with `BunitStoryRunner.VerifyAsync` works too, but skipped runs then pass.
 
 Browser tests start the host on Kestrel inside the test process:
 
@@ -158,6 +178,25 @@ pwsh tests/MyDesignSystem.Tests/bin/Debug/net10.0/playwright.ps1 install chromiu
 ```
 
 You can also set `BTP_INSTALL_BROWSERS=1` to install them automatically on first use.
+
+## The inspector and the recorder
+
+In an interactive render mode, the workbench shows an **Inspector** under the frame: the story's actions (callbacks),
+mocked HTTP requests, JS-interop calls, console messages and live accessibility tree. **Record** turns what you do in
+the frame into a play function: clicks, typed values, checkboxes, selections and keys become
+`await ctx.GetByRole("button", "Add", exact: true).ClickAsync();` lines, each with the most readable locator that finds
+exactly that element (role and name, then test id, placeholder or a CSS path). **Copy play code** copies it as a story:
+
+```csharp
+stories.Add("Recorded", s => s.Play(async ctx =>
+{
+    await ctx.GetByRole("textbox", "New task", exact: true).FillAsync("Ship it");
+    await ctx.GetByRole("button", "Add", exact: true).ClickAsync();
+}));
+```
+
+Add assertions (`ctx.Expect(...)`, `ctx.ExpectAriaSnapshotAsync(...)`) where the recording stops: a recording replays
+actions, it does not know what you meant to check.
 
 ## 6. First run
 

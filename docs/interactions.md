@@ -18,7 +18,7 @@ Locators are lazy and can be chained: `.Locate(...)`, `.GetByRole(...)`, `.GetBy
 
 Only role queries skip hidden elements. The other queries also match hidden ones, as in Playwright; actions then wait for the element to become visible, and `ToBeVisibleAsync` tells the two apart.
 
-**Strictness.** An action or a single-element assertion fails if its locator matches more than one element once the timeout expires. The error lists the matches, in the same format in every driver.
+**Strictness.** An action or a single-element assertion fails if its locator matches more than one element once the timeout expires. The error lists the matches, in the same format in every driver. Negated assertions are just as strict: `Not.ToBeDisabledAsync()`, `Not.ToBeCheckedAsync()`, `Not.ToContainTextAsync(...)` and the other single-element assertions fail when the element is missing or ambiguous, instead of passing vacuously (a typo in a locator never makes a negative check pass). Visibility assertions accept a missing element as hidden (`ToBeHiddenAsync`, `Not.ToBeVisibleAsync`) but fail on more than one match, in both polarities.
 
 ## Actions
 
@@ -68,7 +68,7 @@ await ctx.Expect(locator).ToHaveRoleAsync("dialog");
 
 Failure messages show the expected value, the last observed value, the driver and render mode, the matched elements and, for focus assertions, the element that actually had focus. A failed story's message ends with the last steps of its timeline.
 
-Side effects have auto-waiting assertions too. They work under every driver. The negative forms (`NotToHaveBeenCalledAsync`, `NotToHaveBeenMadeAsync`) wait for the story to be idle and then check once:
+Side effects have auto-waiting assertions too. They work under every driver. The negative forms (`NotToHaveBeenCalledAsync`, `NotToHaveBeenMadeAsync`), and `times: 0`, wait for the story to be idle and then check once:
 
 ```csharp
 await ctx.ExpectAction("OnSave").ToHaveBeenCalledAsync(times: 1);                // callbacks
@@ -76,6 +76,7 @@ await ctx.ExpectRequest("POST", "api/people").ToHaveBeenMadeAsync();            
 await ctx.ExpectJSCall("localStorage.setItem").ToHaveBeenLastCalledWithAsync("consent", "accepted"); // JS interop (stories with MockJS)
 ```
 
+JS-call arguments are compared after `JSCallLog.Format`, the same under every driver: strings as they are, numbers and dates in the invariant culture, booleans as `true`/`false`, collections as `[1, 2, 3]`, dictionaries as `{"key": value}` (strings inside collections are quoted), and other objects as their camelCase JSON, which is what JS interop sends. In trimmed WebAssembly apps, where reflection-based JSON is unavailable, other objects fall back to `ToString()`.
 ## Grouping and timelines
 
 `await ctx.StepAsync("open the menu", async () => { ... })` nests actions on the timeline. Every action, assertion, wait and check is recorded with its start offset and duration. The timeline appears in results, in the HTML report and in failure messages.
@@ -88,9 +89,14 @@ bUnit dispatches raw events. On top of that, the driver adds the default behavio
 * Tab and Shift+Tab follow the real tab order: positive `tabindex` first, `tabindex="-1"`, disabled, `inert` and hidden elements skipped, one stop per radio group, and only the first `<summary>` of a `<details>`. `@onkeydown:preventDefault` is honoured, and a keydown handler that moves focus redirects the rest of the key press, as in a browser.
 * Enter activates buttons and links. In other fields it never toggles anything: it performs HTML implicit submission, firing `change` for an edited field and then clicking the form's first submit button (a form without one submits only when it has a single text field). Space, on key up, activates buttons and toggles checkboxes and radios, but never follows links.
 * `FillAsync` fires `input`, and `change` fires on blur, exactly as in a browser. Code that only reacts to `change` therefore behaves the same in every driver.
+* What the user typed or checked stays in the control across renders, as in a browser, until the component renders a different value for it: an input that only handles `@oninput` (no binding) keeps its text, and a two-way binding that resets the value replaces it. Checking a radio unchecks the other radios of its group. Enter fires `keypress` as well as `keydown`/`keyup`.
+* A component that throws after an `await` (outside an error boundary) fails the story, as the Blazor error UI would in a browser.
 * `ElementReference.FocusAsync()` calls made by components are captured and fire blur, focusout, focus and focusin (with change-on-blur for an edited field), so focus management in roving-tabindex widgets and dialogs can be tested in memory.
+* Focus, hover and `@ref` targets follow the element, not its position: inserting a sibling before the focused element keeps focus on it. Tab continues from the last clicked element.
+* Arrow keys move within a radio group (checking the next radio, wrapping around); activating the first `<summary>` toggles its `<details>` and fires `toggle`; Enter in a textarea or contenteditable inserts a line break; `@onclick:preventDefault` on a checkbox or radio reverts the toggle.
+* Mouse events carry the `buttons` bitmask of the pressed button (left 1, right 2, middle 4). A drop only happens when the target's `dragover` handler prevents the default, as in HTML drag and drop; otherwise the target gets `dragleave`. `FillAsync` waits while a field is `readonly`.
 
-**Stylesheets.** By default, visibility in bUnit comes from attributes and inline styles. Point the driver at your CSS, including Blazor CSS-isolation bundles, and the `display`/`visibility` rules apply too. This uses a real cascade with specificity, `!important`, inline styles and inherited `visibility`. Elements hidden by a class are then hidden from role queries, visibility assertions, Tab order and accessibility rules:
+**Stylesheets.** By default, visibility in bUnit comes from attributes and inline styles. Point the driver at your CSS, including Blazor CSS-isolation bundles, and the `display`/`visibility` rules apply too. This uses a real cascade with specificity (per selector of a list), `!important`, cascade layers (`@layer`, including the Tailwind v4 layer order: unlayered rules win over layered ones, and the order reverses for `!important`), inline styles, inherited `visibility` and the `inherit`/`initial`/`unset`/`revert` keywords. An author `display` rule overrides the `hidden` attribute, as in browsers, and `@container` queries are evaluated against the viewport. Elements hidden by a class are then hidden from role queries, visibility assertions, Tab order and accessibility rules:
 
 ```json
 // btp.json
@@ -99,7 +105,7 @@ bUnit dispatches raw events. On top of that, the driver adds the default behavio
 
 You can also add CSS in code: `new BunitStoryOptions().AddStylesheetFile(path)` or `options.Stylesheets.Add(css)`.
 
-`@media` blocks are evaluated against the viewport the in-memory driver pretends to have. The default is `Viewport.Desktop` (1280×800), as in browser runs. Set it with `BunitStoryOptions.Viewport`, `bunit.viewport` in `btp.json`, or `BTP_BUNIT_VIEWPORT` (a preset name or `WIDTHxHEIGHT`). `BunitStoryOptions.Theme` drives `prefers-color-scheme` and applies the theme's decorator. The evaluator supports width and height (`min-`/`max-` and the range syntax, e.g. `(600px <= width < 900px)`), orientation, `prefers-color-scheme`, `prefers-reduced-motion` (`reduce`, as browser runs emulate), `hover`, `pointer`, media types, `not`/`only`, lists, nested `@media` and `@supports`:
+`@media` blocks are evaluated against the viewport the in-memory driver pretends to have. The default is `Viewport.Desktop` (1280×800), as in browser runs. Set it with `BunitStoryOptions.Viewport`, `bunit.viewport` in `btp.json`, or `BTP_BUNIT_VIEWPORT` (a preset name or `WIDTHxHEIGHT`). `BunitStoryOptions.Theme` drives `prefers-color-scheme` and applies the theme's decorator. The evaluator supports width and height (`min-`/`max-` and the range syntax, e.g. `(600px <= width < 900px)`), orientation, `prefers-color-scheme`, `prefers-reduced-motion` (`reduce`, as browser runs emulate, also as a bare `(prefers-reduced-motion)`), `hover`, `pointer`, media types, `not`/`only`, lists, nested `@media` and `@supports`:
 
 ```csharp
 var phone = new BunitStoryOptions { Viewport = Viewport.Mobile };
@@ -107,12 +113,90 @@ await using var session = await BunitStoryRunner.RenderAsync(story, phone);
 await session.StoryContext.Expect(session.StoryContext.GetByText("Analytics cookies...")).ToBeHiddenAsync();
 ```
 
-Limits remain: there is no layout and no real JavaScript (mock it with `MockJS`; see [test data](test-data.md#javascript-interop-mocks)). Without layout, bUnit can't tell that an element has no size, which browsers treat as not visible. When a play script depends on layout or a real browser, declare it, and the story is reported as *skipped* for drivers that cannot do it:
+Limits remain: there is no layout and no real JavaScript (mock it with `MockJS`; see [test data](test-data.md#javascript-interop-mocks)). Without layout, bUnit can't tell that an element has no size, which browsers treat as not visible. When a story depends on layout or a real browser, declare it, and the story is reported as *skipped*, with the reason, by every driver that cannot do it. See [driver capabilities](#driver-capabilities).
+
+## Driver capabilities
+
+Drivers differ in what they can really do. Each one states its capabilities, and nothing is silently substituted: a story that needs a capability a driver lacks is skipped there, with an explanation, never run against an approximation and reported as passed.
+
+| Capability | bUnit | Playwright (Static SSR) | Playwright (Server, WebAssembly, Auto) | In-app (workbench) |
+|---|---|---|---|---|
+| `RealBrowser` | no | yes | yes | yes |
+| `Layout` (sizes, scrolling, hit testing) | no | yes | yes | yes |
+| `Screenshots` | no | yes | yes | no |
+| `NativeFocus` | emulated (not claimed) | yes | yes | yes |
+| `JavaScript` | mocked (not claimed) | yes | yes | yes |
+| `Css` | `display`/`visibility` cascade and `@media` only (not claimed) | yes | yes | yes |
+| `Network` | no | yes | yes | no |
+| `FakeTime` | with `UseFakeTime` | no (not interactive) | with `UseFakeTime` | with `UseFakeTime` |
+| `BrowserEmulation` (geolocation, permissions, latency, offline) | no | yes | yes | no |
+
+**Declare requirements on the story** when the whole story needs them. Runners check them before rendering, and test data sources can leave the story out entirely:
 
 ```csharp
-ctx.Require(DriverCapabilities.Layout, "measuring the popover position");
-if (ctx.Supports(DriverCapabilities.RealBrowser)) { ... }
+stories.Add("Popover placement", s => s
+    .Requires(DriverCapabilities.Layout, "measuring the popover position")
+    .Play(async ctx => { /* ... */ }));
+
+// Only the stories the in-memory driver can run:
+public static TheoryData<string> Stories => new(Catalog.Supporting(DriverCapabilities.None).Ids);
 ```
+
+`Story.CanRunOn(capabilities)` and `Story.UnsupportedReason(capabilities, driverName)` answer the same question for your own runners; `BunitStoryDriver.CapabilitiesFor(story)` and `PlaywrightStoryDriver.CapabilitiesFor(mode, fakeTime)` give a driver's capabilities without starting it. A skipped result carries a reason such as `Driver 'bunit' lacks capabilities the story requires: Layout (measuring the popover position).`
+
+**Branch inside a play script** when only one step needs a capability:
+
+```csharp
+ctx.Require(DriverCapabilities.Layout, "measuring the popover position"); // skips the rest of the story here
+if (ctx.Supports(DriverCapabilities.RealBrowser)) { ... }                // optional extra checks
+```
+
+A story that calls `ctx.Require` mid-play is still reported as skipped, but it has already rendered and run the earlier steps; prefer the declaration when the requirement covers the whole story.
+
+## Browser emulation
+
+Real browsers can emulate browser APIs and network conditions. A story declares them, and drivers that cannot emulate
+(bUnit, the in-app driver) report it as skipped:
+
+```csharp
+stories.Add("Nearby stores", s => s
+    .Geolocation(52.37, 4.89)                      // navigator.geolocation, with the permission granted
+    .GrantPermissions("notifications")             // Permissions API names; browsers support different sets
+    .NetworkLatency(TimeSpan.FromMilliseconds(400)) // added to every HTTP request (not to an open WebSocket)
+    .Play(async ctx =>
+    {
+        await ctx.GetByRole("button", "Find stores").ClickAsync();
+        await ctx.SetGeolocationAsync(new GeoPosition(-33.87, 151.21)); // move while the story runs
+        await ctx.SetOfflineAsync();                                    // navigator.onLine false, requests fail
+        await ctx.SetOfflineAsync(false);
+    }));
+```
+
+`Emulate(e => e with { ... })` sets the same options as a `BrowserEmulation` record. Offline mode is switched from play
+because the page must load first; under Interactive Server it also cuts the circuit, so test offline behaviour under
+WebAssembly. A story that only calls `ctx.SetOfflineAsync` should still declare
+`.Requires(DriverCapabilities.BrowserEmulation, "goes offline")` so other drivers skip it up front.
+
+## Accessibility tree snapshots
+
+`ctx.ExpectAriaSnapshotAsync(expected)` waits until the story's accessibility tree matches: one line per element with a
+role (generic containers flattened), its accessible name and states, children indented under a line ending in `:`.
+
+```csharp
+await ctx.ExpectAriaSnapshotAsync("""
+    - heading "Sign in" [level=2]
+    - textbox "Email"
+    - checkbox "Remember me" [checked=false]
+    - button "Continue" [disabled]
+    """);
+```
+
+States are `checked`/`checked=false` (native and ARIA), `disabled`, `expanded`/`expanded=false` and `level=N` for
+headings. Hidden and `aria-hidden` content is left out. bUnit computes the tree with the C# engine and the browser
+drivers with its JavaScript port, so the same snapshot passes or fails under every driver (`DriverParityTests` and
+the sample's "Accessibility tree" story hold them to it). The failure message shows the actual tree, ready to paste;
+`ctx.GetAriaSnapshotAsync()` returns it, and `AriaSnapshot.Of(markup)` computes it for any markup. The workbench
+inspector shows the live tree of the selected story.
 
 ## Three drivers, one script
 

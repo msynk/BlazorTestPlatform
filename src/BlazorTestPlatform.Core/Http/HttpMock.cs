@@ -59,6 +59,10 @@ public sealed class HttpMock
 {
     private readonly List<HttpMockRule> _rules = [];
     private readonly List<HttpRequestRecord> _requests = [];
+
+    // Sequence numbers keep increasing across ClearRequests(): an in-flight request must never share its number with a
+    // later one.
+    private int _lastSequence;
     private readonly Lock _gate = new();
 
     /// <summary>Base address of clients created by the mock, and the root for relative rule patterns. Default <c>https://localhost/</c>.</summary>
@@ -133,9 +137,13 @@ public sealed class HttpMock
     /// <summary>Creates a handler that answers from this mock.</summary>
     public HttpMessageHandler CreateHandler() => new MockHttpMessageHandler(this);
 
-    /// <summary>Creates a client whose base address is <see cref="BaseAddress"/>.</summary>
+    /// <summary>
+    /// Creates a client whose base address is <see cref="BaseAddress"/>. Its timeout is infinite: the mock decides how long
+    /// a request takes (<c>Delay</c> on the story's clock, <c>Never()</c>), so a real-time 100 s timeout never cuts a
+    /// story's pending request short.
+    /// </summary>
     [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "Owned by the HttpClient.")]
-    public HttpClient CreateClient() => new(CreateHandler()) { BaseAddress = BaseAddress };
+    public HttpClient CreateClient() => new(CreateHandler()) { BaseAddress = BaseAddress, Timeout = Timeout.InfiniteTimeSpan };
 
     /// <summary>Clears recorded requests (rules are kept).</summary>
     public void ClearRequests()
@@ -231,10 +239,13 @@ public sealed class HttpMock
         return list;
     }
 
-    internal async Task<HttpResponseMessage> HandleAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    internal async Task<HttpResponseMessage> HandleAsync(HttpRequestMessage request, CancellationToken cancellationToken, Uri? clientBaseAddress = null)
     {
-        var url = request.RequestUri is { IsAbsoluteUri: true } absolute ? absolute : new Uri(BaseAddress, request.RequestUri?.ToString() ?? string.Empty);
-        var relative = Relative(url);
+        // Rules are relative to the base address of the client that sent the request (a named client configured with
+        // AddHttpClient keeps its own), else to the mock's.
+        var baseAddress = clientBaseAddress ?? BaseAddress;
+        var url = request.RequestUri is { IsAbsoluteUri: true } absolute ? absolute : new Uri(baseAddress, request.RequestUri?.ToString() ?? string.Empty);
+        var relative = Relative(url, baseAddress);
         var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         var headers = request.Headers.Concat(request.Content?.Headers ?? Enumerable.Empty<KeyValuePair<string, IEnumerable<string>>>())
             .GroupBy(h => h.Key, StringComparer.OrdinalIgnoreCase)
@@ -246,7 +257,7 @@ public sealed class HttpMock
         {
             rule = Enumerable.Reverse(_rules).FirstOrDefault(r => r.CanHandle(request, url, relative));
             rule?.Consume();
-            sequence = _requests.Count + 1;
+            sequence = ++_lastSequence;
             _requests.Add(new HttpRequestRecord { Sequence = sequence, Method = request.Method.Method, Url = url.ToString(), RelativeUrl = relative, Body = body, Headers = headers, Rule = rule?.ToString() });
         }
 
@@ -269,16 +280,25 @@ public sealed class HttpMock
     {
         lock (_gate)
         {
+            // The record is gone when ClearRequests() ran while the request was in flight.
             var index = _requests.FindIndex(r => r.Sequence == sequence);
-            _requests[index] = _requests[index] with { StatusCode = (int)response.StatusCode };
+            if (index >= 0)
+            {
+                _requests[index] = _requests[index] with { StatusCode = (int)response.StatusCode };
+            }
         }
 
         return response;
     }
 
-    private string Relative(Uri url)
+    /// <summary>
+    /// The URL relative to the directory of <see cref="BaseAddress"/>, which is how <see cref="HttpClient"/> resolves
+    /// relative requests: with <c>https://api/v1</c> (no trailing slash) a request for <c>people</c> goes to
+    /// <c>https://api/people</c>, relative <c>people</c>; <c>https://api/v10/x</c> is <c>v10/x</c>, never <c>0/x</c>.
+    /// </summary>
+    private static string Relative(Uri url, Uri baseAddress)
     {
-        var baseText = BaseAddress.ToString();
+        var baseText = new Uri(baseAddress, "./").ToString();
         var text = url.ToString();
         return text.StartsWith(baseText, StringComparison.OrdinalIgnoreCase) ? text[baseText.Length..] : text;
     }
@@ -303,10 +323,13 @@ public sealed class HttpMock
         return Regex.IsMatch(candidate, regex, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
     }
 
-    private sealed class MockHttpMessageHandler(HttpMock mock) : HttpMessageHandler
+    internal sealed class MockHttpMessageHandler(HttpMock mock) : HttpMessageHandler
     {
+        /// <summary>Base address of the client this handler serves, when it differs from the mock's.</summary>
+        public Uri? ClientBaseAddress { get; set; }
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            mock.HandleAsync(request, cancellationToken);
+            mock.HandleAsync(request, cancellationToken, ClientBaseAddress);
     }
 }
 
@@ -447,9 +470,78 @@ public sealed class HttpMockRule
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 }
 
-/// <summary>An <see cref="IHttpClientFactory"/> whose clients (named or typed) all answer from an <see cref="HttpMock"/>.</summary>
-public sealed class HttpMockClientFactory(HttpMock mock) : IHttpClientFactory
+/// <summary>
+/// An <see cref="IHttpClientFactory"/> whose clients (named or typed) all answer from an <see cref="HttpMock"/>. With
+/// the application's services, each client keeps what <c>AddHttpClient(...)</c> configured for its name (base address,
+/// default headers, timeout and delegating handlers such as authentication or resilience): only the primary handler,
+/// the network, is replaced by the mock, so a story exercises the same pipeline as production.
+/// </summary>
+public sealed class HttpMockClientFactory : IHttpClientFactory
 {
+    private readonly HttpMock _mock;
+    private readonly IServiceProvider? _services;
+
+    /// <summary>Creates a factory whose clients ignore any named-client configuration.</summary>
+    public HttpMockClientFactory(HttpMock mock)
+        : this(mock, services: null)
+    {
+    }
+
+    /// <summary>Creates a factory that applies the named-client configuration registered in <paramref name="services"/>.</summary>
+    public HttpMockClientFactory(HttpMock mock, IServiceProvider? services)
+    {
+        _mock = mock ?? throw new ArgumentNullException(nameof(mock));
+        _services = services;
+    }
+
     /// <inheritdoc />
-    public HttpClient CreateClient(string name) => mock.CreateClient();
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "Handlers are owned by the returned HttpClient.")]
+    public HttpClient CreateClient(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        if (_services?.GetService(typeof(Microsoft.Extensions.Options.IOptionsMonitor<Microsoft.Extensions.Http.HttpClientFactoryOptions>))
+            is not Microsoft.Extensions.Options.IOptionsMonitor<Microsoft.Extensions.Http.HttpClientFactoryOptions> monitor)
+        {
+            return _mock.CreateClient();
+        }
+
+        var options = monitor.Get(name);
+        var primary = new HttpMock.MockHttpMessageHandler(_mock);
+        var builder = new Builder(name, _services);
+        foreach (var configure in options.HttpMessageHandlerBuilderActions)
+        {
+            configure(builder);
+        }
+
+        // Whatever primary handler the application configured, the story's requests never reach the network.
+        if (!ReferenceEquals(builder.PrimaryHandler, primary))
+        {
+            builder.PrimaryHandler.Dispose();
+        }
+
+        builder.PrimaryHandler = primary;
+        var client = new HttpClient(builder.Build(), disposeHandler: true) { BaseAddress = _mock.BaseAddress, Timeout = Timeout.InfiniteTimeSpan };
+        foreach (var configure in options.HttpClientActions)
+        {
+            configure(client);
+        }
+
+        primary.ClientBaseAddress = client.BaseAddress;
+        return client;
+    }
+
+    /// <summary>The handler pipeline of one named client: the application's delegating handlers around the mock.</summary>
+    private sealed class Builder(string name, IServiceProvider services) : Microsoft.Extensions.Http.HttpMessageHandlerBuilder
+    {
+        public override string? Name { get; set; } = name;
+
+        // Starts like the default builder, so configuration that inspects the primary handler finds the usual type.
+        public override HttpMessageHandler PrimaryHandler { get; set; } = new HttpClientHandler();
+
+        public override IList<DelegatingHandler> AdditionalHandlers { get; } = [];
+
+        public override IServiceProvider Services => services;
+
+        public override HttpMessageHandler Build() => CreateHandlerPipeline(PrimaryHandler, AdditionalHandlers);
+    }
 }

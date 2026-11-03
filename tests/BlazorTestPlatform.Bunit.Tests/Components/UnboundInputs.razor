@@ -1,0 +1,33 @@
+@* Controls whose value the component never writes back: the browser keeps what the user typed across renders. *@
+<input aria-label="Search" @oninput="e => typed = (string?)e.Value" />
+<output data-testid="typed">@typed</output>
+
+<input type="checkbox" aria-label="Agree" @onchange="e => agreed = e.Value is true" />
+<output data-testid="agreed">@agreed</output>
+
+<input aria-label="Command" @onkeypress="OnKeyPress" />
+<output data-testid="submitted">@submitted</output>
+
+<fieldset>
+    <legend>Size</legend>
+    <label><input type="radio" name="size" value="s" /> Small</label>
+    <label><input type="radio" name="size" value="l" checked /> Large</label>
+</fieldset>
+
+<input aria-label="Bound" @bind="bound" @bind:event="oninput" />
+<button type="button" @onclick="() => bound = string.Empty">Reset bound</button>
+
+@code {
+    private string? typed;
+    private bool agreed;
+    private int submitted;
+    private string bound = "start";
+
+    private void OnKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            submitted++;
+        }
+    }
+}

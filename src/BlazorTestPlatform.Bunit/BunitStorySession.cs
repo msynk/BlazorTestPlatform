@@ -124,8 +124,13 @@ internal sealed class RenderMeasurement
 /// </summary>
 public sealed class BunitStorySession : IAsyncDisposable
 {
-    private BunitStorySession(Story story, BunitContext context, IRenderedComponent<StoryRoot> root, StoryRenderContext renderContext, BunitStoryDriver driver, StoryContext storyContext)
+    // The settings the session was started with: its default accessibility policy comes from them, not from the
+    // process-wide BtpSettings.Current.
+    private readonly BtpSettings _settings;
+
+    private BunitStorySession(Story story, BunitContext context, IRenderedComponent<StoryRoot> root, StoryRenderContext renderContext, BunitStoryDriver driver, StoryContext storyContext, BtpSettings settings)
     {
+        _settings = settings;
         Story = story;
         Context = context;
         Root = root;
@@ -221,7 +226,7 @@ public sealed class BunitStorySession : IAsyncDisposable
 
             var driver = new BunitStoryDriver(context, root!, renderContext, StylesheetCache.Resolve(options.Stylesheets, settings.BunitStylesheets, MediaEnvironment.For(viewport, options.Theme)));
             var storyContext = new StoryContext(story, driver, settings.DefaultTimeout, recorderToUse, cancellationToken);
-            return new BunitStorySession(story, context, root!, renderContext, driver, storyContext);
+            return new BunitStorySession(story, context, root!, renderContext, driver, storyContext, settings);
         }
         catch
         {
@@ -230,24 +235,35 @@ public sealed class BunitStorySession : IAsyncDisposable
         }
     }
 
-    /// <summary>Runs the story's play function (no-op when it has none).</summary>
+    /// <summary>
+    /// Runs the story's play function, then waits until renders settle. Stories without one still settle, so checks
+    /// that follow (markup rules, captured markup) see the state after initial asynchronous work, not the first frame.
+    /// </summary>
     public async Task PlayAsync()
     {
         if (Story.Play is { } play)
         {
             await StoryContext.Recorder.RunAsync("play", StepKind.Step, () => play(StoryContext)).ConfigureAwait(false);
-            await Driver.WaitForIdleAsync(StoryContext.CancellationToken).ConfigureAwait(false);
         }
+
+        await Driver.WaitForIdleAsync(StoryContext.CancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// An exception a component threw that the renderer caught outside any error boundary (for example after an
+    /// <c>await</c> in <c>OnInitializedAsync</c>), or null. In a browser it would show the Blazor error UI.
+    /// </summary>
+    public Exception? UnhandledException =>
+        Context.Renderer.UnhandledException is { IsCompletedSuccessfully: true } unhandled ? unhandled.Result : null;
 
     /// <summary>Runs static accessibility rules on the current markup.</summary>
     public AccessibilityReport AnalyzeAccessibility(AccessibilityPolicy? policy = null) =>
-        new MarkupAccessibilityAnalyzer().Analyze(Driver.Scope(), policy ?? BtpSettings.Current.Accessibility, Story.Accessibility);
+        new MarkupAccessibilityAnalyzer().Analyze(Driver.Scope(), policy ?? _settings.Accessibility, Story.Accessibility);
 
     /// <summary>Throws <see cref="AccessibilityViolationException"/> when the policy fails.</summary>
     public void AssertAccessible(AccessibilityPolicy? policy = null)
     {
-        policy ??= BtpSettings.Current.Accessibility;
+        policy ??= _settings.Accessibility;
         var evaluation = policy.Evaluate(AnalyzeAccessibility(policy), Story.Id, Story.Accessibility);
         if (!evaluation.Passed)
         {

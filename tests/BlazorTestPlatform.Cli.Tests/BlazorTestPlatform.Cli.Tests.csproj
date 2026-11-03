@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.Cli\BlazorTestPlatform.Cli.csproj" />
+    <!-- The generated test classes are compiled against the real adapters and frameworks. -->
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.Bunit\BlazorTestPlatform.Bunit.csproj" />
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.Xunit\BlazorTestPlatform.Xunit.csproj" />
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.NUnit\BlazorTestPlatform.NUnit.csproj" />
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.MSTest\BlazorTestPlatform.MSTest.csproj" />
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.TUnit\BlazorTestPlatform.TUnit.csproj" />
+  </ItemGroup>
+
+</Project>

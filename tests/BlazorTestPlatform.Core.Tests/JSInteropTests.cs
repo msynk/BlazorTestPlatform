@@ -89,6 +89,81 @@ public sealed class JSInteropTests
         Assert.Equal([true, true, false], log.Calls.Select(c => c.Mocked));
     }
 
+    private sealed class FakeReference : IJSObjectReference
+    {
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) => ValueTask.FromResult(default(TValue)!);
+
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) => ValueTask.FromResult(default(TValue)!);
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    [Theory]
+    [InlineData(JSMockMode.Answer)]
+    [InlineData(JSMockMode.AnsweredByInner)]
+    public async Task Property_reads_writes_and_constructors_are_mocked_and_recorded(JSMockMode mode)
+    {
+        var chart = new FakeReference();
+        var inner = new InProcessRuntime();
+        var log = new JSCallLog();
+        var mocks = new JSInteropMocks()
+            .SetupGet("document.title", "Story")
+            .SetupSet("document.title")
+            .Setup<IJSObjectReference>("new Chart", chart);
+        var runtime = StoryJSRuntime.Create(inner, mocks, log, mode);
+
+        Assert.Equal("Story", await runtime.GetValueAsync<string>("document.title"));
+        await runtime.SetValueAsync("document.title", "Changed");
+        Assert.Same(chart, await runtime.InvokeConstructorAsync("Chart", ["#canvas"]));
+
+        Assert.Empty(inner.Calls);
+        Assert.Equal(["get document.title", "set document.title", "new Chart"], log.Calls.Select(c => c.Identifier));
+        Assert.All(log.Calls, c => Assert.True(c.Mocked));
+        Assert.Equal(["Changed"], log.Calls[1].Arguments);
+    }
+
+    [Fact]
+    public async Task Strict_mocks_reject_unmocked_property_reads()
+    {
+        var runtime = StoryJSRuntime.Create(new InProcessRuntime(), new JSInteropMocks { Strict = true }, new JSCallLog(), JSMockMode.Answer);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => runtime.GetValueAsync<string>("navigator.language").AsTask());
+        Assert.Contains("get navigator.language", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void In_process_property_reads_are_mocked()
+    {
+        var runtime = (IJSInProcessRuntime)StoryJSRuntime.Create(new InProcessRuntime(), new JSInteropMocks().SetupGet("innerWidth", 1280), new JSCallLog(), JSMockMode.Answer);
+
+#pragma warning disable IL2026 // Test-only in-process call.
+        Assert.Equal(1280, runtime.GetValue<int>("innerWidth"));
+#pragma warning restore IL2026
+    }
+
+    [Fact]
+    public async Task Missing_mocked_modules_are_returned_as_in_process_references_too()
+    {
+        var log = new JSCallLog();
+        var runtime = StoryJSRuntime.Create(new ThrowingImportRuntime(), new JSInteropMocks().Module("./chart.js", m => m.Setup("size", 3)), log, JSMockMode.Answer);
+
+        var module = await runtime.InvokeAsync<IJSInProcessObjectReference>("import", "./chart.js");
+
+        Assert.NotNull(module);
+#pragma warning disable IL2026 // Test-only in-process call.
+        Assert.Equal(3, module.Invoke<int>("size"));
+#pragma warning restore IL2026
+    }
+
+    /// <summary>A runtime whose module imports fail, as for a script the host does not ship.</summary>
+    private sealed class ThrowingImportRuntime : IJSRuntime
+    {
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) => InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
+            identifier == "import" ? throw new JSException("Failed to fetch dynamically imported module") : ValueTask.FromResult(default(TValue)!);
+    }
+
     [Fact]
     public void Arguments_format_the_same_under_every_driver()
     {
