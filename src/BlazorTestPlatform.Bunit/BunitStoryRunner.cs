@@ -34,7 +34,7 @@ public static class BunitStoryRunner
 
         if ((story.SkipReason ?? story.UnsupportedReason(BunitStoryDriver.CapabilitiesFor(story), "bunit")) is { } skip)
         {
-            return Write(options, settings, Base(story, key, started) with { Outcome = StoryOutcome.Skipped, SkipReason = skip });
+            return Write(options, settings, Base(story, key, started, options) with { Outcome = StoryOutcome.Skipped, SkipReason = skip });
         }
 
         var recorder = new StepRecorder();
@@ -93,12 +93,14 @@ public static class BunitStoryRunner
                 budgetViolations = PerformanceBudgetEvaluator.Evaluate(metrics, budget);
                 if (budget.TrackBaseline)
                 {
+                    // Measured with the run's viewport, theme and args: each configuration has its own baseline.
                     var store = new PerformanceBaselineStore(settings.PerformanceBaselineFilePath);
-                    var baseline = store.Get(story.Id);
+                    var baselineKey = PerformanceBaselineStore.KeyFor(story.Id, options.Viewport?.Name, options.Theme?.Name, ArgsKey(options.Args));
+                    var baseline = store.Get(baselineKey);
                     comparison = PerformanceComparer.Compare(metrics, baseline, settings.Performance);
                     if (settings.UpdatePerformanceBaselines || (baseline is null && !settings.IsContinuousIntegration))
                     {
-                        store.Set(story.Id, PerformanceBaselineEntry.From(metrics));
+                        store.Set(baselineKey, PerformanceBaselineEntry.From(metrics));
                     }
                 }
 
@@ -112,7 +114,7 @@ public static class BunitStoryRunner
                 }
             }
 
-            return Write(options, settings, Base(story, key, started) with
+            return Write(options, settings, Base(story, key, started, options) with
             {
                 Outcome = StoryOutcome.Passed,
                 DurationMilliseconds = clock.Elapsed.TotalMilliseconds,
@@ -127,7 +129,7 @@ public static class BunitStoryRunner
         }
         catch (StorySkippedException ex)
         {
-            return Write(options, settings, Base(story, key, started) with
+            return Write(options, settings, Base(story, key, started, options) with
             {
                 Outcome = StoryOutcome.Skipped,
                 SkipReason = ex.Message,
@@ -145,7 +147,7 @@ public static class BunitStoryRunner
             var message = ex is OperationCanceledException && timeout.IsCancellationRequested
                 ? $"Story timed out after {(options.Timeout ?? story.Timeout ?? TimeSpan.FromSeconds(30)).TotalSeconds:0.#} s."
                 : ex.Message;
-            return Write(options, settings, Base(story, key, started) with
+            return Write(options, settings, Base(story, key, started, options) with
             {
                 Outcome = StoryOutcome.Failed,
                 Error = message,
@@ -300,7 +302,8 @@ public static class BunitStoryRunner
         protected override void Define(StoryCollectionBuilder<Composition> stories) => stories.Add("Empty");
     }
 
-    private static StoryResult Base(Story story, string key, DateTimeOffset started) => new()
+    // Viewport, theme and args are part of the key: reports must show them too, or the runs look identical.
+    private static StoryResult Base(Story story, string key, DateTimeOffset started, BunitStoryOptions options) => new()
     {
         Key = key,
         StoryId = story.Id,
@@ -311,6 +314,9 @@ public static class BunitStoryRunner
         SourceLine = story.SourceLine > 0 ? story.SourceLine : null,
         Driver = "bunit",
         HostingModel = HostingModel.InMemory.ToToken(),
+        Viewport = options.Viewport?.Name,
+        Theme = options.Theme?.Name,
+        Args = options.Args.Count == 0 ? null : new SortedDictionary<string, string?>(options.Args, StringComparer.OrdinalIgnoreCase),
         StartedAt = started,
     };
 

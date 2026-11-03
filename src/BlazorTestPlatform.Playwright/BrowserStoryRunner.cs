@@ -162,18 +162,32 @@ public sealed class BrowserStoryRunner
         VisualResult? visual = null;
         AccessibilityReport? a11y = null;
         IReadOnlyList<string> a11yFailures = [];
-        string? markup = null;
         BrowserMetrics? metrics = null;
         IReadOnlyList<BudgetViolation> budgetViolations = [];
+        var gate = new object();
+        var abandoned = false;
+        var closed = false;
 
         async Task<StoryResult> AttemptAsync()
         {
-            page = await _browser.CreatePageAsync(cell, new StoryPageOptions
+            var opened = await _browser.CreatePageAsync(cell, new StoryPageOptions
             {
                 Trace = keepDiagnostics != DiagnosticsMode.Off,
                 Prerender = _options.Prerender && story.Prerender,
                 ConfigurePageAsync = _options.ConfigurePageAsync,
             }).ConfigureAwait(false);
+            lock (gate)
+            {
+                page = abandoned ? null : opened;
+            }
+
+            if (page is null)
+            {
+                // The attempt timed out (or was cancelled) while the page was opening: nobody else will close it.
+                await ClosePageAsync(opened).ConfigureAwait(false);
+                throw new OperationCanceledException(timeout.Token);
+            }
+
             await recorder.RunAsync($"open {cell}", StepKind.Render, page.NavigateAsync).ConfigureAwait(false);
             if (page.UnsupportedOverrides is { } unsupported)
             {
@@ -246,11 +260,14 @@ public sealed class BrowserStoryRunner
                 throw new StoryAssertionException(DescribeVisualFailure(visual));
             }
 
-            markup = await SafeMarkupAsync(page).ConfigureAwait(false);
+            var markup = await SafeMarkupAsync(page).ConfigureAwait(false);
             var httpRequests = await SafeHttpRequestsAsync(page).ConfigureAwait(false);
+            var collected = new List<ArtifactReference>();
             if (keepDiagnostics == DiagnosticsMode.Always)
             {
-                await CollectArtifactsAsync(page, artifactDirectory, artifacts, failed: false).ConfigureAwait(false);
+                // A timed-out attempt leaves the artifacts to the failure path, which writes the same files.
+                timeout.Token.ThrowIfCancellationRequested();
+                await CollectArtifactsAsync(page, artifactDirectory, collected, failed: false).ConfigureAwait(false);
             }
 
             return Base(cell, key, started) with
@@ -263,18 +280,54 @@ public sealed class BrowserStoryRunner
                 Console = page.Diagnostics.Console,
                 Network = page.Diagnostics.Network,
                 HttpRequests = httpRequests,
-                Artifacts = artifacts,
+                Artifacts = collected,
                 Markup = markup,
                 BrowserMetrics = metrics,
             };
         }
 
+        // Ends the attempt: no page is adopted after this, the open one is closed (which fails whatever the attempt is
+        // still doing on it), and an attempt that is still running gets a bounded time to unwind, so it cannot change
+        // the captured state, write artifacts or keep a baseline once its result has been decided.
+        async Task StopAsync(Task attemptTask)
+        {
+            StoryPage? open;
+            lock (gate)
+            {
+                abandoned = true;
+                open = closed ? null : page;
+                closed = true;
+            }
+
+            if (open is not null)
+            {
+                await ClosePageAsync(open).ConfigureAwait(false);
+            }
+
+            if (!attemptTask.IsCompleted)
+            {
+                try
+                {
+                    await attemptTask.WaitAsync(DiagnosticsTimeout * 2).ConfigureAwait(false);
+                }
+                catch (TimeoutException)
+                {
+                    _ = attemptTask.ContinueWith(static t => t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                }
+                catch (Exception)
+                {
+                    // The abandoned attempt failed on its closed page; the result was decided without it.
+                }
+            }
+        }
+
+        var attemptTask = AttemptAsync();
         try
         {
             // The timeout is enforced, not just requested: navigation, page evaluation, axe and captures do not all
             // observe the token, and a story that blocks the browser's main thread (a WebAssembly loop) never returns.
-            // Disposing the page in the finally block stops whatever is still running.
-            return await AttemptAsync().WaitAsync(timeout.Token).ConfigureAwait(false);
+            // StopAsync closes the page, which stops whatever is still running.
+            return await attemptTask.WaitAsync(timeout.Token).ConfigureAwait(false);
         }
         catch (StorySkippedException ex)
         {
@@ -289,15 +342,26 @@ public sealed class BrowserStoryRunner
         {
             var timedOut = ex is OperationCanceledException && timeout.IsCancellationRequested;
             IReadOnlyList<HttpRequestRecord> failedRequests = [];
-            if (page is not null)
+            string? failedMarkup = null;
+            StoryPage? failedPage;
+            lock (gate)
             {
-                markup = await SafeMarkupAsync(page).ConfigureAwait(false);
-                failedRequests = await SafeHttpRequestsAsync(page).ConfigureAwait(false);
+                failedPage = page;
+            }
+
+            if (failedPage is not null)
+            {
+                // Collected before the attempt is stopped: the page as it hung is what explains a timeout.
+                failedMarkup = await SafeMarkupAsync(failedPage).ConfigureAwait(false);
+                failedRequests = await SafeHttpRequestsAsync(failedPage).ConfigureAwait(false);
                 if (keepDiagnostics != DiagnosticsMode.Off)
                 {
-                    await CollectArtifactsAsync(page, artifactDirectory, artifacts, failed: true).ConfigureAwait(false);
+                    await CollectArtifactsAsync(failedPage, artifactDirectory, artifacts, failed: true).ConfigureAwait(false);
                 }
             }
+
+            // From here on the captured state (visual, a11y, metrics, steps) no longer changes under us.
+            await StopAsync(attemptTask).ConfigureAwait(false);
 
             if (visual?.DiffPath is { } diff)
             {
@@ -323,28 +387,30 @@ public sealed class BrowserStoryRunner
                 Visual = visual,
                 Accessibility = a11y,
                 AccessibilityFailures = a11yFailures,
-                Console = page?.Diagnostics.Console ?? [],
-                Network = page?.Diagnostics.Network ?? [],
+                Console = failedPage?.Diagnostics.Console ?? [],
+                Network = failedPage?.Diagnostics.Network ?? [],
                 HttpRequests = failedRequests,
                 Artifacts = artifacts,
-                Markup = markup,
+                Markup = failedMarkup,
                 BrowserMetrics = metrics,
                 BudgetViolations = budgetViolations,
             };
         }
         finally
         {
-            if (page is not null)
-            {
-                try
-                {
-                    await page.DisposeAsync().AsTask().WaitAsync(DiagnosticsTimeout * 2).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is PlaywrightException or TimeoutException)
-                {
-                    // A crashed browser or a hung page: the context is gone or will be collected with the browser.
-                }
-            }
+            await StopAsync(attemptTask).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task ClosePageAsync(StoryPage page)
+    {
+        try
+        {
+            await page.DisposeAsync().AsTask().WaitAsync(DiagnosticsTimeout * 2).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is PlaywrightException or TimeoutException)
+        {
+            // A crashed browser or a hung page: the context is gone or will be collected with the browser.
         }
     }
 
@@ -395,6 +461,9 @@ public sealed class BrowserStoryRunner
             }
 
             var name = SnapshotNaming.For(story.Id, page.Cell.Viewport.Name, page.Cell.Theme.Name, page.Cell.Browser, variant: variant);
+
+            // A timed-out attempt is being abandoned: it must not write (or update) a baseline after its failure is reported.
+            cancellationToken.ThrowIfCancellationRequested();
 
             // Every render mode and attempt keeps its own actual/diff images: a later mode that matches, or a passing
             // retry, must not delete the evidence of an earlier mismatch.

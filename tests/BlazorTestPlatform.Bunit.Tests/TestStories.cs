@@ -195,3 +195,17 @@ public sealed class InsertsBeforeFocusStories : Stories<InsertsBeforeFocus>
 
     protected override void Define(StoryCollectionBuilder<InsertsBeforeFocus> stories) => stories.Add("Default");
 }
+
+public sealed class RelocatesByTextStories : Stories<RelocatesByText>
+{
+    public override string Title => "Tests/Relocates by text";
+
+    protected override void Define(StoryCollectionBuilder<RelocatesByText> stories) => stories.Add("Default");
+}
+
+public sealed class SummaryActionsStories : Stories<SummaryActions>
+{
+    public override string Title => "Tests/Summary actions";
+
+    protected override void Define(StoryCollectionBuilder<SummaryActions> stories) => stories.Add("Default");
+}

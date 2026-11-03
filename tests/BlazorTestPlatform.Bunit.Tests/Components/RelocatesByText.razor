@@ -1,0 +1,17 @@
+@* Same-key buttons with repeated text: focus must stay on the clicked one when content shifts their positions. *@
+<div>
+    @if (shown)
+    {
+        <p>Inserted above</p>
+    }
+    <button type="button">A</button>
+    <button type="button">B</button>
+    <button type="button" @onclick="() => { shown = true; clicks++; }">A</button>
+    <button type="button">A</button>
+</div>
+<output data-testid="clicks">@clicks</output>
+
+@code {
+    private bool shown;
+    private int clicks;
+}

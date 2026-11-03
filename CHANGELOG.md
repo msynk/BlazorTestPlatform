@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Fixes from the review of the second pass
+
+* **CSS cascade in bUnit**: escaped quotes and braces in selectors (Tailwind's `.content-\[\'\'\]`) no longer split cascade layers at the wrong place and drop the rules after them.
+* **Browser runs**: a timed-out attempt is stopped before its result is decided: its page is closed (also when it was still opening), it cannot write a baseline or artifacts afterwards, and failure diagnostics are collected from the page as it hung.
+* **Test impact analysis**: baselines stored as `{story-id}/{viewport}.{theme}.{browser}-{platform}.png` map to their story; generic components rendered with inferred type arguments (through Razor's generated `TypeInference` helpers) count as dependencies of the components that render them.
+* **Workbench services**: a story service that depends on the type it is registered as (a decorator) receives the application's service instead of recursing until the stack overflows; a disposable singleton the application creates with a factory is flagged when the factory's declared type is disposable, and otherwise fails with an explanation instead of being disposed by the first frame; application services that take a service only stories register in their constructor fail with "Unable to resolve service" (or use another constructor) outside those stories instead of receiving null.
+* **Results directory safety**: `btp clean` and `ResultsStore.Clear()` look for project files and repositories at any depth, so a results path one level too high (a folder of projects) is refused.
+* **bUnit runs**: performance baselines are kept per viewport, theme and args (`btp perf approve` records each configuration under its own key, and pruning keeps every configuration of a live story); results record their viewport, theme and args, so reports tell the configurations apart; a click on a button, link or label inside a `<summary>` no longer toggles the details; focus, hover and `@ref` targets among same-key siblings with repeated text stay on their element when positions shift.
+* **Accessibility rules**: `presentation-role-conflict` no longer reports hidden elements (`<svg role="presentation" aria-hidden="true">`), as axe-core; an author `[hidden] { display: none !important }` beats an inline display on an element with the `hidden` attribute.
+* **`btp init`**: the generated pipelines run `dotnet test --project <dir>` only when the repository's global.json selects Microsoft.Testing.Platform, and `dotnet test <dir>` in the default VSTest mode.
+
 ### New capabilities and fidelity (second pass; see [docs/improvement-progress.md](docs/improvement-progress.md))
 
 * **Test framework packages**: `BlazorTestPlatform.Xunit`, `.NUnit`, `.MSTest` and `.TUnit` turn catalogs, stories and matrix cells into native data rows (`StoryTheoryData`, `StoryTestCases`, `StoryDataRows`) named after the story, with tags as categories and `.Skip(...)` reasons applied at discovery, and `Passed(result)` reports a skipped run as the framework's skip instead of a pass. `StoryTestCase.From(...)` is the framework-neutral form. See [test frameworks](docs/test-frameworks.md).

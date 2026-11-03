@@ -26,6 +26,12 @@ public sealed class FakeGreetingService : IGreetingService
     public string Greet() => "fake";
 }
 
+/// <summary>A story service that decorates the application's service of the same type.</summary>
+public sealed class ExcitedGreetingService(IGreetingService inner) : IGreetingService
+{
+    public string Greet() => inner.Greet() + "!";
+}
+
 public sealed class Widget : ComponentBase
 {
     protected override void BuildRenderTree(RenderTreeBuilder builder) => builder.AddContent(0, "widget");
@@ -88,6 +94,12 @@ public sealed class ShoutingFormatter(IGreetingService greeting, Microsoft.Exten
     }
 }
 
+/// <summary>An application service that requires a service only stories register.</summary>
+public sealed class GreetingBanner(IGreetingFormatter formatter)
+{
+    public string Text => formatter.Format();
+}
+
 public interface IWasmOnlyService;
 
 public sealed class WasmOnlyService : IWasmOnlyService;
@@ -109,6 +121,8 @@ public sealed class WidgetStories : Stories<Widget>
             }
         }));
         stories.Add("Overridden", s => s.Services(services => services.AddSingleton<IGreetingService, FakeGreetingService>()));
+        stories.Add("Decorated", s => s.Services(services => services.AddSingleton<IGreetingService, ExcitedGreetingService>()));
+        stories.Add("Decorated by factory", s => s.Services(services => services.AddScoped<IGreetingService>(sp => new ExcitedGreetingService(sp.GetRequiredService<IGreetingService>()))));
         stories.Add("Options", s => s.Services(services => services.Configure<WidgetSettings>(o => o.Applied.Add("story"))));
         stories.Add("Http", s => s.MockHttp(http => http.Get("api/ping").RespondText("pong")));
         stories.Add("Fake time", s => s.UseFakeTime(new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero)));
@@ -180,6 +194,36 @@ public sealed class ServiceOverrideTests
         await using var frame = await ActivateAsync(provider, "tests-widget--uses-app-services");
 
         Assert.Equal("REAL!", frame.ServiceProvider.GetRequiredService<IGreetingFormatter>().Format());
+    }
+
+    [Fact]
+    public async Task Application_services_that_require_a_story_only_service_fail_clearly_outside_its_stories()
+    {
+        await using var provider = BuildApp(services => services.AddLogging().AddScoped<GreetingBanner>());
+
+        await using (var plain = await ActivateAsync(provider, "tests-widget--plain"))
+        {
+            Assert.Null(plain.ServiceProvider.GetService<IGreetingFormatter>());
+            var error = Assert.Throws<InvalidOperationException>(() => plain.ServiceProvider.GetRequiredService<GreetingBanner>());
+            Assert.Contains(nameof(IGreetingFormatter), error.Message);
+        }
+
+        await using (var story = await ActivateAsync(provider, "tests-widget--uses-app-services"))
+        {
+            Assert.Equal("REAL!", story.ServiceProvider.GetRequiredService<GreetingBanner>().Text);
+        }
+    }
+
+    [Theory]
+    [InlineData("tests-widget--decorated")]
+    [InlineData("tests-widget--decorated-by-factory")]
+    public async Task Story_services_can_decorate_the_application_service_they_replace(string storyId)
+    {
+        await using var provider = BuildApp();
+        await using var frame = await ActivateAsync(provider, storyId);
+
+        Assert.Equal("real!", frame.ServiceProvider.GetRequiredService<IGreetingService>().Greet());
+        Assert.Equal("real!", frame.ServiceProvider.GetRequiredService<StoryServiceScope>().Services!.GetRequiredService<IGreetingService>().Greet());
     }
 
     [Fact]

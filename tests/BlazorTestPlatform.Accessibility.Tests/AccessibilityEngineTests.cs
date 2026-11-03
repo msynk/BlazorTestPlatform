@@ -219,6 +219,8 @@ public sealed class MarkupRuleTests
     [InlineData("<a href='/x'>Open <span tabindex='-1'>details</span></a>", "nested-interactive")]
     [InlineData("<dialog open>Hi</dialog>", "aria-dialog-name")]
     [InlineData("<details><summary><img src='m.png' alt='More'></summary>x</details>", "summary-name")]
+    [InlineData("<button>Save <svg role='presentation' aria-hidden='true'></svg></button>", "presentation-role-conflict")]
+    [InlineData("<span role='none' aria-hidden='true'>*</span>", "presentation-role-conflict")]
     public void Rules_follow_axe_core_where_it_does_not_fail(string html, string rule) => Assert.DoesNotContain(rule, Violations(html));
 
     [Fact]

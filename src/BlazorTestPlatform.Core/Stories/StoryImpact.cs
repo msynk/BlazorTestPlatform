@@ -79,8 +79,12 @@ public sealed class StoryImpact
                 hits.UnionWith(catalog.Stories.Where(s => affected.Contains(s.ComponentType)));
             }
 
-            // Files that carry a story id: baselines, reviews, results.
-            hits.UnionWith(catalog.Stories.Where(s => name.Contains(s.Id, StringComparison.OrdinalIgnoreCase)));
+            // Files that carry a story id, in their name or as a directory: baselines are stored as
+            // {story-id}/{viewport}.{theme}.{browser}-{platform}.png; reviews and results.
+            var directories = file.Split('/')[..^1];
+            hits.UnionWith(catalog.Stories.Where(s =>
+                name.Contains(s.Id, StringComparison.OrdinalIgnoreCase)
+                || directories.Contains(s.Id, StringComparer.OrdinalIgnoreCase)));
 
             if (hits.Count == 0)
             {
@@ -232,12 +236,17 @@ public sealed class StoryImpact
         }
     }
 
-    // Finds OpenComponent<T>() calls in the type's methods (and its nested types: lambdas, render fragments).
+    // Finds OpenComponent<T>() calls in the type's methods (and its nested types: lambdas, render fragments), and in the
+    // type-inference helpers Razor generates for the generic components it renders with inferred type arguments
+    // (__Blazor.{namespace}.{component}.TypeInference.CreateGrid_0<TItem>, which call OpenComponent<Grid<TItem>>).
     [RequiresUnreferencedCode("Resolves IL metadata tokens.")]
     private static HashSet<Type> RenderedComponents(Type type)
     {
         var found = new HashSet<Type>();
-        var types = new[] { type }.Concat(type.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic));
+        var inference = type.Assembly.GetType($"__Blazor.{(type.Namespace is { } ns ? ns + "." : string.Empty)}{ComponentName(type)}.TypeInference");
+        var types = new[] { type, inference }
+            .OfType<Type>()
+            .SelectMany(t => t.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic).Prepend(t));
         foreach (var current in types)
         {
             var methods = current.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);

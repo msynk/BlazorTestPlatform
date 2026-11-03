@@ -115,6 +115,25 @@ public sealed class PerformanceTests
         Assert.Equal(["c--d"], reloaded.Prune(["a--b"]));
         Assert.Null(new PerformanceBaselineStore(path).Get("c--d"));
     }
+
+    [Fact]
+    public void Baselines_are_kept_per_configuration()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "btp-tests", Guid.NewGuid().ToString("N"), "performance.json");
+        var store = new PerformanceBaselineStore(path);
+        var mobile = PerformanceBaselineStore.KeyFor("a--b", "Mobile", null, null);
+        store.Set("a--b", PerformanceBaselineEntry.From(Metrics(1, 2, 3)));
+        store.Set(mobile, PerformanceBaselineEntry.From(Metrics(4, 5, 6)));
+
+        Assert.Equal("a--b", PerformanceBaselineStore.KeyFor("a--b", null, null, null));
+        Assert.Equal("a--b|Mobile|Dark", PerformanceBaselineStore.KeyFor(new StoryResult { Key = "a--b|bunit|Mobile|Dark", StoryId = "a--b", Title = "A", Name = "b", Driver = "bunit" }));
+        Assert.Equal(1, store.Get("a--b")!.RootRenderCount);
+        Assert.Equal(4, store.Get(mobile)!.RootRenderCount);
+
+        // Pruning keeps every configuration of a live story.
+        Assert.Empty(store.Prune(["a--b"]));
+        Assert.Equal([mobile], store.Prune(["e--f"]).Where(k => k != "a--b"));
+    }
 }
 
 public sealed class AccessibilityGateTests

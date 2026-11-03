@@ -30,9 +30,11 @@ public static class DomFacts
         IElement? previous = null;
         for (var current = element; current is not null; previous = current, current = current.ParentElement)
         {
-            // The hidden attribute is display: none in the browser's stylesheet, so an author display wins over it.
+            // The hidden attribute is display: none in the browser's stylesheet, so an author display wins over it. With
+            // the stylesheets known, the cascade decides (an author [hidden] { display: none !important } beats an inline
+            // display); without them, only an inline display can be seen.
             if (NeverRendered.Contains(current.LocalName)
-                || (current.HasAttribute("hidden") && !HasInlineDisplay(current) && scope?.Styles?.DisplayOverridesHiddenAttribute(current) != true))
+                || (current.HasAttribute("hidden") && !(scope?.Styles is { } css ? css.DisplayOverridesHiddenAttribute(current) : HasInlineDisplay(current))))
             {
                 return true;
             }

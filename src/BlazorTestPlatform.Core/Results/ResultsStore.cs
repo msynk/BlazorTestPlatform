@@ -155,11 +155,20 @@ public sealed class ResultsStore
             return "it is a git repository";
         }
 
-        foreach (var marker in SourceMarkers)
+        // At any depth: a path one level too high (resultsDirectory "..") holds project folders, not project files. Hidden
+        // entries (.git) are searched too; links are not followed, as the recursive delete does not follow them either.
+        var everything = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
+        foreach (var entry in System.IO.Directory.EnumerateFileSystemEntries(full, "*", everything))
         {
-            if (System.IO.Directory.EnumerateFiles(full, marker, SearchOption.TopDirectoryOnly).FirstOrDefault() is { } file)
+            var name = Path.GetFileName(entry);
+            if (name == ".git")
             {
-                return $"it contains {Path.GetFileName(file)}";
+                return $"it contains a git repository ({Path.GetRelativePath(full, entry)})";
+            }
+
+            if (SourceMarkers.Any(marker => System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(marker, name)))
+            {
+                return $"it contains {Path.GetRelativePath(full, entry)}";
             }
         }
 

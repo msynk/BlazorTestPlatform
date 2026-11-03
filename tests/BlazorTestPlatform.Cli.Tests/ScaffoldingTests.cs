@@ -62,10 +62,47 @@ public sealed class ScaffoldingTests
 
         var (_, pipeline) = Assert.Single(plan, f => f.Path == Path.Combine(repository, file.Replace('/', Path.DirectorySeparatorChar)));
         Assert.Contains($"mcr.microsoft.com/playwright/dotnet:v{PinnedPlaywrightVersion()}-noble", pipeline, StringComparison.Ordinal);
-        Assert.Contains("dotnet test --project tests/Ui.Tests", pipeline, StringComparison.Ordinal);
+        Assert.Contains("dotnet test tests/Ui.Tests", pipeline, StringComparison.Ordinal);
         Assert.Contains("btp report -p tests/Ui.Tests", pipeline, StringComparison.Ordinal);
         Assert.Contains(expression, pipeline, StringComparison.Ordinal);
         Assert.DoesNotContain("{project}", pipeline, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false, "dotnet test tests/Ui.Tests")]
+    [InlineData(true, "dotnet test --project tests/Ui.Tests")]
+    public void Pipelines_pass_the_project_the_way_the_runner_mode_takes_it(bool testingPlatform, string command)
+    {
+        var repository = Path.Combine(Path.GetTempPath(), "repo");
+        var plan = Scaffolding.Plan(new ScaffoldOptions
+        {
+            ProjectDirectory = Path.Combine(repository, "tests", "Ui.Tests"),
+            Namespace = "Ui.Tests",
+            Ci = CiSystem.GitHub,
+            RepositoryRoot = repository,
+            TestingPlatform = testingPlatform,
+        });
+
+        var pipeline = plan.Single(f => f.Path.EndsWith("blazor-ui-tests.yml", StringComparison.Ordinal)).Content;
+        Assert.Contains($"run: {command}\n", pipeline.ReplaceLineEndings("\n"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_runner_mode_comes_from_the_nearest_global_json()
+    {
+        var repository = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "btp-scaffold", Guid.NewGuid().ToString("N"))).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(repository, "tests", "Ui.Tests")).FullName;
+
+        File.WriteAllText(Path.Combine(repository, "global.json"), """{ "sdk": { "version": "10.0.100" } }""");
+        Assert.False(Scaffolding.UsesTestingPlatform(project));
+
+        File.WriteAllText(Path.Combine(repository, "global.json"), """
+            {
+              // comments are allowed
+              "test": { "runner": "Microsoft.Testing.Platform" },
+            }
+            """);
+        Assert.True(Scaffolding.UsesTestingPlatform(project));
     }
 
     // The version Directory.Packages.props pins, which the browser tests and their baselines use.

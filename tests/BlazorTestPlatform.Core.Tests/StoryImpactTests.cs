@@ -32,6 +32,19 @@ public sealed class ImpactLeaf : ComponentBase
     protected override void BuildRenderTree(RenderTreeBuilder builder) => builder.AddContent(0, "leaf");
 }
 
+public sealed class ImpactGrid<TItem> : ComponentBase
+{
+    [Parameter]
+    public IEnumerable<TItem> Items { get; set; } = [];
+}
+
+// Renders ImpactGrid with an inferred type argument, through Razor's generated TypeInference helper.
+public sealed class ImpactDirectory : ComponentBase
+{
+    protected override void BuildRenderTree(RenderTreeBuilder builder) =>
+        global::__Blazor.BlazorTestPlatform.Core.Tests.ImpactDirectory.TypeInference.CreateImpactGrid_0(builder, 0, 1, new[] { "Ada" });
+}
+
 public sealed class StoryImpactTests
 {
     private const string ThisFile = "tests/BlazorTestPlatform.Core.Tests/StoryImpactTests.cs";
@@ -58,7 +71,14 @@ public sealed class StoryImpactTests
         protected override void Define(StoryCollectionBuilder<Greeter> stories) => stories.Add("Default");
     }
 
-    private static readonly StoryCatalog Catalog = StoryCatalog.FromCollections([new PanelStories(), new LeafStories(), new GreeterImpactStories()]);
+    private sealed class DirectoryStories : Stories<ImpactDirectory>
+    {
+        public override string Title => "Impact/Directory";
+
+        protected override void Define(StoryCollectionBuilder<ImpactDirectory> stories) => stories.Add("Default");
+    }
+
+    private static readonly StoryCatalog Catalog = StoryCatalog.FromCollections([new PanelStories(), new LeafStories(), new GreeterImpactStories(), new DirectoryStories()]);
 
     [Fact]
     public void A_component_change_affects_its_stories_and_the_stories_of_components_that_render_it()
@@ -85,6 +105,25 @@ public sealed class StoryImpactTests
         var impact = StoryImpact.Analyze(Catalog, ["samples/__snapshots__/impact-leaf--default.chromium.desktop-light.png"]);
 
         Assert.Equal(["impact-leaf--default"], impact.Ids);
+    }
+
+    [Fact]
+    public void Baselines_stored_under_the_story_id_affect_that_story()
+    {
+        // SnapshotNaming: {story-id}/{viewport}.{theme}.{browser}-{platform}.png
+        var impact = StoryImpact.Analyze(Catalog, ["samples/__snapshots__/impact-leaf--default/desktop.light.chromium-linux.png"]);
+
+        Assert.False(impact.RunsEverything);
+        Assert.Equal(["impact-leaf--default"], impact.Ids);
+    }
+
+    [Fact]
+    public void Generic_components_rendered_with_inferred_type_arguments_are_dependencies()
+    {
+        var impact = StoryImpact.Analyze(Catalog, ["samples/Ui/ImpactGrid.razor"]);
+
+        Assert.False(impact.RunsEverything);
+        Assert.Equal(["impact-directory--default"], impact.Ids);
     }
 
     [Fact]

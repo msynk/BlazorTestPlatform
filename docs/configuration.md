@@ -26,7 +26,7 @@ Settings are resolved in this order: environment variables, then `btp.json` in t
 
 **CI detection.** A run counts as CI when `BTP_CI` says so; otherwise when `CI` is set to anything but `false`, `0` or `no` (some systems set it to their own name), or when a variable of GitHub Actions, Azure Pipelines, GitLab, Jenkins (`JENKINS_URL`), TeamCity, Buildkite, CircleCI, AWS CodeBuild, Bitbucket, AppVeyor, Travis, Drone, Semaphore or Bitrise is present. On CI, baselines are never written and retries default to 2. If your CI system is not in the list, set `BTP_CI=true`: otherwise missing baselines are written and pass.
 
-**Results directory safety.** `btp clean` and `ResultsStore.Clear()` refuse to delete a directory that holds project, solution, `global.json`, `Directory.Build.props` or `btp.json` files, a git repository, a drive root, or the current directory, so a misconfigured results path cannot delete sources.
+**Results directory safety.** `btp clean` and `ResultsStore.Clear()` refuse to delete a directory that holds project, solution, `global.json`, `Directory.Build.props` or `btp.json` files or a git repository (at any depth, so a path one level too high is refused too), a drive root, or the current directory, so a misconfigured results path cannot delete sources.
 
 ## `btp.json`
 

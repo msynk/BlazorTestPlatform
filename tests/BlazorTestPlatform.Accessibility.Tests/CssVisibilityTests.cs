@@ -151,6 +151,16 @@ public sealed class CssVisibilityTests
         Assert.True(Hidden("@media (min-width: 1px) { @layer a { .h { display: none } } }", "<p id='x' class='h'>x</p>", "x"));
     }
 
+    [Fact]
+    public void Escaped_quotes_in_selectors_do_not_split_layers()
+    {
+        // Tailwind v4 arbitrary values escape quotes in class names: .content-[''] becomes .content-\[\'\'\].
+        const string css = @"@layer utilities { .content-\[\'\'\]::after { content: '' } .hidden { display: none } } @layer utilities { .shown { display: block } }";
+
+        Assert.True(Hidden(css, "<p id='x' class='hidden'>x</p>", "x"));
+        Assert.True(Hidden(css + " .later { display: none }", "<p id='x' class='later'>x</p>", "x"));
+    }
+
     [Theory]
     [InlineData("@layer a { #x { display: none } } .s { display: block }", false)] // unlayered beats any layer, even with lower specificity
     [InlineData("@layer a, b; @layer b { .s { display: none } } @layer a { #x { display: block } }", true)] // later layer wins
@@ -197,6 +207,9 @@ public sealed class CssVisibilityTests
         Assert.False(Hidden(".shown { display: flex }", "<div id='x' class='shown' hidden>x</div>", "x"));
         Assert.True(Hidden(".other { display: flex }", "<div id='x' hidden>x</div>", "x"));
         Assert.False(Hidden(string.Empty, "<div id='x' hidden style='display: block'>x</div>", "x"));
+
+        // Bootstrap's reboot: an important author rule beats a normal inline display.
+        Assert.True(Hidden("[hidden] { display: none !important }", "<div id='x' hidden style='display: flex'>x</div>", "x"));
     }
 
     [Fact]

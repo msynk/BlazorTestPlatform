@@ -127,6 +127,55 @@ public sealed class WorkbenchSecurityTests
     }
 
     [Fact]
+    public async Task Factory_singletons_declared_disposable_are_flagged_like_other_disposable_singletons()
+    {
+        var greeting = new DisposableGreeting();
+        var services = new ServiceCollection();
+        services.AddSingleton<IGreetingService, DisposableGreeting>(_ => greeting);
+        services.AddBlazorTestWorkbench(o => o.AddStoriesFromAssemblyOf<WidgetStories>());
+        await using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var story = scope.ServiceProvider.GetRequiredService<StoryCatalog>().Get("tests-widget--plain");
+            await scope.ServiceProvider.GetRequiredService<StoryServiceScope>().ActivateAsync(story, HostingModel.InteractiveServer, authentication: null);
+            Assert.Equal("real", scope.ServiceProvider.GetRequiredService<IGreetingService>().Greet());
+        }
+
+        Assert.False(greeting.Disposed);
+        Assert.Contains(typeof(IGreetingService), provider.GetRequiredService<WorkbenchOptions>().UnwrappableOverrides);
+    }
+
+    [Fact]
+    public async Task Factory_singletons_that_turn_out_disposable_fail_clearly_instead_of_being_disposed_by_story_scopes()
+    {
+        var greeting = new DisposableGreeting();
+        var services = new ServiceCollection();
+        services.AddSingleton<IGreetingService>(_ => greeting);
+        services.AddBlazorTestWorkbench(o => o.AddStoriesFromAssemblyOf<WidgetStories>());
+        await using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var story = scope.ServiceProvider.GetRequiredService<StoryCatalog>().Get("tests-widget--plain");
+            await scope.ServiceProvider.GetRequiredService<StoryServiceScope>().ActivateAsync(story, HostingModel.InteractiveServer, authentication: null);
+            var error = Assert.Throws<InvalidOperationException>(() => scope.ServiceProvider.GetRequiredService<IGreetingService>());
+            Assert.Contains("AddSingleton<IGreetingService, DisposableGreeting>()", error.Message);
+        }
+
+        Assert.False(greeting.Disposed);
+    }
+
+    [Fact]
+    public void Factory_singletons_whose_return_type_cannot_be_disposable_stay_overridable()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IGreetingService, RealGreetingService>(_ => new RealGreetingService());
+
+        Assert.True(WorkbenchServiceCollectionExtensions.CanWrap(services, typeof(IGreetingService)));
+    }
+
+    [Fact]
     public async Task Services_only_stories_register_stay_optional_elsewhere()
     {
         var services = new ServiceCollection();

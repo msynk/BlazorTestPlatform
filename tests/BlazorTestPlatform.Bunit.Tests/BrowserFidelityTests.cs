@@ -371,6 +371,38 @@ public sealed class BrowserFidelityTests
     }
 
     [Fact]
+    public async Task Controls_inside_a_summary_take_the_click_and_leave_the_details_alone()
+    {
+        await using var session = await RenderAsync("tests-summary-actions--default");
+        var ctx = session.StoryContext;
+
+        await ctx.GetByRole("button", "Reset").ClickAsync();
+        await ctx.Expect(ctx.GetByTestId("resets")).ToHaveTextAsync("1");
+        await ctx.GetByText("Only mine").ClickAsync();
+        await ctx.Expect(ctx.GetByRole("checkbox", "Only mine")).ToBeCheckedAsync();
+        await ctx.Expect(ctx.GetByText("Filter list")).ToBeHiddenAsync();
+        await ctx.Expect(ctx.GetByTestId("toggles")).ToHaveTextAsync("0");
+
+        await ctx.GetByText("Filters", exact: true).ClickAsync();
+        await ctx.Expect(ctx.GetByText("Filter list")).ToBeVisibleAsync();
+        await ctx.Expect(ctx.GetByTestId("toggles")).ToHaveTextAsync("1");
+    }
+
+    [Fact]
+    public async Task Focus_stays_on_its_element_among_same_text_siblings_when_positions_shift()
+    {
+        await using var session = await RenderAsync("tests-relocates-by-text--default");
+        var ctx = session.StoryContext;
+
+        await ctx.GetByRole("button", "A", exact: true).Nth(1).ClickAsync();
+        await ctx.Expect(ctx.GetByText("Inserted above")).ToBeVisibleAsync();
+
+        // Enter activates the focused button: only the clicked one counts.
+        await ctx.PressAsync(Keys.Enter);
+        await ctx.Expect(ctx.GetByTestId("clicks")).ToHaveTextAsync("2");
+    }
+
+    [Fact]
     public async Task Focus_survives_content_inserted_before_the_focused_element()
     {
         await using var session = await RenderAsync("tests-inserts-before-focus--default");

@@ -38,7 +38,8 @@ public sealed record PerformanceBaselineEntry
 }
 
 /// <summary>
-/// A JSON file of <see cref="PerformanceBaselineEntry"/> keyed by story id. Safe for parallel tests: writers in one
+/// A JSON file of <see cref="PerformanceBaselineEntry"/> keyed by story id, plus the run's configuration when it is not
+/// the default (see <see cref="KeyFor(string, string?[])"/>). Safe for parallel tests: writers in one
 /// process share a lock per file, writers in different processes (parallel test projects) take a lock file, and every
 /// write merges into what is on disk at that moment, so no recorded entry is lost.
 /// </summary>
@@ -61,6 +62,28 @@ public sealed class PerformanceBaselineStore
     /// <summary>The baseline file.</summary>
     public string FilePath { get; }
 
+    /// <summary>
+    /// The baseline key of a measured run: the story id, followed by the parts of the run's configuration (viewport,
+    /// theme, args) that are set, so each configuration is compared with its own baseline. The default configuration
+    /// keys by the story id alone.
+    /// </summary>
+    public static string KeyFor(string storyId, params string?[] configuration)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(storyId);
+        ArgumentNullException.ThrowIfNull(configuration);
+        return string.Join('|', configuration.Where(p => !string.IsNullOrEmpty(p)).Prepend(storyId));
+    }
+
+    /// <summary>The baseline key of a result: its <see cref="StoryResult.Key"/> without the driver.</summary>
+    public static string KeyFor(StoryResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var parts = result.Key.Split('|');
+        return KeyFor(result.StoryId, parts.Length > 2 ? parts[2..] : []);
+    }
+
+    private static string StoryIdOf(string key) => key.Split('|')[0];
+
     /// <summary>All entries.</summary>
     public IReadOnlyDictionary<string, PerformanceBaselineEntry> Entries
     {
@@ -73,7 +96,7 @@ public sealed class PerformanceBaselineStore
         }
     }
 
-    /// <summary>Gets the baseline for a story.</summary>
+    /// <summary>Gets the baseline for a story id or a <see cref="KeyFor(string, string?[])"/> key.</summary>
     public PerformanceBaselineEntry? Get(string storyId)
     {
         lock (_gate)
@@ -82,7 +105,7 @@ public sealed class PerformanceBaselineStore
         }
     }
 
-    /// <summary>Records (and persists) the baseline for a story.</summary>
+    /// <summary>Records (and persists) the baseline for a story id or a <see cref="KeyFor(string, string?[])"/> key.</summary>
     public void Set(string storyId, PerformanceBaselineEntry entry)
     {
         ArgumentException.ThrowIfNullOrEmpty(storyId);
@@ -94,14 +117,14 @@ public sealed class PerformanceBaselineStore
         });
     }
 
-    /// <summary>Removes baselines whose story no longer exists. Returns the removed ids.</summary>
+    /// <summary>Removes baselines (of every configuration) whose story no longer exists. Returns the removed keys.</summary>
     public IReadOnlyList<string> Prune(IEnumerable<string> liveStoryIds)
     {
         var live = liveStoryIds.ToHashSet(StringComparer.Ordinal);
         List<string> removed = [];
         Update(entries =>
         {
-            removed = entries.Keys.Where(k => !live.Contains(k)).ToList();
+            removed = entries.Keys.Where(k => !live.Contains(StoryIdOf(k))).ToList();
             foreach (var id in removed)
             {
                 entries.Remove(id);

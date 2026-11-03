@@ -47,6 +47,10 @@ public static class WorkbenchServiceCollectionExtensions
 
         var overridden = DiscoverOverriddenServices(catalog, services);
         options.UnwrappableOverrides.UnionWith(overridden.Unsupported);
+
+        // Known before the wrappers register every overridden type.
+        var applicationServices = services.Where(d => !d.IsKeyedService).Select(d => d.ServiceType).ToHashSet();
+        var storyOnly = new HashSet<Type>();
         foreach (var (serviceType, registrations) in overridden.Services)
         {
             if (serviceType == typeof(IJSRuntime) && overridden.UsesJSMocks)
@@ -65,9 +69,16 @@ public static class WorkbenchServiceCollectionExtensions
                     break;
                 default:
                     options.UnwrappableOverrides.Add(serviceType);
-                    break;
+                    continue;
+            }
+
+            if (!applicationServices.Contains(serviceType) && serviceType != typeof(TimeProvider))
+            {
+                storyOnly.Add(serviceType);
             }
         }
+
+        GuardStoryOnlyDependents(services, storyOnly);
 
         foreach (var optionsType in overridden.Options)
         {
@@ -167,10 +178,35 @@ public static class WorkbenchServiceCollectionExtensions
         return OverrideStrategy.Replace;
     }
 
+    // A factory's instance is unknown until it runs: only its declared return type can be classified here. A factory
+    // declared to return an interface or an unsealed class may still create a disposable instance; the wrappers check
+    // that instance when they first hand it out (see Original).
     private static bool IsDisposableSingleton(ServiceDescriptor descriptor) =>
         descriptor.Lifetime == ServiceLifetime.Singleton
         && (descriptor.ImplementationInstance is IDisposable or IAsyncDisposable
-            || (descriptor.ImplementationType is { } type && (typeof(IDisposable).IsAssignableFrom(type) || typeof(IAsyncDisposable).IsAssignableFrom(type))));
+            || (descriptor.ImplementationType is { } type && IsDisposableType(type))
+            || (descriptor.ImplementationFactory is { } factory && IsDisposableType(factory.Method.ReturnType)));
+
+    private static bool IsDisposableType(Type type) => typeof(IDisposable).IsAssignableFrom(type) || typeof(IAsyncDisposable).IsAssignableFrom(type);
+
+    // True for a singleton whose factory is declared to return a type that may or may not be disposable.
+    private static bool MayCreateDisposableSingleton(ServiceDescriptor descriptor) =>
+        descriptor is { Lifetime: ServiceLifetime.Singleton, IsKeyedService: false, ImplementationFactory: { } factory }
+        && !(factory.Method.ReturnType.IsSealed || factory.Method.ReturnType.IsValueType);
+
+    /// <summary>
+    /// The application's instance, as a per-scope wrapper hands it out. The scope disposes what the wrapper returns when
+    /// it ends, so a factory singleton that turns out disposable fails clearly instead of being disposed for every user.
+    /// </summary>
+    private static object Original(IServiceProvider provider, Type serviceType, ServiceDescriptor original)
+    {
+        var instance = provider.GetRequiredKeyedService(serviceType, OriginalKey);
+        return MayCreateDisposableSingleton(original) && instance is IDisposable or IAsyncDisposable
+            ? throw new InvalidOperationException(
+                $"The application's singleton '{serviceType}' is created by a factory and is disposable ({instance.GetType()}): story frames cannot share it, because each frame disposes what it resolved when it ends. "
+                + $"Register it with its implementation type (AddSingleton<{serviceType.Name}, {instance.GetType().Name}>()) so stories that override it are flagged instead, or as scoped in the workbench host.")
+            : instance;
+    }
 
     /// <summary>Kept for compatibility with earlier previews: true when the story's registration can replace the application's.</summary>
     internal static bool CanWrap(IServiceCollection services, Type serviceType) => Classify(services, serviceType) == OverrideStrategy.Replace;
@@ -257,13 +293,69 @@ public static class WorkbenchServiceCollectionExtensions
 
             if (original is not null)
             {
-                return provider.GetRequiredKeyedService(serviceType, OriginalKey);
+                return Original(provider, serviceType, original);
             }
 
             // The application never registered the type (only stories do): outside those stories it stays optional, as
-            // GetService<T>() returning null, not an exception. Required consumers still fail with the container's error.
+            // GetService<T>() returning null, not an exception. GetRequiredService<T>() and [Inject] still fail, and
+            // application services that take it in their constructor are guarded (see GuardStoryOnlyDependents).
             return serviceType == typeof(TimeProvider) ? TimeProvider.System : null!;
         }, ServiceLifetime.Transient));
+    }
+
+    /// <summary>
+    /// A service type only stories register resolves to null outside them, which the container would pass to an
+    /// application service that takes it in its constructor. Such services are activated against a provider where the
+    /// type exists only while the current story provides it, so elsewhere they choose another constructor or fail with
+    /// "Unable to resolve service for type", as they would without the workbench.
+    /// </summary>
+    private static void GuardStoryOnlyDependents(IServiceCollection services, HashSet<Type> storyOnly)
+    {
+        if (storyOnly.Count == 0)
+        {
+            return;
+        }
+
+        for (var i = 0; i < services.Count; i++)
+        {
+            var descriptor = services[i];
+            if (descriptor.IsKeyedService
+                || descriptor.ImplementationType is not { ContainsGenericParameters: false } type
+                || !type.GetConstructors().Any(c => c.GetParameters().Any(p => !p.HasDefaultValue && storyOnly.Contains(p.ParameterType))))
+            {
+                continue;
+            }
+
+            services[i] = new ServiceDescriptor(
+                descriptor.ServiceType,
+                provider => ActivatorUtilities.CreateInstance(new StoryOnlyServices(provider, storyOnly), descriptor.ImplementationType!),
+                descriptor.Lifetime);
+        }
+    }
+
+    /// <summary>The application's provider, where a story-only service type is registered only while the current story provides it.</summary>
+    private sealed class StoryOnlyServices(IServiceProvider inner, HashSet<Type> storyOnly) : IKeyedServiceProvider, IServiceProviderIsKeyedService
+    {
+        public object? GetService(Type serviceType)
+        {
+            if (serviceType == typeof(IServiceProviderIsService) || serviceType == typeof(IServiceProviderIsKeyedService))
+            {
+                return this;
+            }
+
+            return storyOnly.Contains(serviceType) && !IsService(serviceType) ? null : inner.GetService(serviceType);
+        }
+
+        public bool IsService(Type serviceType) => storyOnly.Contains(serviceType)
+            ? StoryScopeOf(inner)?.Overrides?.GetService<IServiceProviderIsService>()?.IsService(serviceType) == true
+            : inner.GetService<IServiceProviderIsService>()?.IsService(serviceType) == true;
+
+        public bool IsKeyedService(Type serviceType, object? serviceKey) =>
+            inner.GetService<IServiceProviderIsKeyedService>()?.IsKeyedService(serviceType, serviceKey) == true;
+
+        public object? GetKeyedService(Type serviceType, object? serviceKey) => (inner as IKeyedServiceProvider)?.GetKeyedService(serviceType, serviceKey);
+
+        public object GetRequiredKeyedService(Type serviceType, object? serviceKey) => inner.GetRequiredKeyedService(serviceType, serviceKey);
     }
 
     /// <summary>
@@ -283,7 +375,7 @@ public static class WorkbenchServiceCollectionExtensions
 
         services.Add(new ServiceDescriptor(serviceType, provider =>
             StoryScopeOf(provider)?.Resolve(serviceType)
-            ?? (originals.Length > 0 ? provider.GetRequiredKeyedService(serviceType, OriginalKey) : null)!, ServiceLifetime.Transient));
+            ?? (originals.Length > 0 ? Original(provider, serviceType, originals[^1]) : null)!, ServiceLifetime.Transient));
 
         services.Add(new ServiceDescriptor(EnumerableOf(serviceType), provider =>
         {

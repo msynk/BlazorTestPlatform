@@ -70,6 +70,20 @@ public sealed class HardeningTests
     }
 
     [Fact]
+    public void Clearing_refuses_parents_of_project_folders()
+    {
+        // resultsDirectory: ".." resolves to the folder that holds the projects, not to a project.
+        var samples = NewDirectory();
+        var project = Directory.CreateDirectory(Path.Combine(samples, "Contoso.UI")).FullName;
+        File.WriteAllText(Path.Combine(project, "Contoso.UI.csproj"), "<Project />");
+
+        var error = Assert.Throws<InvalidOperationException>(() => new ResultsStore(samples).Clear());
+
+        Assert.Contains("Contoso.UI.csproj", error.Message, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(project, "Contoso.UI.csproj")));
+    }
+
+    [Fact]
     public void Clearing_deletes_a_results_directory()
     {
         var results = Path.Combine(NewDirectory(), "TestResults", "btp");

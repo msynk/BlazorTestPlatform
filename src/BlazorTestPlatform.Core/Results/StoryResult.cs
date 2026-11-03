@@ -186,6 +186,9 @@ public sealed record StoryResult
     /// <summary>Theme name.</summary>
     public string? Theme { get; init; }
 
+    /// <summary>Story args the run set (bUnit runs with <c>Args</c>), or null when it used the story's own.</summary>
+    public IReadOnlyDictionary<string, string?>? Args { get; init; }
+
     /// <summary>Outcome.</summary>
     public StoryOutcome Outcome { get; init; }
 

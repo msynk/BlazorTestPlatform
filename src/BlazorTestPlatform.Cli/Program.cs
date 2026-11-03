@@ -210,8 +210,9 @@ perfApprove.SetAction(parse =>
         .ToArray();
     foreach (var result in measured)
     {
-        store.Set(result.StoryId, PerformanceBaselineEntry.From(result.Performance!));
-        Console.WriteLine($"recorded  {result.StoryId}  {result.Performance}");
+        var key = PerformanceBaselineStore.KeyFor(result);
+        store.Set(key, PerformanceBaselineEntry.From(result.Performance!));
+        Console.WriteLine($"recorded  {key}  {result.Performance}");
     }
 
     Console.WriteLine($"{measured.Length} baseline(s) written to {store.FilePath}");
@@ -319,6 +320,7 @@ init.SetAction(parse =>
     }
 
     var chosen = parse.GetValue(framework);
+    var repositoryRoot = RepositoryRoot(directory);
     var options = new ScaffoldOptions
     {
         ProjectDirectory = directory,
@@ -326,7 +328,10 @@ init.SetAction(parse =>
         Framework = chosen,
         Ci = parse.GetValue(ci),
         Component = parse.GetValue(component),
-        RepositoryRoot = RepositoryRoot(directory),
+        RepositoryRoot = repositoryRoot,
+
+        // Pipelines run dotnet test from the repository root: the global.json there decides the runner mode.
+        TestingPlatform = Scaffolding.UsesTestingPlatform(repositoryRoot ?? directory),
     };
 
     foreach (var (path, content) in Scaffolding.Plan(options))

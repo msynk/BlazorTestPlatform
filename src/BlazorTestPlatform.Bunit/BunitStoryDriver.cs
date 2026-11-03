@@ -460,8 +460,9 @@ public sealed class BunitStoryDriver : IStoryDriver
             return;
         }
 
-        // Activating a details element's summary toggles it (unless the click was cancelled).
-        if (!clickPrevented && SummaryOf(element) is { } summary && summary.ParentElement is { LocalName: "details" } details)
+        // Activating a details element's summary toggles it (unless the click was cancelled, or an interactive element
+        // or label inside the summary took the activation, as browsers do).
+        if (!clickPrevented && SummaryOf(element) is { } summary && !HasActivatableBetween(element, summary) && summary.ParentElement is { LocalName: "details" } details)
         {
             var detailsScope = Scope();
             var detailsPath = DomFacts.CssPath(details, detailsScope);
@@ -1002,8 +1003,10 @@ public sealed class BunitStoryDriver : IStoryDriver
     /// Where a tracked element (the focused or hovered one, an <c>@ref</c> target) was, and what it looked like. bUnit
     /// re-parses its DOM after every render, so elements have no identity across renders; the anchor finds the same
     /// element again when content is inserted or removed before it, instead of losing it with its old position.
+    /// <c>Ordinal</c> is its position among the elements with the same key, <c>TextOrdinal</c> among those that also
+    /// have the same text.
     /// </summary>
-    private sealed record ElementAnchor(string Path, string Tag, string? Id, string Key, string Text, int Ordinal);
+    private sealed record ElementAnchor(string Path, string Tag, string? Id, string Key, string Text, int Ordinal, int TextOrdinal);
 
     private ElementAnchor? AnchorOf(string path)
     {
@@ -1014,7 +1017,9 @@ public sealed class BunitStoryDriver : IStoryDriver
     private static ElementAnchor AnchorOf(IElement element, DomScope scope)
     {
         var key = AnchorKey(element);
+        var text = AnchorText(element);
         var ordinal = 0;
+        var textOrdinal = 0;
         foreach (var candidate in scope.Elements())
         {
             if (candidate == element)
@@ -1025,10 +1030,14 @@ public sealed class BunitStoryDriver : IStoryDriver
             if (AnchorKey(candidate) == key)
             {
                 ordinal++;
+                if (AnchorText(candidate) == text)
+                {
+                    textOrdinal++;
+                }
             }
         }
 
-        return new ElementAnchor(DomFacts.CssPath(element, scope), element.LocalName, element.GetAttribute("id"), key, AnchorText(element), ordinal);
+        return new ElementAnchor(DomFacts.CssPath(element, scope), element.LocalName, element.GetAttribute("id"), key, text, ordinal, textOrdinal);
     }
 
     // What identifies an element across renders: stable attributes only (classes change with focus and hover styles).
@@ -1057,8 +1066,10 @@ public sealed class BunitStoryDriver : IStoryDriver
             return DomFacts.CssPath(byId, scope);
         }
 
+        // The old path still holds the element only if nothing about it changed: a sibling with the same key but other
+        // text has moved into its position.
         var atPath = ResolvePath(scope, anchor.Path);
-        if (atPath is not null && atPath.LocalName == anchor.Tag && AnchorKey(atPath) == anchor.Key)
+        if (atPath is not null && atPath.LocalName == anchor.Tag && AnchorKey(atPath) == anchor.Key && AnchorText(atPath) == anchor.Text)
         {
             return anchor.Path;
         }
@@ -1069,9 +1080,10 @@ public sealed class BunitStoryDriver : IStoryDriver
             return atPath is not null && atPath.LocalName == anchor.Tag ? anchor.Path : null;
         }
 
+        // Each pool is indexed by the position counted over the same pool when the anchor was taken.
         var sameText = candidates.Where(c => AnchorText(c) == anchor.Text).ToList();
-        var pool = sameText.Count > 0 ? sameText : candidates;
-        return DomFacts.CssPath(pool[Math.Min(anchor.Ordinal, pool.Count - 1)], scope);
+        var (pool, ordinal) = sameText.Count > 0 ? (sameText, anchor.TextOrdinal) : (candidates, anchor.Ordinal);
+        return DomFacts.CssPath(pool[Math.Min(ordinal, pool.Count - 1)], scope);
     }
 
     /// <summary>After a render, finds the focused and hovered elements and the <c>@ref</c> targets again.</summary>
@@ -1185,6 +1197,20 @@ public sealed class BunitStoryDriver : IStoryDriver
     }
 
     /// <summary>The summary that toggles a details element, when <paramref name="element"/> is in it.</summary>
+    /// <summary>True when <paramref name="element"/> or an ancestor below <paramref name="ancestor"/> has its own activation behavior.</summary>
+    private static bool HasActivatableBetween(IElement element, IElement ancestor)
+    {
+        for (var current = element; current is not null && current != ancestor; current = current.ParentElement)
+        {
+            if (IsInteractive(current) || current.LocalName == "label")
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static IElement? SummaryOf(IElement element)
     {
         for (var current = element; current is not null; current = current.ParentElement)

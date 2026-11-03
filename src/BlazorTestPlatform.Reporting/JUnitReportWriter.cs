@@ -73,7 +73,11 @@ public static class JUnitReportWriter
     }
 
     internal static string Cell(StoryResult result) =>
-        string.Join(", ", new[] { result.Driver, result.HostingModel, result.Viewport, result.Theme }.Where(p => !string.IsNullOrEmpty(p)));
+        string.Join(", ", new[] { result.Driver, result.HostingModel, result.Viewport, result.Theme, ArgsLabel(result) }.Where(p => !string.IsNullOrEmpty(p)));
+
+    /// <summary><c>name=value&amp;...</c> of the args a run set, or null.</summary>
+    internal static string? ArgsLabel(StoryResult result) =>
+        result.Args is { Count: > 0 } args ? string.Join('&', args.Select(a => $"{a.Key}={a.Value}")) : null;
 
     private static string Seconds(double milliseconds) => (milliseconds / 1000).ToString("0.###", CultureInfo.InvariantCulture);
 

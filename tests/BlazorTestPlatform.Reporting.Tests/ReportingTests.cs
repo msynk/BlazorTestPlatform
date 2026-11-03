@@ -64,6 +64,21 @@ public sealed class ReportingTests
     }
 
     [Fact]
+    public void JUnit_names_tell_configurations_of_one_story_apart()
+    {
+        var xml = JUnitReportWriter.Create(RunSummary.From(
+        [
+            Result("a", StoryOutcome.Passed),
+            Result("a", StoryOutcome.Passed) with { Key = "a|bunit|Mobile|Dark", Viewport = "Mobile", Theme = "Dark" },
+            Result("a", StoryOutcome.Passed) with { Key = "a|bunit|args-1", Args = new Dictionary<string, string?> { ["Label"] = "Go" } },
+        ]));
+
+        var names = xml.Descendants("testcase").Select(c => c.Attribute("name")!.Value).ToArray();
+        Assert.Equal(3, names.Distinct().Count());
+        Assert.Contains("a [bunit, server, Label=Go]", names);
+    }
+
+    [Fact]
     public void Markdown_lists_failures_and_flakes_safely()
     {
         var md = MarkdownSummaryWriter.Create(Summary());

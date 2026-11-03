@@ -125,7 +125,10 @@ writes into the test project:
 * with `--ci`: a pipeline for GitHub Actions (`.github/workflows/blazor-ui-tests.yml`), Azure Pipelines
   (`azure-pipelines.blazor-ui-tests.yml`) or GitLab (`.gitlab/blazor-ui-tests.gitlab-ci.yml`) at the repository root,
   running on the Playwright image that matches the Playwright version BlazorTestPlatform uses, with JUnit results,
-  SARIF and story impact analysis on pull requests ([CI](ci.md))
+  SARIF and story impact analysis on pull requests ([CI](ci.md)). The test step passes the project the way the
+  repository's `dotnet test` takes it: `dotnet test --project <dir>` when the global.json at the repository root
+  selects Microsoft.Testing.Platform (`"test": { "runner": "Microsoft.Testing.Platform" }`), `dotnet test <dir>` in
+  the default VSTest mode. Re-run `btp init --ci ... --force` after switching modes.
 
 Existing files are kept unless `--force` is given. The command prints the `dotnet add package` lines for the packages
 the generated code uses; it never edits the project file.

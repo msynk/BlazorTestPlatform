@@ -137,7 +137,10 @@ internal sealed partial class CssCascadeLayers
     [GeneratedRegex(@"^(?!not\b|\()[a-zA-Z_][\w-]*\s*")]
     private static partial Regex ContainerName();
 
-    /// <summary>Top-level items of a CSS text: (prelude, block body) or (statement, null), skipping comments and strings.</summary>
+    /// <summary>
+    /// Top-level items of a CSS text: (prelude, block body) or (statement, null), skipping comments, strings and escapes
+    /// (an escaped quote or brace in a selector, such as Tailwind's <c>.content-\[\'\'\]</c>, is part of an identifier).
+    /// </summary>
     private static IEnumerable<(string Prelude, string? Body)> Items(string css)
     {
         var start = 0;
@@ -149,6 +152,12 @@ internal sealed partial class CssCascadeLayers
             {
                 var end = css.IndexOf("*/", i + 2, StringComparison.Ordinal);
                 i = end < 0 ? css.Length : end + 2;
+                continue;
+            }
+
+            if (ch == '\\')
+            {
+                i += 2;
                 continue;
             }
 
@@ -204,6 +213,12 @@ internal sealed partial class CssCascadeLayers
             {
                 var end = css.IndexOf("*/", i + 2, StringComparison.Ordinal);
                 i = end < 0 ? css.Length : end + 2;
+                continue;
+            }
+
+            if (ch == '\\')
+            {
+                i += 2;
                 continue;
             }
 

@@ -294,7 +294,9 @@ public sealed class MarkupAccessibilityAnalyzer
 
             Rule("presentation-role-conflict", AccessibilityImpact.Minor, "Elements marked as presentational should not have global ARIA or tabindex", "Ensure elements marked as presentational are consistently ignored",
                 ["cat.aria", "best-practice"],
-                c => c.Elements.Where(e => AriaRoles.GetExplicitRole(e) is "none" or "presentation" && (DomFacts.IsFocusable(e, c.Scope) || AriaRoles.HasGlobalAriaAttribute(e)))
+                // Like axe-core, hidden elements are not checked: <svg role="presentation" aria-hidden="true"> is the usual
+                // decorative-icon pattern, and aria-hidden is a global attribute.
+                c => c.Visible.Where(e => AriaRoles.GetExplicitRole(e) is "none" or "presentation" && (DomFacts.IsFocusable(e, c.Scope) || AriaRoles.HasGlobalAriaAttribute(e)))
                     .Select(e => (e, "Presentational role is ignored because the element is focusable or has global ARIA attributes."))),
 
             Rule("duplicate-id-aria", AccessibilityImpact.Critical, "Ensures every id attribute value used in ARIA and in labels is unique", "IDs used in ARIA and labels must be unique",

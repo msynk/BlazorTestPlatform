@@ -144,7 +144,7 @@ public static class HtmlReportWriter
         }
 
         h.Append("><summary><span class=\"badge ").Append(outcome).Append("\">").Append(r.Outcome).Append("</span><strong>").Append(E(r.Name)).Append("</strong>");
-        foreach (var chip in new[] { r.Driver, r.HostingModel, r.Viewport, r.Theme })
+        foreach (var chip in new[] { r.Driver, r.HostingModel, r.Viewport, r.Theme, JUnitReportWriter.ArgsLabel(r) })
         {
             if (!string.IsNullOrEmpty(chip))
             {

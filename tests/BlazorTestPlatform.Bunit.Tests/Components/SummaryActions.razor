@@ -1,0 +1,12 @@
+@* A summary with its own controls: clicking them must not toggle the details, as in browsers. *@
+<details @ontoggle="() => toggles++">
+    <summary><span>Filters</span> <button type="button" @onclick="() => resets++">Reset</button> <label><input type="checkbox" /> Only mine</label></summary>
+    <p>Filter list</p>
+</details>
+<output data-testid="toggles">@toggles</output>
+<output data-testid="resets">@resets</output>
+
+@code {
+    private int toggles;
+    private int resets;
+}
