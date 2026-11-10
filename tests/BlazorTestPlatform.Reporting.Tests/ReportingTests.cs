@@ -84,7 +84,7 @@ public sealed class ReportingTests
         var md = MarkdownSummaryWriter.Create(Summary());
 
         Assert.Contains("❌", md, StringComparison.Ordinal);
-        Assert.Contains("| 1 | 1 | 1 | 1 | 1 | 1 | 0 |", md, StringComparison.Ordinal);
+        Assert.Contains("| 1 | 1 | 1 | 0 | 1 | 1 | 1 | 0 |", md, StringComparison.Ordinal);
         Assert.Contains("Expected &lt;b> \\| x", md, StringComparison.Ordinal);
         Assert.Contains("### Flaky", md, StringComparison.Ordinal);
     }

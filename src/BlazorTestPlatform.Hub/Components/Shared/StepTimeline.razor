@@ -1,0 +1,49 @@
+@* The step timeline as a waterfall: when each action, assertion and wait started and how long it took. *@
+@{
+    var steps = Flatten(Steps, 0).ToArray();
+    var span = Math.Max(1, steps.Select(s => s.Step.StartMilliseconds + s.Step.DurationMilliseconds).DefaultIfEmpty(1).Max());
+    string P(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+}
+@if (steps.Length == 0)
+{
+    <p class="muted">No steps were recorded.</p>
+}
+else
+{
+    <div class="timeline">
+        @foreach (var (step, depth) in steps)
+        {
+            <div class="step" title="@Tooltip(step)">
+                <span class="label @(step.Failed ? "failed" : null)" style="padding-left:@(depth * 14)px">@(step.Failed ? "✗ " : null)@step.Title</span>
+                <span class="track"><span class="bar @BarClass(step)" style="left:@P(100 * step.StartMilliseconds / span)%;width:@P(100 * step.DurationMilliseconds / span)%"></span></span>
+                <span class="muted small right">@Fmt.Duration(step.DurationMilliseconds)</span>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>Steps.</summary>
+    [Parameter] public IReadOnlyList<StepRecord> Steps { get; set; } = [];
+
+    private static string Tooltip(StepRecord step) => step.Error is null ? step.Title : step.Title + Environment.NewLine + step.Error;
+
+    private static string? BarClass(StepRecord step) => step.Failed ? "failed" : step.Kind switch
+    {
+        StepKind.Wait => "wait",
+        StepKind.Check or StepKind.Assertion => "check",
+        _ => null,
+    };
+
+    private static IEnumerable<(StepRecord Step, int Depth)> Flatten(IEnumerable<StepRecord> steps, int depth)
+    {
+        foreach (var step in steps)
+        {
+            yield return (step, depth);
+            foreach (var child in Flatten(step.Children, depth + 1))
+            {
+                yield return child;
+            }
+        }
+    }
+}

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <RootNamespace>BlazorTestPlatform.Hub</RootNamespace>
+    <Description>The BlazorTestPlatform hub: a self-hosted test platform website over your results. Run history and trends, stability (flaky, broken, fixed) with quarantine, unique errors, visual review with grouped decisions, accessibility baselines, performance trends, story-state coverage, impact analysis, duration-balanced sharding, live in-memory runs and release readiness.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlazorTestPlatform.Core\BlazorTestPlatform.Core.csproj" PrivateAssets="none" />
+    <ProjectReference Include="..\BlazorTestPlatform.Reporting\BlazorTestPlatform.Reporting.csproj" />
+    <ProjectReference Include="..\BlazorTestPlatform.Visual\BlazorTestPlatform.Visual.csproj" />
+    <ProjectReference Include="..\BlazorTestPlatform.Bunit\BlazorTestPlatform.Bunit.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BlazorTestPlatform.Demo.UI.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,140 @@
+@page "/_btp/coverage"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var coverage = Data.Coverage;
+    var reviews = Data.Reviews.ToDictionary(r => r.Component, StringComparer.Ordinal);
+    var gate = Data.ReviewGate?.Entries.ToDictionary(e => e.Component, StringComparer.Ordinal) ?? new Dictionary<string, ReviewGateEntry>(StringComparer.Ordinal);
+    var components = reviews.Keys.Concat(gate.Keys).Concat(coverage?.Components.Select(c => c.Title) ?? []).Distinct().Order(StringComparer.Ordinal).ToArray();
+    var automated = Data.Results.Where(r => r.Accessibility is not null)
+        .SelectMany(r => r.Accessibility!.Violations.SelectMany(v => v.WcagCriteria.Select(c => (Criterion: c, Component: r.Title))))
+        .ToLookup(x => x.Criterion);
+
+    <PageHeader Title="Coverage &amp; traceability" Description="Which component states have a story (a state without one has no snapshot, scan or test), and which WCAG 2.2 success criteria each component is verified against, by people and by automation: a traceability matrix with Xray-style verdicts, where a review goes stale when the component's accessibility structure changes." />
+
+    <section class="card" style="margin-bottom:16px">
+        <header><div><h2>Story state coverage</h2><p>Every bool and enum parameter value, and whether a story renders it.</p></div>@if (coverage is not null) { <span class="badge @(coverage.Ratio >= 1 ? "pass" : "flaky")">@Fmt.Percent(coverage.Ratio) · @coverage.CoveredStates/@coverage.TotalStates states</span> }</header>
+        <div class="body flush scroll-x">
+            @if (coverage is null)
+            {
+                <div class="empty">No coverage data: configure the hub with your stories (<code>AddStoriesFromAssemblyOf</code>) or run a test that saves <code>story-coverage.json</code>.</div>
+            }
+            else
+            {
+                <table class="table">
+                    <thead><tr><th>Component</th><th class="num">Stories</th><th>Covered</th><th>Missing states</th><th>Open-ended parameters</th></tr></thead>
+                    <tbody>
+                        @foreach (var component in coverage.Components.OrderBy(c => c.Ratio).ThenBy(c => c.Title, StringComparer.Ordinal))
+                        {
+                            <tr>
+                                <td><strong>@component.Title</strong><div class="muted small mono">@component.Component</div></td>
+                                <td class="num">@component.Stories</td>
+                                <td>@if (component.TotalStates == 0) { <span class="muted small">no bool or enum parameters</span> } else { <span class="badge @(component.Ratio >= 1 ? "pass" : "flaky")">@component.CoveredStates/@component.TotalStates</span> }</td>
+                                <td class="small">@foreach (var missing in component.MissingStates) { <span class="tag alert">@missing</span> }</td>
+                                <td class="small muted">@string.Join(", ", component.Parameters.Where(p => !p.IsFinite && p.Values.Count > 0).Select(p => $"{p.Name} ({p.Values.Count} values)"))</td>
+                            </tr>
+                        }
+                        @foreach (var missing in coverage.ComponentsWithoutStories)
+                        {
+                            <tr><td><strong>@missing</strong></td><td class="num">0</td><td><span class="badge fail">no stories</span></td><td></td><td></td></tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </section>
+
+    <section class="card" id="reviews" style="margin-bottom:16px">
+        <header><div><h2>Manual accessibility reviews</h2><p>WCAG 2.2 checklists committed as JSON. The gate marks a review stale when the component's accessibility fingerprint changed since it was done.</p></div></header>
+        <div class="body flush scroll-x">
+            <table class="table">
+                <thead><tr><th>Component</th><th>Gate</th><th>Reviewer</th><th>Reviewed</th><th class="num">Pass</th><th class="num">Fail</th><th class="num">Open</th><th>Detail</th></tr></thead>
+                <tbody>
+                    @foreach (var component in components)
+                    {
+                        reviews.TryGetValue(component, out var review);
+                        gate.TryGetValue(component, out var entry);
+                        <tr>
+                            <td><strong>@component</strong></td>
+                            <td>@if (entry is not null) { <span class="badge @entry.State.ToString().ToLowerInvariant()">@entry.State</span> } else if (review is null) { <span class="badge">no review</span> } else { <span class="badge info">not evaluated</span> }</td>
+                            <td>@(review?.Reviewer ?? "—")@if (review?.AssistiveTechnology is { } at) { <div class="small muted">@at</div> }</td>
+                            <td>@(review?.ReviewedAt is { } at2 ? at2.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "—")</td>
+                            <td class="num">@(review?.Items.Count(i => i.Status == ReviewStatus.Pass) ?? 0)</td>
+                            <td class="num">@(review?.Items.Count(i => i.Status == ReviewStatus.Fail) ?? 0)</td>
+                            <td class="num">@(review?.Items.Count(i => i.Status == ReviewStatus.NotReviewed) ?? 0)</td>
+                            <td class="small muted">@entry?.Detail</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <header>
+            <div><h2>WCAG traceability matrix</h2><p>Success criteria × components. OK passed review, NOK failed, NOTRUN not reviewed yet, N/A not applicable, STALE reviewed against older markup, UNCOVERED no review. The last column counts axe violations of the criterion in the latest results.</p></div>
+        </header>
+        <div class="body flush scroll-x">
+            <table class="table matrix">
+                <thead>
+                    <tr>
+                        <th>Criterion</th>
+                        @foreach (var component in components)
+                        {
+                            <th>@component.Split('/').Last()</th>
+                        }
+                        <th>Automated</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var check in ManualChecklists.Wcag22AA)
+                    {
+                        <tr>
+                            <td class="nowrap" title="@check.Guidance"><strong>@check.Criterion</strong> <span class="small muted">@check.Title</span></td>
+                            @foreach (var component in components)
+                            {
+                                var verdict = Verdict(component, check.Id, reviews, gate);
+                                <td class="cell"><span class="badge @VerdictCss(verdict)">@verdict</span></td>
+                            }
+                            <td class="cell">@(automated[check.Criterion].Any() ? $"{automated[check.Criterion].Count()} in {automated[check.Criterion].Select(x => x.Component).Distinct().Count()}" : "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+
+@code {
+    private static string Verdict(string component, string checkId, Dictionary<string, ComponentReview> reviews, Dictionary<string, ReviewGateEntry> gate)
+    {
+        if (!reviews.TryGetValue(component, out var review))
+        {
+            return "UNCOVERED";
+        }
+
+        if (gate.TryGetValue(component, out var entry) && entry.State == ReviewGateState.Stale)
+        {
+            return "STALE";
+        }
+
+        return review.Items.FirstOrDefault(i => i.CheckId == checkId)?.Status switch
+        {
+            ReviewStatus.Pass => "OK",
+            ReviewStatus.Fail => "NOK",
+            ReviewStatus.NotApplicable => "N/A",
+            _ => "NOTRUN",
+        };
+    }
+
+    private static string VerdictCss(string verdict) => verdict switch
+    {
+        "OK" => "pass",
+        "NOK" or "STALE" => "fail",
+        "NOTRUN" => "flaky",
+        "N/A" => "info",
+        _ => string.Empty,
+    };
+}

@@ -1,0 +1,98 @@
+@page "/_btp/integrations"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var markdown = MarkdownSummaryWriter.Create(Data.Summary, null, null, Data.Coverage);
+    var prefix = HubOptions.RoutePrefix;
+
+    <PageHeader Title="Integrations" Description="Everything here is also available to CI, scripts and coding agents: report formats, a JSON API, the pull-request comment, the CLI and the run archive." />
+
+    <div class="grid two">
+        <section class="card">
+            <header><div><h2>Exports of the latest results</h2><p>Generated on demand from the results directory.</p></div></header>
+            <div class="body stack">
+                <div class="spread"><span><strong>JUnit XML</strong> <span class="muted small">for CI test tabs; quarantined failures are reported as skipped</span></span><a class="btn btn-small" href="@prefix/export/junit">Download</a></div>
+                <div class="spread"><span><strong>SARIF 2.1.0</strong> <span class="muted small">accessibility, visual, performance and story failures for code scanning, located at the story's declaration</span></span><a class="btn btn-small" href="@prefix/export/sarif">Download</a></div>
+                <div class="spread"><span><strong>Markdown summary</strong> <span class="muted small">the pull-request comment and job summary</span></span><a class="btn btn-small" href="@prefix/export/markdown">Open</a></div>
+                <div class="spread"><span><strong>CSV</strong> <span class="muted small">one row per result, with category and signature</span></span><a class="btn btn-small" href="@prefix/export/results.csv">Download</a></div>
+            </div>
+        </section>
+        <section class="card">
+            <header><div><h2>JSON API</h2><p>Agent- and script-friendly. Same access rules as the pages.</p></div></header>
+            <div class="body">
+                <table class="table">
+                    <tbody>
+                        @foreach (var (path, what) in new[]
+                        {
+                            ("api/summary", "Latest totals, stability counts, unique errors, coverage"),
+                            ("api/runs", "Archived runs with counts"),
+                            ("api/runs/{id}", "One run with every compacted result"),
+                            ("api/failures", "Unique errors (clusters) with category and affected keys"),
+                            ("api/stability", "Status, flake rate, interval, flips and tags per key"),
+                            ("api/results/{key}", "One full result: timeline, a11y, visual, metrics"),
+                            ("api/live", "Progress of the run started from the hub"),
+                        })
+                        {
+                            <tr><td class="mono small"><a href="@(path.Contains('{') ? null : $"{prefix}/{path}")">GET @prefix/@path</a></td><td class="small muted">@what</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <section class="card" style="margin-top:16px">
+        <header><div><h2>Pull-request comment</h2><p>What <code>btp report --pr-comment</code> posts (and keeps updating) on a pull request, from the latest results.</p></div><button class="btn btn-small" type="button" data-copy="pr-comment">Copy</button></header>
+        <div class="body"><pre class="code" id="pr-comment">@markdown</pre></div>
+    </section>
+
+    <div class="grid two" style="margin-top:16px">
+        <section class="card">
+            <header><div><h2>Record runs in CI</h2><p>Keep <code>.btp/runs</code> between runs (a cache or an artifact) and the hub shows CI history, stability and trends.</p></div><button class="btn btn-small" type="button" data-copy="ci-yaml">Copy</button></header>
+            <div class="body">
+<pre class="code" id="ci-yaml"># .github/workflows/ci.yml (excerpt)
+- uses: actions/cache/restore@v4
+  with: { path: tests/MyApp.Tests/.btp, key: btp-runs-${{ github.run_id }}, restore-keys: btp-runs- }
+- run: dotnet test --project tests/MyApp.Tests
+- if: always()
+  run: >
+    btp report -p tests/MyApp.Tests
+    --archive tests/MyApp.Tests/.btp/runs
+    --junit TestResults/junit.xml --sarif TestResults/btp.sarif
+    --github-summary --pr-comment
+- if: always()
+  uses: actions/cache/save@v4
+  with: { path: tests/MyApp.Tests/.btp, key: btp-runs-${{ github.run_id }} }</pre>
+            </div>
+        </section>
+        <section class="card">
+            <header><div><h2>CLI</h2><p>The same decisions, from a terminal.</p></div></header>
+            <div class="body">
+<pre class="code">btp report --archive .btp/runs        # add the run to the history
+btp approve --filter 'inputs-button--*'  # accept visual changes
+btp perf approve                      # accept render-performance changes
+btp quarantine add 'data-*' --reason "Flaky API mock, #42" --expires 2026-12-31
+btp quarantine list | remove &lt;pattern&gt;
+btp a11y status                        # manual review gate verdicts
+btp flaky                              # flakiest results
+BTP_CHANGED_SINCE=origin/main dotnet test  # run only affected stories</pre>
+            </div>
+        </section>
+    </div>
+
+    <section class="card" style="margin-top:16px">
+        <header><div><h2>Host the hub</h2><p>Add it to the app that hosts the workbench (or any ASP.NET Core app) and point it at the test project.</p></div></header>
+        <div class="body">
+<pre class="code">builder.Services.AddBlazorTestHub(o =>
+{
+    o.ProjectDirectory = "tests/MyApp.Tests";        // btp.json, results, baselines, quarantine.json
+    o.AddStoriesFromAssemblyOf&lt;ButtonStories&gt;();   // stories the hub can run in memory
+    o.RepositoryUrl = "https://github.com/org/repo"; // commit and issue links
+});
+app.MapBlazorTestHub();
+app.MapRazorComponents&lt;App&gt;().AddAdditionalAssemblies(typeof(HubOptions).Assembly);</pre>
+            </div>
+        </section>
+}

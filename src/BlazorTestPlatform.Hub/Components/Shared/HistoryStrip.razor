@@ -1,0 +1,20 @@
+@* One bar per run, oldest first: the history strip of reporting platforms. *@
+<span class="strip" role="img" aria-label="@Label">
+    @foreach (var point in Points.TakeLast(Max))
+    {
+        <i class="@(point.Outcome?.ToString().ToLowerInvariant())" title="@Title(point)"></i>
+    }
+</span>
+
+@code {
+    /// <summary>Points, oldest first.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<HistoryPoint> Points { get; set; } = [];
+
+    /// <summary>Most bars shown.</summary>
+    [Parameter] public int Max { get; set; } = 30;
+
+    private string Label => $"{Points.Count(p => p.Outcome == StoryOutcome.Passed)} passed, {Points.Count(p => p.Outcome == StoryOutcome.Failed)} failed, {Points.Count(p => p.Outcome == StoryOutcome.Flaky)} flaky in the last {Math.Min(Max, Points.Count)} runs";
+
+    private static string Title(HistoryPoint point) =>
+        $"{point.RunId} · {Fmt.When(point.At)} · {point.Outcome?.ToString() ?? "did not run"}{(point.DurationMilliseconds is { } d ? " · " + Fmt.Duration(d) : string.Empty)}";
+}

@@ -13,6 +13,7 @@
     <Project Path="src/BlazorTestPlatform.CodeFixes/BlazorTestPlatform.CodeFixes.csproj" />
     <Project Path="src/BlazorTestPlatform.Core/BlazorTestPlatform.Core.csproj" />
     <Project Path="src/BlazorTestPlatform.Generators/BlazorTestPlatform.Generators.csproj" />
+    <Project Path="src/BlazorTestPlatform.Hub/BlazorTestPlatform.Hub.csproj" />
     <Project Path="src/BlazorTestPlatform.MSTest/BlazorTestPlatform.MSTest.csproj" />
     <Project Path="src/BlazorTestPlatform.NUnit/BlazorTestPlatform.NUnit.csproj" />
     <Project Path="src/BlazorTestPlatform.Playwright/BlazorTestPlatform.Playwright.csproj" />

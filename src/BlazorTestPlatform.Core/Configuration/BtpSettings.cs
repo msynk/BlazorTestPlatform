@@ -61,6 +61,12 @@ public sealed class BtpSettings
     /// <summary>Manual accessibility reviews directory (commit it). Default <c>a11y-reviews</c>.</summary>
     public string ReviewsDirectory { get; init; } = "a11y-reviews";
 
+    /// <summary>Quarantine file (commit it). Default <c>quarantine.json</c>.</summary>
+    public string QuarantinePath { get; init; } = QuarantineList.DefaultFileName;
+
+    /// <summary>Quarantined stories: their failures are reported but do not fail the build.</summary>
+    public QuarantineList Quarantine { get; init; } = QuarantineList.Empty;
+
     /// <summary>Visual baseline update mode (<c>BTP_UPDATE_SNAPSHOTS</c>: none|missing|changed|all).</summary>
     public SnapshotUpdateMode UpdateSnapshots { get; init; } = SnapshotUpdateMode.Missing;
 
@@ -120,6 +126,9 @@ public sealed class BtpSettings
     /// <summary>Absolute reviews directory.</summary>
     public string ReviewsDirectoryPath => Resolve(ReviewsDirectory);
 
+    /// <summary>Absolute quarantine file path.</summary>
+    public string QuarantineFilePath => Resolve(QuarantinePath);
+
     /// <summary>Results store for this run.</summary>
     public ResultsStore CreateResultsStore() => new(ResultsDirectoryPath);
 
@@ -156,6 +165,7 @@ public sealed class BtpSettings
             policy.Suppressions.AddRange(a11y.Suppressions ?? []);
         }
 
+        var quarantinePath = Env("BTP_QUARANTINE") ?? NonEmpty(file?.QuarantinePath) ?? QuarantineList.DefaultFileName;
         return new BtpSettings
         {
             ProjectDirectory = directory,
@@ -163,6 +173,8 @@ public sealed class BtpSettings
             ResultsDirectory = Env("BTP_RESULTS_DIR") ?? NonEmpty(file?.ResultsDirectory) ?? Path.Combine("TestResults", "btp"),
             PerformanceBaselinePath = Env("BTP_PERF_BASELINE") ?? NonEmpty(file?.PerformanceBaselinePath) ?? Path.Combine("__baselines__", "performance.json"),
             ReviewsDirectory = Env("BTP_REVIEWS_DIR") ?? NonEmpty(file?.ReviewsDirectory) ?? "a11y-reviews",
+            QuarantinePath = quarantinePath,
+            Quarantine = QuarantineList.Load(Path.IsPathRooted(quarantinePath) ? quarantinePath : Path.Combine(directory, quarantinePath)),
             UpdateSnapshots = ParseUpdateMode(Env("BTP_UPDATE_SNAPSHOTS")) ?? file?.UpdateSnapshots ?? (ci ? SnapshotUpdateMode.None : SnapshotUpdateMode.Missing),
             UpdatePerformanceBaselines = IsTruthy(Env("BTP_UPDATE_PERF")),
             Retries = int.TryParse(Env("BTP_RETRIES"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var retries) ? retries : file?.Retries ?? (ci ? 2 : 0),
@@ -295,6 +307,8 @@ public sealed class BtpSettings
         public string? PerformanceBaselinePath { get; init; }
 
         public string? ReviewsDirectory { get; init; }
+
+        public string? QuarantinePath { get; init; }
 
         public SnapshotUpdateMode? UpdateSnapshots { get; init; }
 

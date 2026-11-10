@@ -1,0 +1,149 @@
+@page "/_btp/runs/{RunId}"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    @if (Data.History.Find(RunId) is not { } run)
+    {
+        <PageHeader Title="Run not found" Description="@($"No archived run has the id {RunId}.")" />
+    }
+    else
+    {
+        var index = Data.History.Runs.ToList().IndexOf(run);
+        var previous = index > 0 ? Data.History.Runs[index - 1] : null;
+        var results = run.Results
+            .Where(r => Outcome is null || string.Equals(Fmt.Css(r.Outcome, r.Quarantine is not null), Outcome, StringComparison.OrdinalIgnoreCase))
+            .Where(r => string.IsNullOrWhiteSpace(Query) || $"{r.Title} {r.Name} {r.Key} {r.Error}".Contains(Query, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(r => r.IsBlockingFailure ? 0 : r.Outcome == StoryOutcome.Failed ? 1 : r.Outcome == StoryOutcome.Flaky ? 2 : 3)
+            .ThenBy(r => r.Title, StringComparer.Ordinal).ThenBy(r => r.Name, StringComparer.Ordinal).ThenBy(r => r.Key, StringComparer.Ordinal)
+            .ToArray();
+
+        <PageHeader Title="@(run.Run.Label ?? run.Run.RunId)" Description="@($"{run.Run.Trigger} run {run.Run.RunId}, finished {Fmt.When(run.Run.FinishedAt)}.")">
+            @if (previous is not null)
+            {
+                <a class="btn" href="@HubUrls.Compare(previous.Run.RunId, run.Run.RunId)">Compare with previous</a>
+            }
+            <a class="btn" href="@($"{HubOptions.RoutePrefix}/api/runs/{Uri.EscapeDataString(run.Run.RunId)}")">JSON</a>
+        </PageHeader>
+
+        <dl class="grid tiles" style="margin:0 0 16px">
+            <div class="tile"><dt>Results</dt><dd>@run.Results.Count</dd><div class="delta">@run.Stories stories</div></div>
+            <div class="tile pass"><dt>Passed</dt><dd>@run.Count(StoryOutcome.Passed)</dd><div class="delta">@Fmt.Percent(run.PassRate, 1) pass rate</div></div>
+            <div class="tile fail"><dt>Failed</dt><dd>@run.Failed</dd></div>
+            <div class="tile flaky"><dt>Flaky</dt><dd>@run.Count(StoryOutcome.Flaky)</dd></div>
+            <div class="tile quar"><dt>Quarantined</dt><dd>@run.Quarantined</dd></div>
+            <div class="tile"><dt>Skipped</dt><dd>@run.Count(StoryOutcome.Skipped)</dd></div>
+            <div class="tile"><dt>Duration</dt><dd>@Fmt.Duration(run.DurationMilliseconds)</dd><div class="delta">sum of stories</div></div>
+        </dl>
+
+        <section class="card" style="margin-bottom:16px">
+            <header><h2>Environment</h2></header>
+            <div class="body">
+                <dl class="grid" style="margin:0">
+                    <div><dt class="muted small">Branch</dt><dd style="margin:0">@(run.Run.Branch ?? "—")</dd></div>
+                    <div>
+                        <dt class="muted small">Commit</dt>
+                        <dd style="margin:0">
+                            @if (CommitUrl(run.Run.Commit) is { } url)
+                            {
+                                <a class="mono" href="@url">@Fmt.Sha(run.Run.Commit)</a>
+                            }
+                            else
+                            {
+                                <span class="mono">@Fmt.Sha(run.Run.Commit)</span>
+                            }
+                            @if (run.Run.CommitMessage is { } message)
+                            {
+                                <span> · @message</span>
+                            }
+                        </dd>
+                    </div>
+                    <div><dt class="muted small">Author</dt><dd style="margin:0">@(run.Run.Author ?? "—")</dd></div>
+                    <div>
+                        <dt class="muted small">CI</dt>
+                        <dd style="margin:0">
+                            @if (run.Run.CiUrl is { } ci)
+                            {
+                                <a href="@ci">@run.Run.CiProvider</a>
+                            }
+                            else
+                            {
+                                <span>@(run.Run.CiProvider ?? "local")</span>
+                            }
+                            @if (run.Run.PullRequest is { } pr)
+                            {
+                                <span> · PR #@pr</span>
+                            }
+                        </dd>
+                    </div>
+                    <div><dt class="muted small">Machine</dt><dd style="margin:0">@run.Run.Machine · @run.Run.OperatingSystem</dd></div>
+                    <div><dt class="muted small">Runtime</dt><dd style="margin:0">@run.Run.Runtime</dd></div>
+                </dl>
+            </div>
+        </section>
+
+        <form class="filters" method="get">
+            <div class="field">
+                <label for="outcome">Outcome</label>
+                <select id="outcome" name="outcome">
+                    <option value="">All</option>
+                    @foreach (var value in new[] { "failed", "quarantined", "flaky", "passed", "skipped" })
+                    {
+                        <option value="@value" selected="@(Outcome == value)">@value</option>
+                    }
+                </select>
+            </div>
+            <div class="field"><label for="q">Search</label><input id="q" name="q" type="text" value="@Query" placeholder="story, cell or error" /></div>
+            <button class="btn" type="submit">Filter</button>
+        </form>
+
+        <section class="card">
+            <div class="body flush scroll-x">
+                <table class="table">
+                    <thead><tr><th>Outcome</th><th>Story</th><th>Cell</th><th>Failure</th><th class="num">Duration</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in results.Take(500))
+                        {
+                            <tr>
+                                <td><OutcomeBadge Outcome="r.Outcome" Quarantined="@(r.Quarantine is not null)" /></td>
+                                <td class="title-cell"><a href="@HubUrls.Result(r.Key)"><strong>@r.Name</strong></a><span class="muted small">@r.Title</span></td>
+                                <td class="small">@Fmt.Cell(r.Driver, r.HostingModel, r.Viewport, r.Theme)</td>
+                                <td class="small wrap-anywhere">
+                                    @if (r.Outcome == StoryOutcome.Failed)
+                                    {
+                                        <span class="badge fail">@FailureAnalysis.Explain(r.Category).Label</span>
+                                        <span> @Fmt.FirstLine(r.Error, 140)</span>
+                                    }
+                                    else if (r.SkipReason is { } skip)
+                                    {
+                                        <span class="muted">@Fmt.FirstLine(skip, 140)</span>
+                                    }
+                                </td>
+                                <td class="num">@Fmt.Duration(r.DurationMilliseconds)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (results.Length == 0)
+                {
+                    <div class="empty">Nothing matches the filter.</div>
+                }
+            </div>
+        </section>
+    }
+}
+
+@code {
+    /// <summary>Run id.</summary>
+    [Parameter] public string RunId { get; set; } = string.Empty;
+
+    /// <summary>Outcome filter.</summary>
+    [SupplyParameterFromQuery(Name = "outcome")] public string? Outcome { get; set; }
+
+    /// <summary>Text filter.</summary>
+    [SupplyParameterFromQuery(Name = "q")] public string? Query { get; set; }
+
+    /// <inheritdoc />
+    protected override void OnParametersSet() => Outcome = string.IsNullOrEmpty(Outcome) ? null : Outcome;
+}

@@ -1,0 +1,64 @@
+@page "/_btp/runs"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var runs = Data.History.Runs.Reverse().ToArray();
+    <PageHeader Title="Runs" Description="Every archived run, newest first: CI runs recorded with btp report --archive, local runs and runs started from this hub.">
+        @if (runs.Length >= 2)
+        {
+            <a class="btn" href="@HubUrls.Compare(runs[1].Run.RunId, runs[0].Run.RunId)">Compare the last two</a>
+        }
+    </PageHeader>
+
+    @if (runs.Length == 0)
+    {
+        <div class="card empty"><strong>No archived runs</strong>Add one with <code>btp report --archive &lt;project&gt;/.btp/runs</code> after a test run, or start one from <a href="@HubUrls.Page("live")">Run stories</a>.</div>
+    }
+    else
+    {
+        <section class="card">
+            <div class="body flush scroll-x">
+                <table class="table">
+                    <thead><tr><th>Run</th><th>Source</th><th>When</th><th class="num">Results</th><th>Outcomes</th><th class="num">Pass rate</th><th class="num">Failed</th><th class="num">Flaky</th><th class="num">Duration</th><th></th></tr></thead>
+                    <tbody>
+                        @for (var i = 0; i < runs.Length; i++)
+                        {
+                            var run = runs[i];
+                            var previous = i + 1 < runs.Length ? runs[i + 1] : null;
+                            var flaky = run.Count(StoryOutcome.Flaky);
+                            <tr>
+                                <td class="title-cell"><a href="@HubUrls.Run(run.Run.RunId)"><strong>@(run.Run.Label ?? run.Run.RunId)</strong></a><span class="muted small mono">@run.Run.RunId</span></td>
+                                <td>
+                                    <span class="chip">@run.Run.Trigger</span>
+                                    @if (run.Run.Branch is { } branch)
+                                    {
+                                        <span class="chip">@branch</span>
+                                    }
+                                    @if (run.Run.Commit is { } sha)
+                                    {
+                                        <a class="chip mono" href="@(CommitUrl(sha) ?? HubUrls.Run(run.Run.RunId))">@Fmt.Sha(sha)</a>
+                                    }
+                                </td>
+                                <td class="nowrap" title="@Fmt.When(run.Run.FinishedAt)">@Fmt.Ago(run.Run.FinishedAt)</td>
+                                <td class="num">@run.Results.Count</td>
+                                <td><OutcomeBar Passed="@run.Count(StoryOutcome.Passed)" Failed="@run.Failed" Flaky="@flaky" Quarantined="@run.Quarantined" Skipped="@run.Count(StoryOutcome.Skipped)" /></td>
+                                <td class="num">@Fmt.Percent(run.PassRate, 1)</td>
+                                <td class="num">@(run.Failed == 0 ? "—" : run.Failed.ToString(CultureInfo.InvariantCulture))</td>
+                                <td class="num">@(flaky == 0 ? "—" : flaky.ToString(CultureInfo.InvariantCulture))</td>
+                                <td class="num">@Fmt.Duration(run.DurationMilliseconds)</td>
+                                <td>
+                                    @if (previous is not null)
+                                    {
+                                        <a class="small" href="@HubUrls.Compare(previous.Run.RunId, run.Run.RunId)">vs previous</a>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+}

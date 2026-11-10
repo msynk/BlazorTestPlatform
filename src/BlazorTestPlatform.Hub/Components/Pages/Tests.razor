@@ -1,0 +1,173 @@
+@page "/_btp/tests"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var rows = Data.Results
+        .Select(r => (Result: r, Stability: Data.StabilityOf(r.Key)))
+        .Where(x => Status is null || string.Equals((x.Stability?.Status ?? Stability.New).ToString(), Status, StringComparison.OrdinalIgnoreCase)
+            || (Status == "failing-now" && x.Result.IsBlockingFailure))
+        .Where(x => Driver is null || x.Result.Driver == Driver)
+        .Where(x => Mode is null || (x.Result.HostingModel ?? "in-memory") == Mode)
+        .Where(x => string.IsNullOrWhiteSpace(Query) || $"{x.Result.Title} {x.Result.Name} {x.Result.Key} {string.Join(' ', TagsOf(x.Result.StoryId))}".Contains(Query, StringComparison.OrdinalIgnoreCase))
+        .OrderBy(x => x.Result.IsBlockingFailure ? 0 : 1)
+        .ThenBy(x => x.Stability?.Status switch { Stability.Broken => 0, Stability.Failing => 1, Stability.Flaky => 2, _ => 3 })
+        .ThenBy(x => x.Result.Title, StringComparer.Ordinal).ThenBy(x => x.Result.Name, StringComparer.Ordinal).ThenBy(x => x.Result.Key, StringComparer.Ordinal)
+        .ToArray();
+
+    <PageHeader Title="All tests" Description="The latest result of every story in every cell (driver × render mode × viewport × theme), with its stability over the archived runs." />
+
+    <nav class="tabs" aria-label="Views">
+        <a href="@Link("list")" class="@(View == "matrix" ? null : "active")">List</a>
+        <a href="@Link("matrix")" class="@(View == "matrix" ? "active" : null)">Matrix</a>
+    </nav>
+
+    <form class="filters" method="get">
+        <input type="hidden" name="view" value="@View" />
+        <div class="field">
+            <label for="status">Status</label>
+            <select id="status" name="status">
+                <option value="">All</option>
+                <option value="failing-now" selected="@(Status == "failing-now")">Failing now</option>
+                @foreach (var value in Enum.GetNames<Stability>())
+                {
+                    <option value="@value" selected="@(string.Equals(Status, value, StringComparison.OrdinalIgnoreCase))">@value</option>
+                }
+            </select>
+        </div>
+        <div class="field">
+            <label for="driver">Driver</label>
+            <select id="driver" name="driver">
+                <option value="">All</option>
+                @foreach (var value in Data.Results.Select(r => r.Driver).Distinct().Order(StringComparer.Ordinal))
+                {
+                    <option value="@value" selected="@(Driver == value)">@value</option>
+                }
+            </select>
+        </div>
+        <div class="field">
+            <label for="mode">Render mode</label>
+            <select id="mode" name="mode">
+                <option value="">All</option>
+                @foreach (var value in Data.Results.Select(r => r.HostingModel ?? "in-memory").Distinct().Order(StringComparer.Ordinal))
+                {
+                    <option value="@value" selected="@(Mode == value)">@Fmt.Mode(value == "in-memory" ? null : value)</option>
+                }
+            </select>
+        </div>
+        <div class="field"><label for="q">Search</label><input id="q" name="q" type="text" value="@Query" placeholder="story, key or tag" /></div>
+        <button class="btn" type="submit">Filter</button>
+        <span class="muted small">@rows.Length of @Data.Results.Count results</span>
+    </form>
+
+    @if (Data.Results.Count == 0)
+    {
+        <div class="card empty"><strong>No results</strong>Run the tests or start a run from <a href="@HubUrls.Page("live")">Run stories</a>.</div>
+    }
+    else if (View == "matrix")
+    {
+        var cells = rows.Select(x => Cell(x.Result)).Distinct().Order(StringComparer.Ordinal).ToArray();
+        <section class="card">
+            <header><div><h2>Cross-hosting matrix</h2><p>One row per story, one column per cell. Hover a square for the outcome; click to open the result.</p></div><div class="legend"><span class="passed">passed</span><span class="flaky">flaky</span><span class="failed">failed</span><span class="quarantined">quarantined</span><span class="skipped">skipped</span></div></header>
+            <div class="body flush scroll-x">
+                <table class="table matrix">
+                    <thead>
+                        <tr>
+                            <th>Story</th>
+                            @foreach (var cell in cells)
+                            {
+                                <th title="@cell">@cell.Replace(" · ", "\n", StringComparison.Ordinal)</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var story in rows.GroupBy(x => x.Result.StoryId).Take(400))
+                        {
+                            var first = story.First().Result;
+                            <tr>
+                                <td class="title-cell nowrap"><a href="@HubUrls.Story(first.StoryId)"><strong>@first.Name</strong></a><span class="muted small">@first.Title</span></td>
+                                @foreach (var cell in cells)
+                                {
+                                    var result = story.FirstOrDefault(x => Cell(x.Result) == cell).Result;
+                                    <td class="cell">
+                                        @if (result is not null)
+                                        {
+                                            <a href="@HubUrls.Result(result.Key)" title="@($"{result.Outcome} · {cell}")"><span class="dot @Fmt.Css(result.Outcome, result.Quarantine is not null)"></span></a>
+                                        }
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+    else
+    {
+        <section class="card">
+            <div class="body flush scroll-x">
+                <table class="table">
+                    <thead><tr><th>Outcome</th><th>Story</th><th>Cell</th><th>Stability</th><th>History</th><th class="num">Duration</th></tr></thead>
+                    <tbody>
+                        @foreach (var (r, stability) in rows.Take(600))
+                        {
+                            <tr>
+                                <td><OutcomeBadge Outcome="r.Outcome" Quarantined="@(r.Quarantine is not null)" /></td>
+                                <td class="title-cell">
+                                    <a href="@HubUrls.Result(r.Key)"><strong>@r.Name</strong></a>
+                                    <span class="muted small"><a href="@HubUrls.Story(r.StoryId)">@r.Title</a></span>
+                                    @if (stability is not null)
+                                    {
+                                        <div><Tags Items="stability.Tags" /></div>
+                                    }
+                                </td>
+                                <td class="small">@Fmt.Cell(r.Driver, r.HostingModel, r.Viewport, r.Theme)</td>
+                                <td>@if (stability is not null) { <StabilityBadge Status="stability.Status" /> } else { <span class="faint small">not archived</span> }</td>
+                                <td>@if (stability is not null) { <HistoryStrip Points="stability.Points" Max="20" /> }</td>
+                                <td class="num">@Fmt.Duration(r.DurationMilliseconds)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (rows.Length == 0)
+                {
+                    <div class="empty">Nothing matches the filter.</div>
+                }
+            </div>
+        </section>
+    }
+}
+
+@code {
+    /// <summary>View: list or matrix.</summary>
+    [SupplyParameterFromQuery(Name = "view")] public string? View { get; set; }
+
+    /// <summary>Stability filter.</summary>
+    [SupplyParameterFromQuery(Name = "status")] public string? Status { get; set; }
+
+    /// <summary>Driver filter.</summary>
+    [SupplyParameterFromQuery(Name = "driver")] public string? Driver { get; set; }
+
+    /// <summary>Render-mode filter.</summary>
+    [SupplyParameterFromQuery(Name = "mode")] public string? Mode { get; set; }
+
+    /// <summary>Text filter.</summary>
+    [SupplyParameterFromQuery(Name = "q")] public string? Query { get; set; }
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        Status = string.IsNullOrEmpty(Status) ? null : Status;
+        Driver = string.IsNullOrEmpty(Driver) ? null : Driver;
+        Mode = string.IsNullOrEmpty(Mode) ? null : Mode;
+        View = View == "matrix" ? "matrix" : "list";
+    }
+
+    private string Link(string view) => HubUrls.Page($"tests?view={view}");
+
+    private IEnumerable<string> TagsOf(string storyId) => Data.Catalog.TryGet(storyId, out var story) ? story.Tags : [];
+
+    private static string Cell(StoryResult r) => Fmt.Cell(r.Driver, r.HostingModel, r.Viewport, r.Theme);
+}

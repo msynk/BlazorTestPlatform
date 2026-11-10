@@ -166,11 +166,14 @@ public static class BunitStoryRunner
         }
     }
 
-    /// <summary>Runs the story and throws <see cref="StoryFailedException"/> when it fails (skips pass silently).</summary>
+    /// <summary>
+    /// Runs the story and throws <see cref="StoryFailedException"/> when it fails (skips pass silently). A failure the
+    /// quarantine file covers is returned instead: it is in the results, but it does not fail the test.
+    /// </summary>
     public static async Task<StoryResult> VerifyAsync(Story story, BunitStoryOptions? options = null, CancellationToken cancellationToken = default)
     {
         var result = await RunAsync(story, options, cancellationToken).ConfigureAwait(false);
-        return result.Outcome == StoryOutcome.Failed ? throw new StoryFailedException(result) : result;
+        return result.IsBlockingFailure ? throw new StoryFailedException(result) : result;
     }
 
     /// <summary>Renders the story for custom assertions. Dispose the session when done.</summary>
@@ -322,6 +325,7 @@ public static class BunitStoryRunner
 
     private static StoryResult Write(BunitStoryOptions options, BtpSettings settings, StoryResult result)
     {
+        result = settings.Quarantine.Apply(result);
         BtpTelemetry.Complete(System.Diagnostics.Activity.Current is { OperationName: "btp.story" } story ? story : null, result);
         if (options.WriteResults)
         {

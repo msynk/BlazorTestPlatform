@@ -1,0 +1,90 @@
+@page "/_btp/live"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var state = Runner.Current;
+    var catalog = Data.Catalog;
+    <PageHeader Title="Run stories" Description="Run stories in memory (bUnit) from here: every story, the ones that failed, the unstable ones, a component, a tag or the stories a change affects. Results land in the results directory and the run in the archive, so every page updates when it finishes." />
+
+    @if (!Runner.CanRun)
+    {
+        <div class="callout warn" style="margin-bottom:16px">This hub has no story catalog to run. Configure it with <code>options.AddStoriesFromAssemblyOf&lt;MyStories&gt;()</code>.</div>
+    }
+    else if (Options.AllowChanges && !Runner.IsRunning)
+    {
+        <section class="card" style="margin-bottom:16px">
+            <header><div><h2>Start a run</h2><p>@catalog.Count stories available · runs in this process, @Math.Clamp(Environment.ProcessorCount / 2, 1, 4) at a time</p></div></header>
+            <div class="body">
+                <form method="post" action="@HubUrls.Page("actions/run")" class="filters" style="margin:0">
+                    <AntiforgeryToken />
+                    <div class="field">
+                        <label for="scope">Stories</label>
+                        <select id="scope" name="scope">
+                            <option value="all">All (@catalog.Count)</option>
+                            <option value="failed">Failed in the latest results (@Data.Results.Where(r => r.Outcome == StoryOutcome.Failed).Select(r => r.StoryId).Distinct().Count())</option>
+                            <option value="unstable">Unstable: flaky, failing or broken (@Data.Stability.Where(s => s.Status is Stability.Flaky or Stability.Broken or Stability.Failing).Select(s => s.Last.StoryId).Distinct().Count())</option>
+                            <option value="component">One component (pick below)</option>
+                            <option value="tag">One tag (type below)</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="value">Component or tag</label>
+                        <input id="value" name="value" type="text" list="components" placeholder="Inputs/Button" />
+                        <datalist id="components">
+                            @foreach (var title in catalog.Stories.Select(s => s.Title).Distinct().Order(StringComparer.Ordinal))
+                            {
+                                <option value="@title"></option>
+                            }
+                        </datalist>
+                    </div>
+                    <div class="field"><label for="label">Label</label><input id="label" name="label" type="text" placeholder="What this run checks" /></div>
+                    <button class="btn btn-primary" type="submit">Run</button>
+                </form>
+            </div>
+        </section>
+    }
+
+    @if (state is null)
+    {
+        <div class="card empty"><strong>No run yet in this session</strong>Start one above. Runs from CI appear under <a href="@HubUrls.Page("runs")">Runs</a>.</div>
+    }
+    else
+    {
+        <section class="card" data-live="@HubUrls.Page("api/live")">
+            <header>
+                <div>
+                    <h2><span data-live-label>@state.Request.Label</span> <span class="badge info" data-live-status>@state.Status</span></h2>
+                    <p><span data-live-count>@state.Completed of @state.Total</span> · started @Fmt.When(state.StartedAt) · <span class="mono">@state.Id</span></p>
+                </div>
+                <div class="row">
+                    @if (Options.AllowChanges)
+                    {
+                        <form method="post" action="@HubUrls.Page("actions/cancel")" data-live-cancel>
+                            <AntiforgeryToken />
+                            <button class="btn btn-danger" type="submit">Cancel</button>
+                        </form>
+                    }
+                    <a class="btn btn-primary" href="@HubUrls.Page()" data-live-done hidden>Back to the dashboard</a>
+                </div>
+            </header>
+            <div class="body stack">
+                <div class="live-progress"><span data-live-bar style="width:0"></span></div>
+                <div class="row small">
+                    <span class="badge pass"><span data-live-passed>0</span> passed</span>
+                    <span class="badge fail"><span data-live-failed>0</span> failed</span>
+                    <span class="badge flaky"><span data-live-flaky>0</span> flaky</span>
+                    <span class="badge quarantined"><span data-live-quarantined>0</span> quarantined</span>
+                    <span class="badge"><span data-live-skipped>0</span> skipped</span>
+                    <span class="muted mono" data-live-running></span>
+                </div>
+                @if (state.Error is { } error)
+                {
+                    <div class="error-box">@error</div>
+                }
+                <table class="table"><tbody data-live-results><tr><td class="muted">Loading…</td></tr></tbody></table>
+            </div>
+        </section>
+    }
+}

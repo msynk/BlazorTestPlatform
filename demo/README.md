@@ -1,15 +1,23 @@
 # BlazorTestPlatform demo
 
-A small design system, its stories, a workbench host and a test project: the complete, working version of the setup in [getting started](../docs/getting-started.md). Every feature of BlazorTestPlatform is used here at least once, by a story you can open in the workbench and a test that runs in CI.
+A small design system, its stories, a host with the workbench and the test hub, and a test project: the complete, working version of the setup in [getting started](../docs/getting-started.md). Every feature of BlazorTestPlatform is used here at least once, by a story you can open, a hub page that shows its results, and a test that runs in CI.
 
-The idea in one sentence: **a story is one state of a component, written once in C#, and it runs as a bUnit test, a real-browser test under every render mode, a visual snapshot, an accessibility audit and a performance check.**
+The idea in one sentence: **a story is one state of a component, written once in C#, and it runs as a bUnit test, a real-browser test under every render mode, a visual snapshot, an accessibility audit and a performance check; the hub then turns those results into history, triage and decisions.**
+
+The site has three parts:
+
+| URL | What it is |
+|---|---|
+| `/` | A guided tour of the platform in five stages (author, run, review, analyze, ship), linking to the page or story that shows each feature |
+| `/_btp` | The test hub: dashboard and trends, runs and comparisons, flaky tests and quarantine, failures grouped by cause, visual and accessibility review, performance, coverage and WCAG traceability, impact analysis and sharding, live runs, release readiness and integrations ([guide](../docs/hub.md)) |
+| `/_workbench` | The component workbench: every story across themes, viewports and render modes, with live controls, in-frame play, an inspector and a recorder |
 
 ## Run it
 
 From the repository root:
 
 ```bash
-# The guided tour (http://localhost:5288) and the workbench (/_workbench)
+# The tour (http://localhost:5288), the test hub (/_btp) and the workbench (/_workbench)
 dotnet run --project demo/BlazorTestPlatform.Demo.Workbench
 
 # Every story in memory with bUnit: seconds, no browser needed
@@ -20,11 +28,11 @@ dotnet build demo/BlazorTestPlatform.Demo.UI.Tests
 pwsh demo/BlazorTestPlatform.Demo.UI.Tests/bin/Debug/net10.0/playwright.ps1 install
 dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests
 
-# The HTML report: visual diffs, timelines, accessibility, performance and coverage
-dotnet run --project src/BlazorTestPlatform.Cli -- report -p demo/BlazorTestPlatform.Demo.UI.Tests
+# Add the run to the hub's history, and write the HTML report
+dotnet run --project src/BlazorTestPlatform.Cli -- report -p demo/BlazorTestPlatform.Demo.UI.Tests --archive demo/BlazorTestPlatform.Demo.UI.Tests/.btp/runs
 ```
 
-The home page of the workbench host is a guided tour: each card explains a feature and opens the story that shows it, with its play script running in the frame where that helps.
+On first start (`dotnet run` uses the `http` launch profile, which sets `BTP_DEMO_SEED=1`) the host records ten real in-memory runs of every story into `BlazorTestPlatform.Demo.UI.Tests/.btp/runs`, a day apart, so the hub has history to show. They include the **Demo/Chaos** stories in [`BlazorTestPlatform.Demo.Workbench/Chaos`](BlazorTestPlatform.Demo.Workbench/Chaos), which fail on purpose in some runs: an intermittent toast (flaky, and quarantined in [`quarantine.json`](BlazorTestPlatform.Demo.UI.Tests/quarantine.json)), a regression that was fixed, a renamed button that broke a story, a hanging bell (a flaky timeout), an accessibility fix and a new accessibility failure, and a feed that gets slower. They only exist in the host: the workbench and the test suite never see them. Delete `.btp/runs` to reseed; run the test suite and `btp report --archive` to add the browser results to the history.
 
 ## What's here
 
@@ -32,7 +40,7 @@ The home page of the workbench host is a guided tour: each card explains a featu
 |---|---|
 | [`BlazorTestPlatform.Demo.UI`](BlazorTestPlatform.Demo.UI) | The design system under test: 14 components, from a button to an HTTP-backed sign-up form, plus `demo.css` with light and dark themes. Nothing in it knows about testing. |
 | [`BlazorTestPlatform.Demo.UI.Stories`](BlazorTestPlatform.Demo.UI.Stories) | One collection of stories per component (`*Stories.cs`), Razor fragments the stories use (`Fragments.razor`), and two test fixtures for driver parity and browser emulation. Shared by the workbench and the tests. |
-| [`BlazorTestPlatform.Demo.Workbench`](BlazorTestPlatform.Demo.Workbench) + [`.Client`](BlazorTestPlatform.Demo.Workbench.Client) | A Blazor Web App with Server and WebAssembly interactivity that hosts the guided tour (`/`) and the workbench (`/_workbench`). Browser tests run against it. |
+| [`BlazorTestPlatform.Demo.Workbench`](BlazorTestPlatform.Demo.Workbench) + [`.Client`](BlazorTestPlatform.Demo.Workbench.Client) | A Blazor Web App with Server and WebAssembly interactivity that hosts the guided tour (`/`), the test hub (`/_btp`) and the workbench (`/_workbench`), plus the chaos stories and the history seeder. Browser tests run against it. |
 | [`BlazorTestPlatform.Demo.UI.Tests`](BlazorTestPlatform.Demo.UI.Tests) | xUnit v3 tests: every story in bUnit and in real browsers, plus the quality gates. Committed baselines and reviews live here too. |
 
 ## Feature map
@@ -97,6 +105,27 @@ Story ids open in the workbench at `/_workbench?story=<id>`; add `&play=1` to ru
 | Browser runtime budgets (layout shift, DOM size) | `data-person-list--large-list`, `testing-browser-emulation--geolocation` | [PersonListStories.cs](BlazorTestPlatform.Demo.UI.Stories/PersonListStories.cs) | `CrossHostingTests`, `BrowserMetricsTests` |
 | Story state coverage | every component | [StoryCoverageTests.cs](BlazorTestPlatform.Demo.UI.Tests/StoryCoverageTests.cs) | `StoryCoverageTests` |
 
+### The test hub
+
+| Feature | Hub page | Code | Test |
+|---|---|---|---|
+| Dashboard: trends, outcomes per run, matrix, decisions waiting | `/_btp` | [Dashboard.razor](../src/BlazorTestPlatform.Hub/Components/Pages/Dashboard.razor) | `HubTests` |
+| Run archive with commit, branch and CI metadata | `/_btp/runs` | [RunArchive.cs](../src/BlazorTestPlatform.Reporting/RunArchive.cs) | `HistoryTests` |
+| Run comparison: new failures, still failing, fixed, new flaky, slower | `/_btp/compare` | [RunHistory.cs](../src/BlazorTestPlatform.Reporting/RunHistory.cs) | `HistoryTests` |
+| Stability (healthy, failing, flaky, broken, fixed) with a 95% interval and smart tags | `/_btp/flaky` | [RunHistory.cs](../src/BlazorTestPlatform.Reporting/RunHistory.cs) | `HistoryTests` |
+| Quarantine in a committed file | `/_btp/flaky#quarantine` | [quarantine.json](BlazorTestPlatform.Demo.UI.Tests/quarantine.json) | `HubTests`, `QuarantineAndShardPlanTests` |
+| Unique errors with category, likely cause and next step | `/_btp/failures` | [FailureAnalysis.cs](../src/BlazorTestPlatform.Reporting/FailureAnalysis.cs) | `HistoryTests` |
+| A result as a trace: timeline, failure, attempts, artifacts, copy as prompt | `/_btp/result?key=demo-chaos--report-export%7Cbunit` | [ResultDetail.razor](../src/BlazorTestPlatform.Hub/Components/Pages/ResultDetail.razor) | `HubTests` |
+| Visual review: five view modes, grouped decisions, keyboard | `/_btp/visual` | [Visual.razor](../src/BlazorTestPlatform.Hub/Components/Pages/Visual.razor) | `HubTests` |
+| Accessibility baseline: new, existing, fixed; needs review; waivers | `/_btp/accessibility` | [Accessibility.razor](../src/BlazorTestPlatform.Hub/Components/Pages/Accessibility.razor) | `HistoryTests` |
+| Performance budgets, browser metrics, duration trends | `/_btp/performance` | [Performance.razor](../src/BlazorTestPlatform.Hub/Components/Pages/Performance.razor) | `HubTests` |
+| Story-state coverage and a WCAG traceability matrix | `/_btp/coverage` | [Coverage.razor](../src/BlazorTestPlatform.Hub/Components/Pages/Coverage.razor) | `HubTests` |
+| Impact analysis with reasons, duration-balanced shards | `/_btp/impact` | [ShardPlan.cs](../src/BlazorTestPlatform.Core/Matrix/ShardPlan.cs) | `ImpactAnalysisTests`, `QuarantineAndShardPlanTests` |
+| Live in-memory runs from the browser | `/_btp/live` | [HubRunner.cs](../src/BlazorTestPlatform.Hub/HubRunner.cs) | `HubTests` |
+| Release readiness verdict | `/_btp/readiness` | [Readiness.razor](../src/BlazorTestPlatform.Hub/Components/Pages/Readiness.razor) | `HubTests` |
+| Exports, JSON API, pull-request comment | `/_btp/integrations` | [HubEndpoints.cs](../src/BlazorTestPlatform.Hub/HubEndpoints.cs) | `HubTests` |
+| Access control: 404 when disabled, antiforgery on actions, files only from results and snapshots | — | [HubEndpoints.cs](../src/BlazorTestPlatform.Hub/HubEndpoints.cs) | `HubTests` |
+
 ### Every render mode, every browser, CI
 
 | Feature | Where | Test |
@@ -120,6 +149,8 @@ Story ids open in the workbench at `/_workbench?story=<id>`; add `&play=1` to ru
 | `BlazorTestPlatform.Demo.UI.Tests/__baselines__/performance.json` | Render-performance baselines. | Written for new stories on local runs; `btp perf approve` accepts intended changes. |
 | `BlazorTestPlatform.Demo.UI.Tests/a11y-reviews/` | Manual WCAG 2.2 reviews, one per component, with the accessibility fingerprint they were made against. | `btp a11y init` copies templates for missing or stale reviews; a person fills them in. Components without a review are listed, not failed (`RequireReview = false`). |
 | `BlazorTestPlatform.Demo.UI.Tests/btp.json` | Accessibility policy, visual threshold, stylesheets bUnit evaluates. | Edit by hand. |
+| `BlazorTestPlatform.Demo.UI.Tests/quarantine.json` | Quarantined stories: they run and report, but cannot fail the build. The demo quarantines one chaos story. | `btp quarantine add/remove` or the hub. |
+| `BlazorTestPlatform.Demo.UI.Tests/.btp/runs/` (not committed) | The run archive behind the hub's history. | Seeded on first start; `btp report --archive` and hub runs add to it. |
 
 ## Adding a story
 

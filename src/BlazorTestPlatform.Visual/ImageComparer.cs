@@ -41,6 +41,13 @@ public sealed record ImageCompareResult
 
     /// <summary>Bounding box of differing pixels.</summary>
     public PixelRectangle? DiffBounds { get; init; }
+
+    /// <summary>
+    /// Shape of the change: the size of <see cref="DiffBounds"/> (to 4 px) and which cells of an 8×8 grid over it hold
+    /// differing pixels. Two comparisons with equal fingerprints changed the same way, wherever on the page, so a review
+    /// can decide them together. Null when nothing differs.
+    /// </summary>
+    public string? Fingerprint { get; init; }
 }
 
 /// <summary>
@@ -52,6 +59,29 @@ public static class ImageComparer
 {
     // Maximum possible YIQ delta (35215) scaled by threshold² gives the acceptable squared distance.
     private const double MaxYiqDelta = 35215;
+
+    private static string FingerprintOf(RgbaImage diff, PixelRectangle bounds, bool sizeMismatch, RgbaImage expected, RgbaImage actual)
+    {
+        const int Grid = 8;
+        ulong cells = 0;
+        for (var y = bounds.Y; y < bounds.Y + bounds.Height; y++)
+        {
+            for (var x = bounds.X; x < bounds.X + bounds.Width; x++)
+            {
+                var (r, g, b, _) = diff.GetPixel(x, y);
+                if (r == 255 && g == 0 && (b == 0 || b == 255))
+                {
+                    var cx = Math.Min(Grid - 1, (x - bounds.X) * Grid / bounds.Width);
+                    var cy = Math.Min(Grid - 1, (y - bounds.Y) * Grid / bounds.Height);
+                    cells |= 1UL << ((cy * Grid) + cx);
+                }
+            }
+        }
+
+        var shape = string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"{(sizeMismatch ? $"size:{expected.Width}x{expected.Height}>{actual.Width}x{actual.Height}" : "pixels")}|{(bounds.Width + 2) / 4}x{(bounds.Height + 2) / 4}|{cells:x16}");
+        return DeterministicRandom.StableHash(shape).ToString("x16", System.Globalization.CultureInfo.InvariantCulture)[..12];
+    }
 
     /// <summary>Compares two images.</summary>
     public static ImageCompareResult Compare(RgbaImage expected, RgbaImage actual, ImageCompareOptions? options = null)
@@ -122,6 +152,7 @@ public static class ImageComparer
             }
         }
 
+        var bounds = maxX < 0 ? (PixelRectangle?)null : new PixelRectangle(minX, minY, maxX - minX + 1, maxY - minY + 1);
         return new ImageCompareResult
         {
             DiffPixels = diffCount,
@@ -129,7 +160,8 @@ public static class ImageComparer
             TotalPixels = total,
             SizeMismatch = sizeMismatch,
             DiffImage = diff,
-            DiffBounds = maxX < 0 ? null : new PixelRectangle(minX, minY, maxX - minX + 1, maxY - minY + 1),
+            DiffBounds = bounds,
+            Fingerprint = bounds is { } region ? FingerprintOf(diff, region, sizeMismatch, expected, actual) : null,
         };
 
         void Track(int x, int y)

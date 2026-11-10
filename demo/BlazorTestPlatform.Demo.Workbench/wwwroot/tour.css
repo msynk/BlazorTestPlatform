@@ -92,6 +92,26 @@ html:has(.tour), html:has(.tour) body {
 .tour-targets span { color: var(--t-muted); font-size: 15px; }
 .tour-targets code { color: var(--t-accent); }
 
+/* Pipeline */
+.tour-pipeline { list-style: none; margin: 20px 0 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.tour-pipeline li {
+    position: relative; display: grid; gap: 4px; align-content: start; padding: 14px 16px;
+    border: 1px solid var(--t-border); border-radius: 12px; background: var(--t-surface);
+}
+.tour-pipeline li:not(:last-child)::after {
+    content: "→"; position: absolute; right: -11px; top: 50%; transform: translateY(-50%);
+    color: var(--t-accent); font-weight: 700; background: var(--t-bg); line-height: 1; z-index: 1;
+}
+.tour-pipeline__step { color: var(--t-accent); font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.tour-pipeline span:last-child { color: var(--t-muted); font-size: 14px; }
+.tour-note { margin: 16px 0 0; padding: 12px 14px; border-radius: 10px; background: var(--t-accent-soft); max-width: 900px; }
+.tour-step {
+    display: inline-grid; place-items: center; width: 30px; height: 30px; margin-right: 6px; border-radius: 50%;
+    background: var(--t-accent); color: var(--t-accent-text); font-size: 15px; vertical-align: 3px;
+}
+.tour-links a.tour-link--hub { background: var(--t-accent-soft); border-color: transparent; }
+.tour-loop { max-width: 900px; margin: 16px 0 0; padding-left: 20px; display: grid; gap: 8px; }
+
 /* Table of contents */
 .tour-toc { padding: 40px 0 8px; }
 .tour-toc p { color: var(--t-muted); max-width: 760px; }
@@ -129,6 +149,8 @@ html:has(.tour), html:has(.tour) body {
 @media (max-width: 760px) {
     .tour { padding: 32px 16px 56px; }
     .tour-hero h1 br { display: none; }
+    .tour-pipeline { grid-template-columns: minmax(0, 1fr); }
+    .tour-pipeline li:not(:last-child)::after { content: "↓"; right: auto; left: 50%; top: auto; bottom: -11px; transform: translateX(-50%); }
     .tour-flow__grid { grid-template-columns: minmax(0, 1fr); }
     .tour-grid { grid-template-columns: minmax(0, 1fr); }
 }

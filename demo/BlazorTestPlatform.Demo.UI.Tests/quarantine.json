@@ -1,0 +1,12 @@
+{
+  "quarantined": [
+    {
+      "pattern": "demo-chaos--save-toast",
+      "reason": "Race between the save toast and the assertion; tracked in DEMO-12. Only the hub's chaos stories match this pattern.",
+      "owner": "UI team",
+      "issue": "DEMO-12",
+      "added": "2026-11-01T09:00:00+00:00",
+      "expires": "2027-06-30"
+    }
+  ]
+}

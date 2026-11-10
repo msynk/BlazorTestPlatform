@@ -48,7 +48,7 @@ public static class StoryTestCases
     public static StoryResult Passed(StoryResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
-        if (result.Outcome == StoryOutcome.Failed)
+        if (result.IsBlockingFailure)
         {
             throw new StoryFailedException(result);
         }

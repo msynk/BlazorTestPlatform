@@ -1,0 +1,98 @@
+@page "/_btp/tests/{StoryId}"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var results = Data.Results.Where(r => r.StoryId == StoryId).OrderBy(r => r.Driver == "bunit" ? 0 : 1).ThenBy(r => r.Key, StringComparer.Ordinal).ToArray();
+    var archived = Data.Stability.Where(s => s.Last.StoryId == StoryId).ToArray();
+    Data.Catalog.TryGet(StoryId, out var story);
+    var title = story?.Title ?? results.FirstOrDefault()?.Title ?? archived.FirstOrDefault()?.Last.Title ?? StoryId;
+    var name = story?.Name ?? results.FirstOrDefault()?.Name ?? archived.FirstOrDefault()?.Last.Name ?? StoryId;
+
+    <PageHeader Title="@name" Description="@($"{title} · {StoryId}")">
+        @if (WorkbenchUrl(StoryId) is { } workbench)
+        {
+            <a class="btn" href="@workbench">Open in workbench</a>
+            @if (story?.HasPlay == true)
+            {
+                <a class="btn" href="@WorkbenchUrl(StoryId, play: true)">Run interactions ▶</a>
+            }
+        }
+        @if (Runner.CanRun && Options.AllowChanges && story is not null)
+        {
+            <form method="post" action="@HubUrls.Page("actions/run")" style="display:inline">
+                <AntiforgeryToken />
+                <input type="hidden" name="scope" value="story" />
+                <input type="hidden" name="value" value="@StoryId" />
+                <button class="btn btn-primary" type="submit" disabled="@Runner.IsRunning">Run in memory</button>
+            </form>
+        }
+    </PageHeader>
+
+    <div class="grid two">
+        <section class="card">
+            <header><h2>Story</h2></header>
+            <div class="body stack">
+                @if (story?.Description is { Length: > 0 } description)
+                {
+                    <p>@description</p>
+                }
+                <dl class="grid" style="margin:0">
+                    <div><dt class="muted small">Component</dt><dd style="margin:0" class="mono">@(story?.ComponentType.FullName ?? results.FirstOrDefault()?.Component ?? "—")</dd></div>
+                    <div><dt class="muted small">Play script</dt><dd style="margin:0">@(story is null ? "—" : story.HasPlay ? "yes" : "no")</dd></div>
+                    <div><dt class="muted small">Tags</dt><dd style="margin:0">@if (story is not null) { foreach (var tag in story.Tags) { <span class="tag">@tag</span> } }</dd></div>
+                    <div><dt class="muted small">Declared in</dt><dd style="margin:0" class="mono small wrap-anywhere">@(story?.SourceFile is { } file ? $"{Path.GetFileName(file)}:{story.SourceLine}" : "—")</dd></div>
+                </dl>
+                @if (Data.Quarantine.Entries.FirstOrDefault(e => e.Matches(StoryId, StoryId)) is { } quarantine)
+                {
+                    <div class="callout warn"><strong>Quarantined</strong> (@quarantine.Pattern): @quarantine.Reason @(quarantine.Owner is { } owner ? $"· owner {owner}" : null) @(quarantine.Expires is { } until ? $"· until {until:yyyy-MM-dd}" : null)</div>
+                }
+            </div>
+        </section>
+        <section class="card">
+            <header><h2>Health</h2></header>
+            <div class="body">
+                <dl class="grid tiles" style="margin:0">
+                    <div class="tile"><dt>Cells</dt><dd>@results.Length</dd></div>
+                    <div class="tile pass"><dt>Passing</dt><dd>@results.Count(r => r.IsSuccess)</dd></div>
+                    <div class="tile fail"><dt>Failing</dt><dd>@results.Count(r => r.IsBlockingFailure)</dd></div>
+                    <div class="tile flaky"><dt>Unstable</dt><dd>@archived.Count(s => s.Status is Stability.Flaky or Stability.Broken or Stability.Failing)</dd></div>
+                </dl>
+            </div>
+        </section>
+    </div>
+
+    <section class="card" style="margin-top:16px">
+        <header><div><h2>Cells</h2><p>Every driver, render mode, viewport and theme this story ran in, with its history.</p></div></header>
+        <div class="body flush scroll-x">
+            <table class="table">
+                <thead><tr><th>Outcome</th><th>Cell</th><th>Stability</th><th>History</th><th class="num">Median</th><th class="num">Last</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var r in results)
+                    {
+                        var stability = Data.StabilityOf(r.Key);
+                        <tr>
+                            <td><OutcomeBadge Outcome="r.Outcome" Quarantined="@(r.Quarantine is not null)" /></td>
+                            <td><a href="@HubUrls.Result(r.Key)">@Fmt.Cell(r.Driver, r.HostingModel, r.Viewport, r.Theme)</a>@if (r.Outcome == StoryOutcome.Failed) { <div class="small muted wrap-anywhere">@Fmt.FirstLine(r.Error, 140)</div> }</td>
+                            <td>@if (stability is not null) { <StabilityBadge Status="stability.Status" /> <Tags Items="stability.Tags" /> }</td>
+                            <td>@if (stability is not null) { <HistoryStrip Points="stability.Points" /> }</td>
+                            <td class="num">@(stability?.MedianDurationMilliseconds is { } median ? Fmt.Duration(median) : "—")</td>
+                            <td class="num">@Fmt.Duration(r.DurationMilliseconds)</td>
+                            <td>@if (WorkbenchUrl(StoryId, r.HostingModel) is { } open) { <a class="small" href="@open">workbench</a> }</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            @if (results.Length == 0)
+            {
+                <div class="empty">No results for this story yet.</div>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    /// <summary>Story id.</summary>
+    [Parameter] public string StoryId { get; set; } = string.Empty;
+}

@@ -1,0 +1,17 @@
+<span class="badge @Status.ToString().ToLowerInvariant()" title="@Title">@Status</span>
+
+@code {
+    /// <summary>Status.</summary>
+    [Parameter] public Stability Status { get; set; }
+
+    private string Title => Status switch
+    {
+        Stability.New => "Fewer than two runs: too early to tell",
+        Stability.Healthy => "Passed cleanly in every analysed run",
+        Stability.Failing => "Failing since recently, after a clean history",
+        Stability.Flaky => "Alternates between passing and failing, or passes only on retry",
+        Stability.Broken => "Fails consistently",
+        Stability.Fixed => "Failed in one stretch of runs and passes since, or the last five runs passed after flakiness",
+        _ => string.Empty,
+    };
+}

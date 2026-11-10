@@ -1,0 +1,183 @@
+@page "/_btp"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var summary = Data.Summary;
+    var trend = Data.History.Trend();
+    var latest = Data.History.Latest;
+    var unstable = Data.Stability.Where(s => s.Status is Stability.Flaky or Stability.Broken or Stability.Failing).ToArray();
+    var activeErrors = Data.Clusters.Where(c => c.Active).ToArray();
+    var visualChanges = Data.Results.Where(r => r.Visual is { IsFailure: true }).Select(r => r.Visual!.SnapshotName).Distinct().Count();
+    IReadOnlyList<ViolationDelta> a11yDelta = latest is null ? [] : RunHistory.AccessibilityDelta(Data.History.Previous, latest);
+
+    <PageHeader Title="Dashboard" Description="Where the suite stands now and how it got here: the latest result of every story and cell, and the history of archived runs.">
+        <a class="btn" href="@HubUrls.Page("readiness")">Release readiness</a>
+        @if (Runner.CanRun && Options.AllowChanges)
+        {
+            <a class="btn btn-primary" href="@HubUrls.Page("live")">Run stories</a>
+        }
+    </PageHeader>
+
+    @if (Data.Problem is { } problem)
+    {
+        <div class="callout bad" style="margin-bottom:16px">@problem</div>
+    }
+
+    @if (summary.Total == 0 && Data.History.Runs.Count == 0)
+    {
+        <div class="card empty">
+            <strong>No results yet</strong>
+            <p>Run the test project (<code>dotnet test</code>), then <code>btp report --archive .btp/runs</code> to add the run to the history, or start an in-memory run from <a href="@HubUrls.Page("live")">Run stories</a>.</p>
+        </div>
+    }
+    else
+    {
+        <dl class="grid tiles" style="margin:0 0 16px">
+            <div class="tile"><dt>Results</dt><dd>@Fmt.Number(summary.Total)</dd><div class="delta">@summary.Stories stories · @summary.Drivers.Count drivers</div></div>
+            <div class="tile pass"><dt>Passed</dt><dd>@Fmt.Number(summary.Passed)</dd><div class="delta">@Fmt.Percent(summary.Total == 0 ? 0 : (double)(summary.Passed + summary.Flaky) / Math.Max(1, summary.Total - summary.Skipped), 1) pass rate</div></div>
+            <div class="tile fail"><dt>Failing</dt><dd>@summary.Failed</dd><div class="delta">@activeErrors.Length unique errors</div></div>
+            <div class="tile flaky"><dt>Flaky now</dt><dd>@summary.Flaky</dd><div class="delta">@unstable.Count(s => s.Status == Stability.Flaky) flaky over @Data.History.Runs.Count runs</div></div>
+            <div class="tile quar"><dt>Quarantined</dt><dd>@summary.Quarantined</dd><div class="delta">@Data.Quarantine.Entries.Count entries in quarantine.json</div></div>
+            <div class="tile"><dt>Skipped</dt><dd>@summary.Skipped</dd><div class="delta">capabilities a driver lacks</div></div>
+            <div class="tile"><dt>Visual changes</dt><dd>@visualChanges</dd><div class="delta"><a href="@HubUrls.Page("visual")">review</a></div></div>
+            <div class="tile"><dt>State coverage</dt><dd>@(Data.Coverage is { } c ? Fmt.Percent(c.Ratio) : "—")</dd><div class="delta">bool and enum values with a story</div></div>
+        </dl>
+
+        @if (summary.Failed > 0)
+        {
+            <div class="callout bad" style="margin-bottom:16px">
+                <strong>@summary.Failed failing results from @Data.Results.Where(r => r.IsBlockingFailure).Select(r => r.StoryId).Distinct().Count() stories</strong>, in @activeErrors.Length unique errors.
+                <a href="@HubUrls.Page("failures")">Triage failures →</a>
+            </div>
+        }
+
+        <div class="grid two">
+            <section class="card">
+                <header><div><h2>Pass rate</h2><p>Share of passing results in each archived run.</p></div><a class="btn btn-small" href="@HubUrls.Page("runs")">All runs</a></header>
+                <div class="body">
+                    @if (trend.Count == 0)
+                    {
+                        <p class="muted">No archived runs yet.</p>
+                    }
+                    else
+                    {
+                        <TrendChart Labels="@trend.Select(t => t.At.ToLocalTime().ToString("MMM d", CultureInfo.InvariantCulture)).ToArray()" Series="@([new ChartSeries("Pass rate", "pass", trend.Select(t => t.PassRate).ToArray())])" Max="1" Min="@Math.Max(0, Math.Floor((trend.Min(t => t.PassRate) - 0.05) * 20) / 20)" Percent="true" Area="true" Caption="Pass rate per run" />
+                        <div style="margin-top:10px"><RunBars Runs="@trend" /></div>
+                        <div class="legend" style="margin-top:6px"><span class="passed">passed</span><span class="flaky">flaky</span><span class="quarantined">quarantined</span><span class="failed">failed</span></div>
+                    }
+                </div>
+            </section>
+            <section class="card">
+                <header><div><h2>Suite duration</h2><p>Sum of story durations per run, and how many results failed.</p></div></header>
+                <div class="body">
+                    @if (trend.Count == 0)
+                    {
+                        <p class="muted">No archived runs yet.</p>
+                    }
+                    else
+                    {
+                        <TrendChart Labels="@trend.Select(t => t.At.ToLocalTime().ToString("MMM d", CultureInfo.InvariantCulture)).ToArray()" Series="@([new ChartSeries("Duration", "accent", trend.Select(t => t.DurationMilliseconds).ToArray())])" Milliseconds="true" Area="true" Caption="Suite duration per run" />
+                        <TrendChart Labels="@trend.Select(t => t.At.ToLocalTime().ToString("MMM d", CultureInfo.InvariantCulture)).ToArray()" Series="@([new ChartSeries("Failed", "fail", trend.Select(t => (double)t.Failed).ToArray()), new ChartSeries("Flaky", "flaky", trend.Select(t => (double)t.Flaky).ToArray())])" Height="120" Caption="Failed and flaky results per run" />
+                    }
+                </div>
+            </section>
+
+            <section class="card">
+                <header><div><h2>Unique errors</h2><p>Failures grouped by normalized message: one problem, however many cells it breaks.</p></div><a class="btn btn-small" href="@HubUrls.Page("failures")">All</a></header>
+                <div class="body flush">
+                    @if (activeErrors.Length == 0)
+                    {
+                        <div class="empty"><strong>No active errors</strong>The latest run has no failures.</div>
+                    }
+                    else
+                    {
+                        <table class="table">
+                            <tbody>
+                                @foreach (var cluster in activeErrors.Take(6))
+                                {
+                                    <tr>
+                                        <td><span class="badge fail">@FailureAnalysis.Explain(cluster.Category).Label</span></td>
+                                        <td class="wrap-anywhere"><a href="@HubUrls.Page("failures#" + cluster.Signature)">@Fmt.FirstLine(cluster.Message, 120)</a><div class="muted small">@cluster.Stories.Count stories · @cluster.Keys.Count cells · since @Fmt.Ago(cluster.FirstSeen)</div></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </section>
+            <section class="card">
+                <header><div><h2>Least stable</h2><p>Broken, failing and flaky results over the last @Data.Window runs.</p></div><a class="btn btn-small" href="@HubUrls.Page("flaky")">Flaky &amp; quarantine</a></header>
+                <div class="body flush">
+                    @if (unstable.Length == 0)
+                    {
+                        <div class="empty"><strong>Everything is stable</strong>No flaky, failing or broken results in the window.</div>
+                    }
+                    else
+                    {
+                        <table class="table">
+                            <tbody>
+                                @foreach (var key in unstable.Take(8))
+                                {
+                                    <tr>
+                                        <td><StabilityBadge Status="key.Status" /></td>
+                                        <td class="title-cell"><a href="@HubUrls.Result(key.Key)"><strong>@key.Last.Name</strong></a><span class="muted small">@key.Last.Title · @Fmt.Cell(key.Last.Driver, key.Last.HostingModel, key.Last.Viewport, key.Last.Theme)</span></td>
+                                        <td><HistoryStrip Points="key.Points" Max="20" /></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </section>
+
+            <section class="card">
+                <header><div><h2>Render modes × drivers</h2><p>Latest results per driver and render mode: the cross-hosting matrix.</p></div><a class="btn btn-small" href="@HubUrls.Page("tests?view=matrix")">Matrix</a></header>
+                <div class="body flush scroll-x">
+                    <table class="table">
+                        <thead><tr><th>Driver</th>@foreach (var mode in Modes) { <th>@Fmt.Mode(mode)</th> }</tr></thead>
+                        <tbody>
+                            @foreach (var driver in Data.Results.Select(r => r.Driver).Distinct().Order(StringComparer.Ordinal))
+                            {
+                                <tr>
+                                    <th scope="row">@driver</th>
+                                    @foreach (var mode in Modes)
+                                    {
+                                        var cell = Data.Results.Where(r => r.Driver == driver && (r.HostingModel ?? string.Empty) == mode).ToArray();
+                                        <td>
+                                            @if (cell.Length == 0)
+                                            {
+                                                <span class="faint">—</span>
+                                            }
+                                            else
+                                            {
+                                                <OutcomeBar Passed="@cell.Count(r => r.Outcome == StoryOutcome.Passed)" Failed="@cell.Count(r => r.IsBlockingFailure)" Flaky="@cell.Count(r => r.Outcome == StoryOutcome.Flaky)" Quarantined="@cell.Count(r => r.Outcome == StoryOutcome.Failed && r.Quarantine is not null)" Skipped="@cell.Count(r => r.Outcome == StoryOutcome.Skipped)" />
+                                                <div class="muted small">@cell.Count(r => r.IsSuccess)/@cell.Length</div>
+                                            }
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            <section class="card">
+                <header><div><h2>Needs a decision</h2><p>Changes waiting for a person.</p></div></header>
+                <div class="body stack">
+                    <div class="spread"><span>Visual changes to accept or reject</span><a class="btn btn-small" href="@HubUrls.Page("visual")">@visualChanges</a></div>
+                    <div class="spread"><span>New accessibility violations since the previous run</span><a class="btn btn-small" href="@HubUrls.Page("accessibility")">@a11yDelta.Count(d => d.Change == ViolationChange.New)</a></div>
+                    <div class="spread"><span>Manual accessibility reviews that are stale or missing</span><a class="btn btn-small" href="@HubUrls.Page("coverage#reviews")">@(Data.ReviewGate?.Entries.Count(e => e.State is not ReviewGateState.Approved) ?? 0)</a></div>
+                    <div class="spread"><span>Quarantine entries expiring within 14 days</span><a class="btn btn-small" href="@HubUrls.Page("flaky")">@Data.Quarantine.Entries.Count(e => e.Expires is { } x && x <= DateOnly.FromDateTime(DateTime.UtcNow.AddDays(14)))</a></div>
+                    <div class="spread"><span>Stories slower than their usual time</span><a class="btn btn-small" href="@HubUrls.Page("performance")">@Data.Stability.Count(s => s.Tags.Contains(ResultTag.Slower))</a></div>
+                </div>
+            </section>
+        </div>
+    }
+}
+
+@code {
+    private IEnumerable<string> Modes => Data.Results.Select(r => r.HostingModel ?? string.Empty).Distinct()
+        .OrderBy(m => m switch { "" or "memory" => 0, "ssr" => 1, "server" => 2, "wasm" => 3, "auto" => 4, _ => 5 });
+}

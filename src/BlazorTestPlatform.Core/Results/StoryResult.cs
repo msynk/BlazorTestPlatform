@@ -83,6 +83,15 @@ public sealed record VisualResult
     /// <summary>The browser build that took the screenshot, when known.</summary>
     public string? BrowserVersion { get; init; }
 
+    /// <summary>
+    /// Shape of the change, for grouping: equal fingerprints are the same change (the same region changed in the same
+    /// way), so one review decision can cover every snapshot that shares it. Null when nothing differs.
+    /// </summary>
+    public string? DiffFingerprint { get; init; }
+
+    /// <summary>Bounding box of the differing pixels (x, y, width, height), for zooming a review to the change.</summary>
+    public IReadOnlyList<int>? DiffBounds { get; init; }
+
     /// <summary>True for statuses that fail the build.</summary>
     public bool IsFailure => Status is VisualStatus.Mismatched or VisualStatus.SizeMismatch or VisualStatus.MissingBaseline;
 }
@@ -255,8 +264,17 @@ public sealed record StoryResult
     /// <summary>Final markup (truncated) for diagnostics.</summary>
     public string? Markup { get; init; }
 
+    /// <summary>
+    /// The quarantine entry that covered this failed run: it still failed, but it does not fail the build (see
+    /// <see cref="QuarantineList"/>). Null for runs that passed or were not quarantined.
+    /// </summary>
+    public QuarantineEntry? Quarantine { get; init; }
+
     /// <summary>True for passing outcomes (passed or flaky).</summary>
     public bool IsSuccess => Outcome is StoryOutcome.Passed or StoryOutcome.Flaky;
+
+    /// <summary>True for a failure that fails the build: failed and not quarantined.</summary>
+    public bool IsBlockingFailure => Outcome == StoryOutcome.Failed && Quarantine is null;
 
     /// <summary>Builds a run key.</summary>
     public static string CreateKey(string storyId, string driver, string? viewport = null, string? theme = null, string? hostingModel = null) =>

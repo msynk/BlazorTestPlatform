@@ -1,0 +1,9 @@
+@foreach (var tag in Items)
+{
+    <span class="tag @Fmt.TagTone(tag)">@Fmt.Tag(tag)</span>
+}
+
+@code {
+    /// <summary>Tags.</summary>
+    [Parameter] public IReadOnlyList<ResultTag> Items { get; set; } = [];
+}

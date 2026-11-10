@@ -1,0 +1,33 @@
+@* One stacked bar per run (passed, flaky, quarantined, failed), linking to the run. *@
+@{
+    var runs = Runs.TakeLast(Max).ToArray();
+    const double W = 640, H = 120, Gap = 3;
+    var width = runs.Length == 0 ? 0 : (W - Gap * (runs.Length - 1)) / runs.Length;
+    var max = Math.Max(1, runs.Select(r => r.Total - r.Skipped).DefaultIfEmpty(1).Max());
+    string P(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+}
+<svg class="chart" viewBox="0 0 @P(W) @P(H)" role="img" aria-label="Outcomes of the last @runs.Length runs">
+    @for (var i = 0; i < runs.Length; i++)
+    {
+        var run = runs[i];
+        var x = i * (width + Gap);
+        var y = H;
+        <a href="@HubUrls.Run(run.RunId)">
+            <title>@run.RunId · @Fmt.When(run.At) · @run.Passed passed, @run.Flaky flaky, @run.Quarantined quarantined, @run.Failed failed</title>
+            @foreach (var (value, css) in new[] { (run.Passed, "pass-fill"), (run.Flaky, "flaky-fill"), (run.Quarantined, "quar-fill"), (run.Failed, "fail-fill") })
+            {
+                var height = H * value / max;
+                y -= height;
+                <rect class="@css" x="@P(x)" y="@P(y)" width="@P(Math.Max(1, width))" height="@P(height)" rx="1" />
+            }
+        </a>
+    }
+</svg>
+
+@code {
+    /// <summary>Runs, oldest first.</summary>
+    [Parameter] public IReadOnlyList<RunTrendPoint> Runs { get; set; } = [];
+
+    /// <summary>Most runs shown.</summary>
+    [Parameter] public int Max { get; set; } = 40;
+}

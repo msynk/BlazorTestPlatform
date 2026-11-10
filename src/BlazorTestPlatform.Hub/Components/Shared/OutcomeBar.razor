@@ -1,0 +1,29 @@
+@{
+    var total = Math.Max(1, Passed + Failed + Flaky + Quarantined + Skipped);
+}
+<span class="outcomes" role="img" aria-label="@($"{Passed} passed, {Failed} failed, {Flaky} flaky, {Quarantined} quarantined, {Skipped} skipped")">
+    <span class="p" style="width:@Width(Passed, total)"></span>
+    <span class="k" style="width:@Width(Flaky, total)"></span>
+    <span class="q" style="width:@Width(Quarantined, total)"></span>
+    <span class="f" style="width:@Width(Failed, total)"></span>
+    <span class="s" style="width:@Width(Skipped, total)"></span>
+</span>
+
+@code {
+    /// <summary>Passed.</summary>
+    [Parameter] public int Passed { get; set; }
+
+    /// <summary>Failed (blocking).</summary>
+    [Parameter] public int Failed { get; set; }
+
+    /// <summary>Flaky.</summary>
+    [Parameter] public int Flaky { get; set; }
+
+    /// <summary>Quarantined failures.</summary>
+    [Parameter] public int Quarantined { get; set; }
+
+    /// <summary>Skipped.</summary>
+    [Parameter] public int Skipped { get; set; }
+
+    private static string Width(int value, int total) => (100.0 * value / total).ToString("0.###", CultureInfo.InvariantCulture) + "%";
+}

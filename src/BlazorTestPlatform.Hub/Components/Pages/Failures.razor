@@ -1,0 +1,90 @@
+@page "/_btp/failures"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var clusters = Data.Clusters.Where(c => All || c.Active).ToArray();
+    var latestFailures = Data.Results.Where(r => r.Outcome == StoryOutcome.Failed).ToArray();
+    var unarchived = latestFailures.Where(r => !Data.Clusters.Any(c => c.Keys.Contains(r.Key))).GroupBy(r => FailureAnalysis.Signature(r)!).ToArray();
+
+    <PageHeader Title="Failures" Description="Failures grouped by a normalized error signature, so one broken service, selector or style shows up as one problem, with every story and cell it breaks. Categories come from the evidence on each result; nothing is guessed by a model.">
+        <a class="btn @(All ? null : "btn-primary")" href="@HubUrls.Page("failures")">Active</a>
+        <a class="btn @(All ? "btn-primary" : null)" href="@HubUrls.Page("failures?all=1")">All in window</a>
+    </PageHeader>
+
+    <dl class="grid tiles" style="margin:0 0 16px">
+        <div class="tile fail"><dt>Unique errors now</dt><dd>@Data.Clusters.Count(c => c.Active)</dd></div>
+        <div class="tile"><dt>Failing results</dt><dd>@latestFailures.Length</dd><div class="delta">@latestFailures.Count(r => r.Quarantine is not null) quarantined</div></div>
+        @foreach (var group in Data.Clusters.Where(c => c.Active).GroupBy(c => c.Category).OrderByDescending(g => g.Count()).Take(4))
+        {
+            <div class="tile"><dt>@FailureAnalysis.Explain(group.Key).Label</dt><dd>@group.Count()</dd><div class="delta">@(FailureAnalysis.Explain(group.Key).IsProductIssue ? "usually the component" : "usually the test or machine")</div></div>
+        }
+    </dl>
+
+    @if (clusters.Length == 0 && unarchived.Length == 0)
+    {
+        <div class="card empty"><strong>No failures</strong>@(All ? "No failures in the analysed runs." : "The latest run has no failures.")</div>
+    }
+
+    <div class="stack">
+        @foreach (var cluster in clusters)
+        {
+            var explanation = FailureAnalysis.Explain(cluster.Category);
+            <section class="card" id="@cluster.Signature">
+                <header>
+                    <div>
+                        <h2><span class="badge fail">@explanation.Label</span> @Fmt.FirstLine(cluster.Message, 110)</h2>
+                        <p>@cluster.Stories.Count stories · @cluster.Keys.Count cells · @cluster.Occurrences failures in @cluster.Runs runs · first seen @Fmt.Ago(cluster.FirstSeen) · last seen @Fmt.Ago(cluster.LastSeen) @(cluster.Active ? null : "· not in the latest run")</p>
+                    </div>
+                    <span class="chip mono" title="Signature">@cluster.Signature</span>
+                </header>
+                <div class="body stack">
+                    <div class="error-box">@cluster.Message</div>
+                    <div class="grid">
+                        <div><strong>Likely cause.</strong> <span class="muted">@explanation.LikelyCause</span></div>
+                        <div><strong>Next step.</strong> <span class="muted">@explanation.NextStep</span></div>
+                    </div>
+                    <div class="row">
+                        @foreach (var driver in cluster.Drivers) { <span class="chip">@driver</span> }
+                        @foreach (var mode in cluster.HostingModels) { <span class="chip">@Fmt.Mode(mode == "in-memory" ? null : mode)</span> }
+                    </div>
+                    <details class="more" open="@(cluster.Keys.Count <= 6)">
+                        <summary>Affected cells (@cluster.Keys.Count)</summary>
+                        <ul class="small">
+                            @foreach (var key in cluster.Keys.Take(100))
+                            {
+                                <li><a href="@HubUrls.Result(key)" class="mono wrap-anywhere">@key</a></li>
+                            }
+                        </ul>
+                    </details>
+                </div>
+            </section>
+        }
+
+        @if (!All && unarchived.Length > 0)
+        {
+            <section class="card">
+                <header><div><h2>Not archived yet</h2><p>Failures in the results directory that no archived run contains (run <code>btp report --archive</code> to track them over time).</p></div></header>
+                <div class="body flush">
+                    <table class="table">
+                        <tbody>
+                            @foreach (var group in unarchived)
+                            {
+                                var first = group.First();
+                                <tr><td><span class="badge fail">@FailureAnalysis.Explain(FailureAnalysis.Categorize(first)).Label</span></td><td class="wrap-anywhere">@Fmt.FirstLine(first.Error, 140)<div class="small">@foreach (var r in group.Take(8)) { <a class="mono" href="@HubUrls.Result(r.Key)">@r.Key</a><br /> }</div></td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>Show clusters that are no longer active too.</summary>
+    [SupplyParameterFromQuery(Name = "all")] public string? AllQuery { get; set; }
+
+    private bool All => AllQuery is "1" or "true";
+}

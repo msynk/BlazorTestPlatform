@@ -1,0 +1,136 @@
+@page "/_btp/performance"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var measured = Data.Results.Where(r => r.Performance is not null).OrderByDescending(r => r.Performance!.AllocatedBytes).ToArray();
+    var browser = Data.Results.Where(r => r.BrowserMetrics is not null).OrderByDescending(r => r.BrowserMetrics!.DomNodes).ToArray();
+    var slowest = Data.Results.Where(r => r.Outcome != StoryOutcome.Skipped).OrderByDescending(r => r.DurationMilliseconds).Take(12).ToArray();
+    var slower = Data.Stability.Where(s => s.Tags.Contains(ResultTag.Slower)).ToArray();
+    var focus = Key ?? measured.FirstOrDefault()?.Key ?? slowest.FirstOrDefault()?.Key;
+    var history = focus is null ? null : Data.StabilityOf(focus);
+    var points = focus is null ? [] : Data.History.Runs.Select(run => (Run: run, Result: run.Results.FirstOrDefault(r => r.Key == focus))).Where(x => x.Result is { Outcome: not StoryOutcome.Skipped }).ToArray();
+
+    <PageHeader Title="Performance" Description="Render budgets and baselines measured in memory (render counts, allocations, time), runtime budgets from real browsers (layout shift, largest contentful paint, long tasks, DOM size), and duration trends from the archive." />
+
+    <dl class="grid tiles" style="margin:0 0 16px">
+        <div class="tile"><dt>Measured stories</dt><dd>@measured.Length</dd><div class="delta">with a render budget</div></div>
+        <div class="tile fail"><dt>Over budget</dt><dd>@Data.Results.Count(r => r.BudgetViolations.Count > 0)</dd></div>
+        <div class="tile flaky"><dt>Regressions vs baseline</dt><dd>@Data.Results.Count(r => r.PerformanceComparison?.HasFailures == true)</dd></div>
+        <div class="tile"><dt>Slower than usual</dt><dd>@slower.Length</dd><div class="delta">&gt; 1.5× median</div></div>
+        <div class="tile"><dt>Browser metrics</dt><dd>@browser.Length</dd><div class="delta">real-browser cells</div></div>
+    </dl>
+
+    @if (focus is not null && points.Length > 0)
+    {
+        var first = points[^1].Result!;
+        <section class="card" style="margin-bottom:16px">
+            <header><div><h2>Trend: @first.Title / @first.Name</h2><p>@Fmt.Cell(first.Driver, first.HostingModel, first.Viewport, first.Theme) · pick another story in the tables below</p></div><a class="btn btn-small" href="@HubUrls.Result(focus)">Result</a></header>
+            <div class="body grid two">
+                <TrendChart Labels="@points.Select(p => p.Run.Run.FinishedAt.ToLocalTime().ToString("MMM d", CultureInfo.InvariantCulture)).ToArray()" Series="@([new ChartSeries("Duration", "accent", points.Select(p => p.Result!.DurationMilliseconds).ToArray())])" Milliseconds="true" Area="true" ShowLegend="true" Caption="Duration per run" />
+                @if (points.Any(p => p.Result!.Render is not null))
+                {
+                    <TrendChart Labels="@points.Select(p => p.Run.Run.FinishedAt.ToLocalTime().ToString("MMM d", CultureInfo.InvariantCulture)).ToArray()" Series="@([new ChartSeries("Allocated KB", "flaky", points.Select(p => (p.Result!.Render?.AllocatedBytes ?? 0) / 1024.0).ToArray()), new ChartSeries("Total renders", "accent", points.Select(p => (double)(p.Result!.Render?.TotalRenderCount ?? 0)).ToArray())])" Caption="Render metrics per run" />
+                }
+            </div>
+        </section>
+    }
+
+    <section class="card" style="margin-bottom:16px">
+        <header><div><h2>Render budgets (bUnit)</h2><p>Median of render and play; allocations of the initial render. Baselines live in <code>__baselines__/performance.json</code>; accept intended changes with <code>btp perf approve</code>.</p></div></header>
+        <div class="body flush scroll-x">
+            <table class="table">
+                <thead><tr><th>Story</th><th class="num">Root renders</th><th class="num">Total renders</th><th class="num">Allocated</th><th class="num">Median</th><th>Baseline</th><th>Budget</th></tr></thead>
+                <tbody>
+                    @foreach (var r in measured)
+                    {
+                        var m = r.Performance!;
+                        <tr>
+                            <td class="title-cell"><a href="@HubUrls.Page("performance?key=" + Uri.EscapeDataString(r.Key))"><strong>@r.Name</strong></a><span class="muted small">@r.Title</span></td>
+                            <td class="num">@m.RootRenderCount</td>
+                            <td class="num">@m.TotalRenderCount</td>
+                            <td class="num">@Fmt.Bytes(m.AllocatedBytes)</td>
+                            <td class="num">@Fmt.Duration(m.MedianMilliseconds)</td>
+                            <td>
+                                @if (r.PerformanceComparison is not { } comparison)
+                                {
+                                    <span class="muted small">no baseline</span>
+                                }
+                                else if (comparison.HasFailures)
+                                {
+                                    <span class="badge fail">regression</span>
+                                }
+                                else if (comparison.Changes.Any(c => c.IsRegression))
+                                {
+                                    <span class="badge flaky">slower</span>
+                                }
+                                else
+                                {
+                                    <span class="badge pass">within baseline</span>
+                                }
+                            </td>
+                            <td>@if (r.BudgetViolations.Count > 0) { <span class="badge fail" title="@string.Join("; ", r.BudgetViolations)">@r.BudgetViolations.Count over</span> } else { <span class="badge pass">ok</span> }</td>
+                        </tr>
+                    }
+                    @if (measured.Length == 0)
+                    {
+                        <tr><td colspan="7" class="muted">No story declares Performance(...) in the latest results.</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <div class="grid two">
+        <section class="card">
+            <header><div><h2>Browser runtime</h2><p>Per cell; n/a where the browser does not report the metric (never 0).</p></div></header>
+            <div class="body flush scroll-x">
+                <table class="table">
+                    <thead><tr><th>Story</th><th class="num">CLS</th><th class="num">LCP</th><th class="num">Long tasks</th><th class="num">DOM</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in browser.Take(30))
+                        {
+                            var b = r.BrowserMetrics!;
+                            <tr>
+                                <td class="title-cell"><a href="@HubUrls.Result(r.Key)"><strong>@r.Name</strong></a><span class="muted small">@Fmt.Cell(r.Driver, r.HostingModel, r.Viewport, r.Theme)</span></td>
+                                <td class="num">@(b.CumulativeLayoutShift?.ToString("0.###", CultureInfo.InvariantCulture) ?? "n/a")</td>
+                                <td class="num">@(b.LargestContentfulPaintMilliseconds is { } lcp ? Fmt.Duration(lcp) : "n/a")</td>
+                                <td class="num">@(b.LongTasks?.ToString(CultureInfo.InvariantCulture) ?? "n/a")</td>
+                                <td class="num">@b.DomNodes</td>
+                            </tr>
+                        }
+                        @if (browser.Length == 0)
+                        {
+                            <tr><td colspan="5" class="muted">No real-browser results yet.</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        <section class="card">
+            <header><div><h2>Slowest results</h2><p>Longest runs in the latest results, with their usual time.</p></div></header>
+            <div class="body flush scroll-x">
+                <table class="table">
+                    <thead><tr><th>Story</th><th class="num">Last</th><th class="num">Median</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in slowest)
+                        {
+                            var s = Data.StabilityOf(r.Key);
+                            <tr>
+                                <td class="title-cell"><a href="@HubUrls.Page("performance?key=" + Uri.EscapeDataString(r.Key))"><strong>@r.Name</strong></a><span class="muted small">@Fmt.Cell(r.Driver, r.HostingModel, r.Viewport, r.Theme)</span>@if (s?.Tags.Contains(ResultTag.Slower) == true) { <span class="tag warn">slower</span> }</td>
+                                <td class="num">@Fmt.Duration(r.DurationMilliseconds)</td>
+                                <td class="num">@(s?.MedianDurationMilliseconds is { } median ? Fmt.Duration(median) : "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    /// <summary>Result key to chart.</summary>
+    [SupplyParameterFromQuery(Name = "key")] public string? Key { get; set; }
+}

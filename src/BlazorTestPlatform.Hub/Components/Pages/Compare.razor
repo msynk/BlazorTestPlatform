@@ -1,0 +1,113 @@
+@page "/_btp/compare"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var runs = Data.History.Runs;
+    <PageHeader Title="Compare runs" Description="What changed between two runs: new failures, failures that persist, fixes, new flakes, added and removed results, and big slowdowns. Pick a base (main) and a head (your branch)." />
+
+    @if (runs.Count < 2)
+    {
+        <div class="card empty"><strong>Two runs are needed</strong>Archive at least two runs to compare them.</div>
+    }
+    else
+    {
+        var head = (HeadId is null ? null : Data.History.Find(HeadId)) ?? runs[^1];
+        var baseRun = (BaseId is null ? null : Data.History.Find(BaseId)) ?? runs.TakeWhile(r => r != head).LastOrDefault() ?? runs[0];
+        var comparison = RunHistory.Compare(baseRun, head);
+        var sections = new (string Title, IReadOnlyList<ComparedResult> Items, string Note)[]
+        {
+            ("New failures", comparison.NewFailures, "Failed in head, did not fail in base: start here."),
+            ("Still failing", comparison.StillFailing, "Failed in both runs."),
+            ("Fixed", comparison.Fixed, "Failed in base, passes in head."),
+            ("New flaky", comparison.NewFlaky, "Passed only on retry in head."),
+            ("Slower", comparison.Slower, "More than 1.5× as long and 100 ms longer."),
+            ("Added", comparison.Added, "Results only in head."),
+            ("Removed", comparison.Removed, "Results only in base."),
+        };
+
+        <form class="filters" method="get">
+            <div class="field">
+                <label for="base">Base</label>
+                <select id="base" name="base">
+                    @foreach (var run in runs.Reverse())
+                    {
+                        <option value="@run.Run.RunId" selected="@(run == baseRun)">@Label(run)</option>
+                    }
+                </select>
+            </div>
+            <div class="field">
+                <label for="head">Head</label>
+                <select id="head" name="head">
+                    @foreach (var run in runs.Reverse())
+                    {
+                        <option value="@run.Run.RunId" selected="@(run == head)">@Label(run)</option>
+                    }
+                </select>
+            </div>
+            <button class="btn" type="submit">Compare</button>
+        </form>
+
+        <dl class="grid tiles" style="margin:0 0 16px">
+            <div class="tile fail"><dt>New failures</dt><dd>@comparison.NewFailures.Count</dd></div>
+            <div class="tile fail"><dt>Still failing</dt><dd>@comparison.StillFailing.Count</dd></div>
+            <div class="tile pass"><dt>Fixed</dt><dd>@comparison.Fixed.Count</dd></div>
+            <div class="tile flaky"><dt>New flaky</dt><dd>@comparison.NewFlaky.Count</dd></div>
+            <div class="tile"><dt>Added</dt><dd>@comparison.Added.Count</dd></div>
+            <div class="tile"><dt>Removed</dt><dd>@comparison.Removed.Count</dd></div>
+            <div class="tile"><dt>Slower</dt><dd>@comparison.Slower.Count</dd></div>
+            <div class="tile"><dt>Pass rate</dt><dd>@Fmt.Percent(head.PassRate, 1)</dd><div class="delta">@Delta(head.PassRate - baseRun.PassRate)</div></div>
+        </dl>
+
+        <div class="stack">
+            @foreach (var section in sections.Where(s => s.Items.Count > 0))
+            {
+                <section class="card">
+                    <header><div><h2>@section.Title <span class="muted">@section.Items.Count</span></h2><p>@section.Note</p></div></header>
+                    <div class="body flush scroll-x">
+                        <table class="table">
+                            <thead><tr><th>Story</th><th>Cell</th><th>Base</th><th>Head</th><th class="num">Duration</th></tr></thead>
+                            <tbody>
+                                @foreach (var item in section.Items.Take(200))
+                                {
+                                    var r = item.Latest;
+                                    <tr>
+                                        <td class="title-cell"><a href="@HubUrls.Result(r.Key)"><strong>@r.Name</strong></a><span class="muted small">@r.Title</span></td>
+                                        <td class="small">@Fmt.Cell(r.Driver, r.HostingModel, r.Viewport, r.Theme)</td>
+                                        <td><OutcomeBadge Outcome="item.Base?.Outcome" Quarantined="@(item.Base?.Quarantine is not null)" /></td>
+                                        <td>
+                                            <OutcomeBadge Outcome="item.Head?.Outcome" Quarantined="@(item.Head?.Quarantine is not null)" />
+                                            @if (item.Head is { Outcome: StoryOutcome.Failed } failed)
+                                            {
+                                                <div class="small muted wrap-anywhere">@Fmt.FirstLine(failed.Error, 120)</div>
+                                            }
+                                        </td>
+                                        <td class="num">@(item.Base is null ? "—" : Fmt.Duration(item.Base.DurationMilliseconds)) → @(item.Head is null ? "—" : Fmt.Duration(item.Head.DurationMilliseconds))</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            }
+        </div>
+    }
+}
+
+@code {
+    /// <summary>Base run.</summary>
+    [SupplyParameterFromQuery(Name = "base")] public string? BaseId { get; set; }
+
+    /// <summary>Head run.</summary>
+    [SupplyParameterFromQuery(Name = "head")] public string? HeadId { get; set; }
+
+    private static string Label(RunRecord run) => $"{Fmt.When(run.Run.FinishedAt)} · {run.Run.Label ?? run.Run.RunId} · {run.Failed} failed";
+
+    private static string Delta(double value) => value switch
+    {
+        > 0.0005 => "+" + Fmt.Percent(value, 1) + " vs base",
+        < -0.0005 => Fmt.Percent(value, 1) + " vs base",
+        _ => "same as base",
+    };
+}

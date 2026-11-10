@@ -1,0 +1,99 @@
+@page "/_btp/readiness"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var gates = Gates().ToArray();
+    var verdict = gates.Any(g => g.State == "bad") ? "Not ready" : gates.Any(g => g.State == "warn") ? "Ready, with warnings" : "Ready";
+
+    <PageHeader Title="Release readiness" Description="Every quality gate in one place: what blocks a release, what deserves a look, and what is fine. Computed from the latest results, the run history, quarantine.json, the reviews and the baselines." />
+
+    <section class="card" style="margin-bottom:16px">
+        <div class="body spread">
+            <div>
+                <h2 style="font-size:24px">@verdict</h2>
+                <p class="muted">@gates.Count(g => g.State == "ok") of @gates.Length gates pass · @gates.Count(g => g.State == "bad") blocking · @gates.Count(g => g.State == "warn") warnings</p>
+            </div>
+            <span class="badge @(verdict == "Ready" ? "pass" : verdict == "Not ready" ? "fail" : "flaky")" style="font-size:14px;padding:6px 14px">@verdict</span>
+        </div>
+    </section>
+
+    <div class="gates">
+        @foreach (var gate in gates)
+        {
+            <div class="gate @gate.State">
+                <span class="icon" aria-hidden="true">@(gate.State == "ok" ? "✓" : gate.State == "warn" ? "!" : "✗")</span>
+                <div><strong>@gate.Title</strong><div class="muted small">@gate.Detail</div></div>
+                @if (gate.Link is { } link)
+                {
+                    <a class="btn btn-small" href="@link">Open</a>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private sealed record Gate(string Title, string State, string Detail, string? Link);
+
+    private IEnumerable<Gate> Gates()
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var summary = Data.Summary;
+        yield return summary.Total == 0
+            ? new Gate("Test results", "bad", "No results in the results directory.", HubUrls.Page("live"))
+            : summary.Failed == 0
+                ? new Gate("No blocking failures", "ok", $"{summary.Total} results, {summary.Passed + summary.Flaky} passing, {summary.Quarantined} quarantined.", HubUrls.Page("tests"))
+                : new Gate("Blocking failures", "bad", $"{summary.Failed} results fail in {Data.Clusters.Count(c => c.Active)} unique errors.", HubUrls.Page("failures"));
+        if (Data.Unreadable.Count > 0)
+        {
+            yield return new Gate("Unreadable results", "bad", $"{Data.Unreadable.Count} result files could not be read; they may hide failures.", null);
+        }
+
+        var visual = Data.Results.Where(r => r.Visual is { IsFailure: true }).Select(r => r.Visual!.SnapshotName).Distinct().Count();
+        yield return visual == 0
+            ? new Gate("Visual baselines", "ok", "Every snapshot matches its baseline.", HubUrls.Page("visual"))
+            : new Gate("Visual changes to review", "bad", $"{visual} snapshots differ from their baselines or have none.", HubUrls.Page("visual"));
+
+        var a11y = Data.Results.Count(r => r.AccessibilityFailures.Count > 0);
+        IReadOnlyList<ViolationDelta> delta = Data.History.Latest is { } latest ? RunHistory.AccessibilityDelta(Data.History.Previous, latest) : [];
+        var fresh = delta.Count(d => d.Change == ViolationChange.New);
+        yield return a11y > 0
+            ? new Gate("Accessibility gate", "bad", $"{a11y} results have violations at or above {Data.Settings.Accessibility.FailOn}.", HubUrls.Page("accessibility"))
+            : fresh > 0
+                ? new Gate("New accessibility findings", "warn", $"{fresh} violations below the gate's threshold appeared since the previous run.", HubUrls.Page("accessibility"))
+                : new Gate("Accessibility gate", "ok", "No violations at or above the policy's threshold.", HubUrls.Page("accessibility"));
+
+        var reviews = Data.ReviewGate?.Entries ?? [];
+        var stale = reviews.Count(e => e.State is ReviewGateState.Stale or ReviewGateState.Failed);
+        yield return Data.ReviewGate is null
+            ? new Gate("Manual accessibility reviews", "warn", "The review gate has not run (AccessibilityReviews.VerifyAsync in a test).", HubUrls.Page("coverage#reviews"))
+            : stale > 0
+                ? new Gate("Manual accessibility reviews", "bad", $"{stale} reviews are stale or record failed checks.", HubUrls.Page("coverage#reviews"))
+                : new Gate("Manual accessibility reviews", reviews.Any(e => e.State != ReviewGateState.Approved) ? "warn" : "ok", $"{reviews.Count(e => e.State == ReviewGateState.Approved)} approved, {reviews.Count(e => e.State == ReviewGateState.Missing)} missing, {reviews.Count(e => e.State == ReviewGateState.Incomplete)} incomplete.", HubUrls.Page("coverage#reviews"));
+
+        var perf = Data.Results.Count(r => r.BudgetViolations.Count > 0 || r.PerformanceComparison?.HasFailures == true);
+        yield return perf == 0
+            ? new Gate("Performance budgets", "ok", $"{Data.Results.Count(r => r.Performance is not null)} measured stories within budget and baseline.", HubUrls.Page("performance"))
+            : new Gate("Performance budgets", "bad", $"{perf} results exceed a budget or regressed against the baseline.", HubUrls.Page("performance"));
+
+        var flaky = Data.Stability.Where(s => s.Status == Stability.Flaky).ToArray();
+        yield return flaky.Length == 0
+            ? new Gate("Flakiness", "ok", $"No flaky results over {Data.History.Runs.Count} archived runs.", HubUrls.Page("flaky"))
+            : new Gate("Flakiness", flaky.Any(s => s.Severity == FlakeSeverity.High) ? "warn" : "ok", $"{flaky.Length} flaky results ({flaky.Count(s => s.Severity == FlakeSeverity.High)} high severity), {Fmt.Duration(flaky.Sum(s => s.WastedMilliseconds))} lost.", HubUrls.Page("flaky"));
+
+        var expired = Data.Quarantine.Entries.Count(e => !e.IsActive(today));
+        yield return expired > 0
+            ? new Gate("Quarantine", "warn", $"{expired} entries expired: renew them with a reason or remove them.", HubUrls.Page("flaky#quarantine"))
+            : new Gate("Quarantine", Data.Quarantine.Entries.Count > 0 ? "warn" : "ok", Data.Quarantine.Entries.Count > 0 ? $"{Data.Quarantine.Entries.Count} stories run but cannot fail the build." : "Nothing is quarantined.", HubUrls.Page("flaky#quarantine"));
+
+        yield return Data.Coverage is not { } coverage
+            ? new Gate("Story state coverage", "warn", "No coverage data.", HubUrls.Page("coverage"))
+            : new Gate("Story state coverage", coverage.Ratio >= 1 && coverage.ComponentsWithoutStories.Count == 0 ? "ok" : "warn", $"{Fmt.Percent(coverage.Ratio)} of bool and enum states have a story; {coverage.ComponentsWithoutStories.Count} components have none.", HubUrls.Page("coverage"));
+
+        yield return Data.History.Latest is not { } last
+            ? new Gate("Run history", "warn", "No archived runs: trends, stability and comparisons need btp report --archive.", HubUrls.Page("runs"))
+            : new Gate("Run history", DateTimeOffset.UtcNow - last.Run.FinishedAt > TimeSpan.FromDays(7) ? "warn" : "ok", $"{Data.History.Runs.Count} runs; the last finished {Fmt.Ago(last.Run.FinishedAt)}.", HubUrls.Page("runs"));
+    }
+}

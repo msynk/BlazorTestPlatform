@@ -1,11 +1,12 @@
 @page "/"
 @using BlazorTestPlatform
+@using BlazorTestPlatform.Hub
 @using BlazorTestPlatform.Workbench
 @using BlazorTestPlatform.Demo.Workbench
 @inject StoryCatalog Catalog
+@inject HubStore Hub
 
-@* The demo's front door: what BlazorTestPlatform does, and a guided tour that opens the workbench at the story that
-   shows each feature. Static SSR, no interactivity needed. *@
+@* The demo's front door: what the platform does end to end, and a guided tour into the hub and the workbench. *@
 <PageTitle>BlazorTestPlatform demo</PageTitle>
 <HeadContent>
     <link rel="stylesheet" href="@Assets["tour.css"]" />
@@ -14,74 +15,78 @@
 <div class="tour">
     <header class="tour-hero">
         <p class="tour-eyebrow">BlazorTestPlatform · demo</p>
-        <h1>Write a component story once.<br />Run it as every kind of test.</h1>
+        <h1>A test platform for Blazor<br />component libraries.</h1>
         <p class="tour-lead">
-            This demo is a small design system with @ComponentCount components and @Catalog.Count stories. A story is one
-            state of a component, written in C#. Each one is also a bUnit test, a real-browser interaction test in four
-            render modes and three browsers, a visual snapshot, an accessibility audit and a performance check, and you
-            can browse and run it in the workbench.
+            Write a component state once, as a C# story. Run it as a bUnit test, as a real-browser test in four render
+            modes and three browsers, as a visual snapshot, an accessibility audit and a performance check. Then review,
+            analyze and decide in one place: run history, flaky tests and quarantine, failures grouped by cause, visual
+            and accessibility review, coverage, impact analysis and release readiness.
         </p>
         <div class="tour-actions">
-            <a class="tour-button tour-button--primary" href="_workbench">Open the workbench</a>
+            <a class="tour-button tour-button--primary" href="@HubUrls.Page()">Open the test hub</a>
+            <a class="tour-button" href="_workbench">Open the workbench</a>
             <a class="tour-button" href="#tour">Take the tour</a>
-            <a class="tour-button" href="#run">Run the tests</a>
         </div>
         <dl class="tour-stats">
             <div><dt>Stories</dt><dd>@Catalog.Count</dd></div>
             <div><dt>Components</dt><dd>@ComponentCount</dd></div>
             <div><dt>Play scripts</dt><dd>@Catalog.Stories.Count(s => s.HasPlay)</dd></div>
-            <div><dt>Render modes</dt><dd>4</dd></div>
-            <div><dt>Browsers</dt><dd>3</dd></div>
+            <div><dt>Latest results</dt><dd>@Data.Results.Count</dd></div>
+            <div><dt>Archived runs</dt><dd>@Data.History.Runs.Count</dd></div>
+            <div><dt>Render modes × browsers</dt><dd>4 × 3</dd></div>
         </dl>
     </header>
 
     <section class="tour-flow" aria-labelledby="flow-title">
-        <h2 id="flow-title">One story, many tests</h2>
-        <div class="tour-flow__grid">
-            <figure class="tour-code">
-                <figcaption>ButtonStories.cs</figcaption>
-                <pre><code>stories.Add("Keyboard activation", s => s.Play(async ctx =>
-{
-    await ctx.TabAsync();
-    await ctx.Expect(ctx.GetByRole("button", "Save changes"))
-             .ToBeFocusedAsync();
-    await ctx.PressAsync(Keys.Enter);
-    await ctx.ExpectAction("OnClick")
-             .ToHaveBeenCalledAsync(times: 1);
-}));</code></pre>
-            </figure>
-            <ol class="tour-targets">
-                <li>
-                    <strong>bUnit, in milliseconds</strong>
-                    <span>Renders the story in memory and runs the play script with browser-faithful keyboard, focus and pointer behaviour, 37 accessibility rules and render budgets.</span>
-                    <code>ComponentStoryTests</code>
-                </li>
-                <li>
-                    <strong>Real browsers, every render mode</strong>
-                    <span>The same script in Chromium, Firefox and WebKit, under static SSR, Interactive Server, WebAssembly and Auto, then a visual snapshot and an axe-core scan.</span>
-                    <code>CrossHostingTests · VisualTests · CrossBrowserTests</code>
-                </li>
-                <li>
-                    <strong>The workbench, interactively</strong>
-                    <span>Browse every story across themes, viewports and render modes, edit its parameters live, run its script in the frame and record new ones.</span>
-                    <code>/_workbench</code>
-                </li>
-                <li>
-                    <strong>Reports and CI</strong>
-                    <span>An HTML report with visual diffs and timelines, JUnit, SARIF, a pull-request comment, flake history and test impact analysis.</span>
-                    <code>btp report</code>
-                </li>
-            </ol>
-        </div>
+        <h2 id="flow-title">How it fits together</h2>
+        <ol class="tour-pipeline">
+            <li>
+                <span class="tour-pipeline__step">Stories</span>
+                <strong>Author</strong>
+                <span>C# states of your components, browsable in the <a href="_workbench">workbench</a>.</span>
+            </li>
+            <li>
+                <span class="tour-pipeline__step">Drivers</span>
+                <strong>Run</strong>
+                <span>bUnit in memory · Playwright × SSR, Server, WebAssembly, Auto × Chromium, Firefox, WebKit · in the frame.</span>
+            </li>
+            <li>
+                <span class="tour-pipeline__step">Results</span>
+                <strong>Record</strong>
+                <span>Timelines, snapshots, axe scans, metrics; every run archived with its commit.</span>
+            </li>
+            <li>
+                <span class="tour-pipeline__step">Hub</span>
+                <strong>Review &amp; analyze</strong>
+                <span>Trends, stability, unique errors, visual and accessibility review in the <a href="@HubUrls.Page()">test hub</a>.</span>
+            </li>
+            <li>
+                <span class="tour-pipeline__step">CI</span>
+                <strong>Ship</strong>
+                <span>Readiness verdict, JUnit, SARIF, a pull-request comment and a JSON API.</span>
+            </li>
+        </ol>
+        @if (Data.History.Runs.Count > 0)
+        {
+            <p class="tour-note">
+                The hub's history is real: @Data.History.Runs.Count in-memory runs of every story, recorded on this machine.
+                The <a href="@HubUrls.Page("tests?q=chaos")">Demo/Chaos</a> stories fail on purpose in some runs, so there are
+                flaky, broken, regressed and fixed results to look at.
+            </p>
+        }
+        else
+        {
+            <p class="tour-note">The hub has no run history yet. Start the demo with <code>dotnet run</code> (it seeds ten runs on first start) or start a run from <a href="@HubUrls.Page("live")">Run stories</a>.</p>
+        }
     </section>
 
     <nav id="tour" class="tour-toc" aria-label="Tour">
         <h2>The tour</h2>
-        <p>Each card says what a feature does, opens the story that shows it (▶ runs its play script in the frame), and names the code that declares it and the test that runs it.</p>
+        <p>Each card says what a feature does, opens it in the hub or the workbench (▶ runs a story's play script in the frame), and names the code that declares it and the test that runs it.</p>
         <ol>
             @foreach (var section in Tour.Sections)
             {
-                <li><a href="#@section.Id">@section.Title</a></li>
+                <li><a href="#@section.Id">@section.Step. @section.Title</a></li>
             }
         </ol>
     </nav>
@@ -89,7 +94,7 @@
     @foreach (var section in Tour.Sections)
     {
         <section id="@section.Id" class="tour-section" aria-labelledby="@($"{section.Id}-title")">
-            <h2 id="@($"{section.Id}-title")">@section.Title</h2>
+            <h2 id="@($"{section.Id}-title")"><span class="tour-step">@section.Step</span> @section.Title</h2>
             <p class="tour-section__lead">@section.Lead</p>
             <div class="tour-grid">
                 @foreach (var feature in section.Features)
@@ -97,13 +102,13 @@
                     <article class="tour-card">
                         <h3>@feature.Title</h3>
                         <p>@feature.Text</p>
-                        <ul class="tour-links" aria-label="Stories: @feature.Title">
+                        <ul class="tour-links" aria-label="@($"Open: {feature.Title}")">
                             @foreach (var link in feature.Links)
                             {
                                 <li>
-                                    @if (Catalog.TryGet(link.StoryId, out _))
+                                    @if (link.StoryId is null || Catalog.TryGet(link.StoryId, out _))
                                     {
-                                        <a href="@Href(link)">@(link.Play ? link.Label + " ▶" : link.Label)</a>
+                                        <a href="@Tour.Href(link)" class="@(link.HubPage is null ? null : "tour-link--hub")">@(link.Play ? link.Label + " ▶" : link.Label)</a>
                                     }
                                     else
                                     {
@@ -127,36 +132,21 @@
         </section>
     }
 
-    <section class="tour-section" aria-labelledby="workbench-title">
-        <h2 id="workbench-title">Around the workbench</h2>
-        <div class="tour-grid">
-            <article class="tour-card">
-                <h3>Controls</h3>
-                <p>Every parameter of a supported type gets a control. Edits re-render interactive frames in place and live in the URL, so a link reproduces exactly what you see.</p>
-                <ul class="tour-links"><li><a href="@WorkbenchUrls.Shell("inputs-button--primary")">Edit a button</a></li></ul>
-            </article>
-            <article class="tour-card">
-                <h3>Run interactions</h3>
-                <p>Runs the play script inside the frame, in the story's own Server circuit or WebAssembly runtime, and lists each step as it passes.</p>
-                <ul class="tour-links"><li><a href="@WorkbenchUrls.Shell("navigation-tabs--keyboard-navigation", autoPlay: true)">Run the tabs script ▶</a></li></ul>
-            </article>
-            <article class="tour-card">
-                <h3>Inspector and recorder</h3>
-                <p>Live actions, HTTP requests, JS calls, console and accessibility tree of the frame. <strong>Record</strong> turns what you do into a play function with readable locators.</p>
-                <ul class="tour-links"><li><a href="@WorkbenchUrls.Shell("data-todo-list--empty")">Record on the todo list</a></li></ul>
-            </article>
-            <article class="tour-card">
-                <h3>Quality gates panel</h3>
-                <p>Each story's visual options, accessibility waivers, performance budgets, render-mode limits, state coverage and its component's manual accessibility review.</p>
-                <ul class="tour-links"><li><a href="@WorkbenchUrls.Shell("display-badge--custom-brand-color")">A story with a waiver</a></li></ul>
-            </article>
-        </div>
+    <section class="tour-section" aria-labelledby="loop-title">
+        <h2 id="loop-title">Try the review loop</h2>
+        <p class="tour-section__lead">Make a real change and follow it through the platform.</p>
+        <ol class="tour-loop">
+            <li>Change a design token in <code>demo/BlazorTestPlatform.Demo.UI/wwwroot/demo.css</code>, for example <code>--c-radius: 8px</code> to <code>2px</code>.</li>
+            <li>Run the snapshots: <code>dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests -- --filter-class '*VisualTests'</code>.</li>
+            <li>Open <a href="@HubUrls.Page("visual")">Visual review</a>: identical changes are grouped; compare them with the slider or strobe, then accept or reject.</li>
+            <li>Record the run with <code>btp report --archive demo/BlazorTestPlatform.Demo.UI.Tests/.btp/runs</code> and <a href="@HubUrls.Page("compare")">compare it</a> with the previous one.</li>
+        </ol>
     </section>
 
     <section id="run" class="tour-section" aria-labelledby="run-title">
         <h2 id="run-title">Run it yourself</h2>
         <p class="tour-section__lead">From the repository root. The in-memory suite needs no browser; the browser suites need Playwright's browsers once.</p>
-        <pre class="tour-commands"><code><span class="tour-comment"># this page and the workbench</span>
+        <pre class="tour-commands"><code><span class="tour-comment"># this site: the tour, the test hub (/_btp) and the workbench (/_workbench)</span>
 dotnet run --project demo/BlazorTestPlatform.Demo.Workbench
 
 <span class="tour-comment"># every story in memory (bUnit): seconds, no browser</span>
@@ -167,14 +157,14 @@ dotnet build demo/BlazorTestPlatform.Demo.UI.Tests
 pwsh demo/BlazorTestPlatform.Demo.UI.Tests/bin/Debug/net10.0/playwright.ps1 install
 dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests
 
-<span class="tour-comment"># the HTML report: visual diffs, timelines, accessibility, performance, coverage</span>
-dotnet run --project src/BlazorTestPlatform.Cli -- report -p demo/BlazorTestPlatform.Demo.UI.Tests</code></pre>
-        <p>The guides are in <code>docs/</code>, starting with <code>docs/getting-started.md</code>; <code>demo/README.md</code> maps every feature to its story and test.</p>
+<span class="tour-comment"># add the run to the hub's history, and write the static HTML report</span>
+dotnet run --project src/BlazorTestPlatform.Cli -- report -p demo/BlazorTestPlatform.Demo.UI.Tests --archive demo/BlazorTestPlatform.Demo.UI.Tests/.btp/runs</code></pre>
+        <p>The guides are in <code>docs/</code>, starting with <code>docs/getting-started.md</code> and <code>docs/hub.md</code>; <code>demo/README.md</code> maps every feature to its story and test.</p>
     </section>
 </div>
 
 @code {
-    private int ComponentCount => Catalog.Stories.Select(s => s.ComponentType).Where(t => t.Namespace == typeof(BlazorTestPlatform.Demo.UI.Button).Namespace).Distinct().Count();
+    private HubSnapshot Data => Hub.Current;
 
-    private static string Href(TourLink link) => WorkbenchUrls.Shell(link.StoryId, hostingModel: link.Mode, autoPlay: link.Play);
+    private int ComponentCount => Catalog.Stories.Select(s => s.ComponentType).Where(t => t.Namespace == typeof(BlazorTestPlatform.Demo.UI.Button).Namespace).Distinct().Count();
 }

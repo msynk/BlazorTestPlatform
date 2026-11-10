@@ -14,8 +14,11 @@ public sealed record RunSummary
     /// <summary>Passed results.</summary>
     public int Passed => Results.Count(r => r.Outcome == StoryOutcome.Passed);
 
-    /// <summary>Failed results.</summary>
-    public int Failed => Results.Count(r => r.Outcome == StoryOutcome.Failed);
+    /// <summary>Failed results that fail the build (quarantined failures are counted in <see cref="Quarantined"/>).</summary>
+    public int Failed => Results.Count(r => r.IsBlockingFailure);
+
+    /// <summary>Failed results covered by the quarantine file: reported, but not failing the build.</summary>
+    public int Quarantined => Results.Count(r => r.Outcome == StoryOutcome.Failed && r.Quarantine is not null);
 
     /// <summary>Flaky results (passed after retry).</summary>
     public int Flaky => Results.Count(r => r.Outcome == StoryOutcome.Flaky);

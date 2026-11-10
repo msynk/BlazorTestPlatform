@@ -46,6 +46,29 @@ public sealed class BunitDriverTests
     }
 
     [Fact]
+    public async Task Quarantined_failures_are_recorded_but_do_not_fail_verify()
+    {
+        var directory = Directory.CreateTempSubdirectory("btp-quarantined-").FullName;
+        try
+        {
+            QuarantineList.From([new QuarantineEntry { Pattern = "tests-inaccessible--*", Reason = "Known a11y debt, #321" }])
+                .Save(Path.Combine(directory, QuarantineList.DefaultFileName));
+            var settings = BtpSettings.Load(directory, new Dictionary<string, string?>());
+            var options = new BunitStoryOptions { Settings = settings, WriteResults = false };
+
+            var result = await BunitStoryRunner.VerifyAsync(Catalog.Get("tests-inaccessible--default"), options, TestContext.Current.CancellationToken);
+
+            Assert.Equal(StoryOutcome.Failed, result.Outcome);
+            Assert.Equal("Known a11y debt, #321", result.Quarantine?.Reason);
+            Assert.False(result.IsBlockingFailure);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Args_set_component_parameters()
     {
         await using var session = await BunitStoryRunner.RenderAsync(Catalog.Get("tests-counter--by-five"), Options);

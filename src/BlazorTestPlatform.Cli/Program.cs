@@ -41,9 +41,11 @@ var repository = new Option<string?>("--repository") { Description = "Repository
 var reportUrl = new Option<string?>("--report-url") { Description = "Link to the published HTML report, added to the Markdown summary (default: the GitHub Actions run)." };
 var sarif = new Option<string?>("--sarif") { Description = "Also write a SARIF 2.1.0 log (accessibility violations, failures, visual and performance regressions) for code scanning." };
 var sourceRoot = new Option<string?>("--source-root") { Description = "Repository root that SARIF locations are relative to (default: the current directory)." };
+var archive = new Option<string?>("--archive") { Description = "Run archive directory to add this run to (run history for trends, stability and the hub; persist it between CI runs). Typically <project>/.btp/runs." };
+var trigger = new Option<string?>("--trigger") { Description = "What started the run, recorded in the archive (default: ci on CI, else local)." };
 var report = new Command("report", "Aggregate results into an HTML report (plus optional JUnit, Markdown, flake history and a pull-request comment).")
 {
-    results, output, junit, markdown, githubSummary, history, runId, failOnFailures, prComment, pullRequest, repository, reportUrl, sarif, sourceRoot,
+    results, output, junit, markdown, githubSummary, history, runId, failOnFailures, prComment, pullRequest, repository, reportUrl, sarif, sourceRoot, archive, trigger,
 };
 report.SetAction(async (parse, cancellationToken) =>
 {
@@ -73,6 +75,13 @@ report.SetAction(async (parse, cancellationToken) =>
         flakeHistory.Add(parse.GetValue(runId) ?? Environment.GetEnvironmentVariable("GITHUB_RUN_ID") ?? Environment.GetEnvironmentVariable("BUILD_BUILDID") ?? DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture), summary.Results);
         flakeHistory.Save(historyPath);
         flakes = flakeHistory.Analyze();
+    }
+
+    if (parse.GetValue(archive) is { } archiveDirectory)
+    {
+        var info = RunInfo.Detect(parse.GetValue(runId), parse.GetValue(trigger), settings.ProjectDirectory);
+        var archived = new RunArchive(archiveDirectory).Save(RunRecord.Create(info, summary.Results));
+        Console.WriteLine($"Run archive: {archived}");
     }
 
     var coverage = directories.Select(StoryCoverageReport.Load).OfType<StoryCoverageReport>().FirstOrDefault();
@@ -196,6 +205,77 @@ approve.SetAction(parse =>
     return failed == 0 ? 0 : 1;
 });
 root.Add(approve);
+
+// btp quarantine
+var quarantinePattern = new Argument<string>("pattern") { Description = "Story id, result key or glob (data-people-*, *|webkit|*)." };
+var quarantineReason = new Option<string>("--reason") { Description = "Why the story is quarantined.", Required = true };
+var quarantineOwner = new Option<string?>("--owner") { Description = "Who owns the fix." };
+var quarantineIssue = new Option<string?>("--issue") { Description = "Issue that tracks the fix." };
+var quarantineExpires = new Option<string?>("--expires") { Description = "Last day the quarantine applies (yyyy-MM-dd)." };
+var quarantineAdd = new Command("add", "Quarantine a story: it keeps running and reporting, but its failures stop failing the build.") { quarantinePattern, quarantineReason, quarantineOwner, quarantineIssue, quarantineExpires };
+quarantineAdd.SetAction(parse =>
+{
+    var settings = Settings(parse);
+    DateOnly? expires = null;
+    if (parse.GetValue(quarantineExpires) is { } text)
+    {
+        if (!DateOnly.TryParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
+        {
+            Console.Error.WriteLine($"--expires must be yyyy-MM-dd, not '{text}'.");
+            return 2;
+        }
+
+        expires = day;
+    }
+
+    var entry = new QuarantineEntry
+    {
+        Pattern = parse.GetValue(quarantinePattern)!,
+        Reason = parse.GetValue(quarantineReason)!,
+        Owner = parse.GetValue(quarantineOwner),
+        Issue = parse.GetValue(quarantineIssue),
+        Expires = expires,
+        Added = DateTimeOffset.UtcNow,
+    };
+    settings.Quarantine.With(entry).Save(settings.QuarantineFilePath);
+    Console.WriteLine($"Quarantined {entry.Pattern} in {settings.QuarantineFilePath}. Commit the file.");
+    return 0;
+});
+var quarantineRemove = new Command("remove", "Release a story from quarantine.") { quarantinePattern };
+quarantineRemove.SetAction(parse =>
+{
+    var settings = Settings(parse);
+    var pattern = parse.GetValue(quarantinePattern)!;
+    if (!settings.Quarantine.Entries.Any(e => string.Equals(e.Pattern, pattern, StringComparison.OrdinalIgnoreCase)))
+    {
+        Console.Error.WriteLine($"'{pattern}' is not quarantined.");
+        return 1;
+    }
+
+    settings.Quarantine.Without(pattern).Save(settings.QuarantineFilePath);
+    Console.WriteLine($"Released {pattern}. Commit {settings.QuarantineFilePath}.");
+    return 0;
+});
+var quarantineList = new Command("list", "List quarantined stories.");
+quarantineList.SetAction(parse =>
+{
+    var settings = Settings(parse);
+    var today = DateOnly.FromDateTime(DateTime.UtcNow);
+    if (settings.Quarantine.Entries.Count == 0)
+    {
+        Console.WriteLine("Nothing is quarantined.");
+        return 0;
+    }
+
+    foreach (var entry in settings.Quarantine.Entries)
+    {
+        var state = entry.IsActive(today) ? "active " : "expired";
+        Console.WriteLine($"{state}  {entry.Pattern,-40} {entry.Reason}{(entry.Owner is null ? string.Empty : $"  owner: {entry.Owner}")}{(entry.Expires is { } e ? $"  until {e:yyyy-MM-dd}" : string.Empty)}");
+    }
+
+    return 0;
+});
+root.Add(new Command("quarantine", "Quarantined stories (quarantine.json): failures are reported but do not fail the build.") { quarantineAdd, quarantineRemove, quarantineList });
 
 // btp perf approve
 var baselineFile = new Option<string?>("--baseline") { Description = "Performance baseline file (default from settings)." };
@@ -439,7 +519,7 @@ void PrintSummary(RunSummary summary)
 {
     Console.WriteLine();
     Console.WriteLine($"  passed {summary.Passed}   failed {summary.Failed}   flaky {summary.Flaky}   skipped {summary.Skipped}   visual changes {summary.VisualChanges}   a11y {summary.AccessibilityFailures}   perf {summary.PerformanceRegressions}");
-    foreach (var failed in summary.Results.Where(r => r.Outcome == StoryOutcome.Failed).Take(20))
+    foreach (var failed in summary.Results.Where(r => r.IsBlockingFailure).Take(20))
     {
         var message = failed.Error ?? string.Empty;
         var newline = message.IndexOf('\n', StringComparison.Ordinal);

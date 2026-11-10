@@ -1,0 +1,9 @@
+<span class="badge @Fmt.Css(Outcome, Quarantined)">@(Quarantined && Outcome == StoryOutcome.Failed ? "Quarantined" : Outcome?.ToString() ?? "Not run")</span>
+
+@code {
+    /// <summary>Outcome.</summary>
+    [Parameter] public StoryOutcome? Outcome { get; set; }
+
+    /// <summary>Whether a failure is quarantined.</summary>
+    [Parameter] public bool Quarantined { get; set; }
+}

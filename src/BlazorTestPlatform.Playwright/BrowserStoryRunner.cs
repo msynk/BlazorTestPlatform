@@ -140,11 +140,14 @@ public sealed class BrowserStoryRunner
         });
     }
 
-    /// <summary>Runs a cell and throws <see cref="StoryFailedException"/> when it fails.</summary>
+    /// <summary>
+    /// Runs a cell and throws <see cref="StoryFailedException"/> when it fails. A failure the quarantine file covers is
+    /// returned instead: it is in the results, but it does not fail the test.
+    /// </summary>
     public async Task<StoryResult> VerifyAsync(MatrixCase cell, CancellationToken cancellationToken = default)
     {
         var result = await RunAsync(cell, cancellationToken).ConfigureAwait(false);
-        return result.Outcome == StoryOutcome.Failed ? throw new StoryFailedException(result) : result;
+        return result.IsBlockingFailure ? throw new StoryFailedException(result) : result;
     }
 
     private async Task<StoryResult> RunAttemptAsync(MatrixCase cell, string key, DateTimeOffset started, int attempt, CancellationToken cancellationToken)
@@ -627,6 +630,7 @@ public sealed class BrowserStoryRunner
 
     private StoryResult Write(StoryResult result)
     {
+        result = _settings.Quarantine.Apply(result);
         BtpTelemetry.Complete(System.Diagnostics.Activity.Current is { OperationName: "btp.story" } story ? story : null, result);
         if (_options.WriteResults)
         {

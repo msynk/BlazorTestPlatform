@@ -1,0 +1,144 @@
+@page "/_btp/impact"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var catalog = Data.Catalog;
+    var files = (Files ?? string.Empty).Split(['\n', '\r', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+    string? gitProblem = null;
+    if (Since is { Length: > 0 } since)
+    {
+        if (StoryImpact.ChangedFilesSince(since, Data.Settings.ProjectDirectory) is { } changed)
+        {
+            files.AddRange(changed);
+        }
+        else
+        {
+            gitProblem = $"git could not list the files changed since '{since}'.";
+        }
+    }
+
+    var impact = files.Count == 0 || catalog.Count == 0 ? null : StoryImpact.Analyze(catalog, files);
+    var durations = Data.History.MedianDurations(Data.Window);
+    var keys = Data.Results.Where(r => r.Driver != "bunit").Select(r => r.Key).Distinct().ToArray();
+    if (keys.Length == 0)
+    {
+        keys = durations.Keys.ToArray();
+    }
+
+    var shards = Math.Clamp(Shards ?? 4, 1, 32);
+    var plan = keys.Length == 0 ? null : ShardPlan.Create(keys, durations, shards);
+    var hashLoads = plan is null ? [] : Enumerable.Range(1, shards).Select(i => keys.Where(k => new Shard(i, shards).Contains(k)).Sum(k => durations.TryGetValue(k, out var d) ? d : 0)).ToArray();
+
+    <PageHeader Title="Impact &amp; sharding" Description="Which stories a change can affect, and why (a story file, a component file or a component that renders it, a baseline); and how to split the browser matrix into shards that finish together, from durations in the run history." />
+
+    <div class="grid two">
+        <section class="card">
+            <header><div><h2>Test impact analysis</h2><p>Paste changed files (one per line) or name a git ref to diff against. Shared code that cannot be traced to stories selects everything, so the analysis never narrows a run it cannot explain.</p></div></header>
+            <div class="body">
+                <form method="get" class="stack">
+                    <div class="field"><label for="files">Changed files</label><textarea id="files" name="files" placeholder="demo/BlazorTestPlatform.Demo.UI/Button.razor">@Files</textarea></div>
+                    <div class="row">
+                        <div class="field"><label for="since">or changed since (git ref)</label><input id="since" name="since" type="text" value="@Since" placeholder="origin/main" /></div>
+                        <button class="btn" type="submit" style="align-self:end">Analyze</button>
+                    </div>
+                </form>
+                @if (gitProblem is not null)
+                {
+                    <div class="callout warn small" style="margin-top:10px">@gitProblem</div>
+                }
+                @if (catalog.Count == 0)
+                {
+                    <div class="callout warn small" style="margin-top:10px">The hub has no story catalog; configure it with <code>AddStoriesFromAssemblyOf&lt;T&gt;()</code>.</div>
+                }
+            </div>
+        </section>
+
+        <section class="card">
+            <header>
+                <div><h2>Selection</h2><p>@(impact is null ? "Analyze a change to see the stories it affects." : impact.RunsEverything ? "Some files could not be traced to stories: everything runs." : $"{impact.Stories.Count} of {catalog.Count} stories ({Fmt.Percent((double)impact.Stories.Count / Math.Max(1, catalog.Count))}) are affected.")</p></div>
+                @if (impact is { Stories.Count: > 0 } && Runner.CanRun && Options.AllowChanges)
+                {
+                    <form method="post" action="@HubUrls.Page("actions/run")">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="scope" value="affected" />
+                        <input type="hidden" name="value" value="@string.Join('\n', files)" />
+                        <button class="btn btn-primary" type="submit" disabled="@Runner.IsRunning">Run affected in memory</button>
+                    </form>
+                }
+            </header>
+            <div class="body flush scroll-x">
+                @if (impact is not null)
+                {
+                    @if (impact.UnmappedFiles.Count > 0)
+                    {
+                        <div class="callout warn small" style="margin:12px">Not traceable: @foreach (var file in impact.UnmappedFiles) { <code>@file</code> <span> </span> }</div>
+                    }
+                    <table class="table">
+                        <thead><tr><th>Story</th><th>Why</th></tr></thead>
+                        <tbody>
+                            @foreach (var story in impact.Stories.Take(200))
+                            {
+                                <tr>
+                                    <td class="title-cell"><a href="@HubUrls.Story(story.Id)"><strong>@story.Name</strong></a><span class="muted small">@story.Title</span></td>
+                                    <td class="small mono">@string.Join(", ", impact.Reasons.GetValueOrDefault(story.Id) ?? ["shared code"])</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </section>
+    </div>
+
+    <section class="card" style="margin-top:16px">
+        <header>
+            <div><h2>Duration-balanced shards</h2><p>Longest-first assignment from median durations in the archive, compared with the stable hash split <code>BTP_SHARD</code> uses today.</p></div>
+            <form method="get" class="row"><label for="shards" class="small">Shards</label><input id="shards" name="shards" type="text" value="@shards" style="width:60px" /><button class="btn btn-small" type="submit">Plan</button></form>
+        </header>
+        <div class="body">
+            @if (plan is null)
+            {
+                <p class="muted">No durations yet: archive a few runs first.</p>
+            }
+            else
+            {
+                var max = Math.Max(plan.MakespanMilliseconds, hashLoads.DefaultIfEmpty(0).Max());
+                <div class="row" style="margin-bottom:12px">
+                    <span class="badge pass">balanced: @Fmt.Duration(plan.MakespanMilliseconds) wall clock · @Fmt.Percent(plan.Balance) balance</span>
+                    <span class="badge flaky">hash split: @Fmt.Duration(hashLoads.DefaultIfEmpty(0).Max()) wall clock</span>
+                    <span class="muted small">@keys.Length cells · @plan.EstimatedWithoutHistory.Count without history (estimated at the median)</span>
+                </div>
+                <div class="timeline">
+                    @foreach (var shard in plan.Shards)
+                    {
+                        <div class="step">
+                            <span class="label">Shard @shard.Index · @shard.Keys.Count cells</span>
+                            <span class="track">
+                                <span class="bar check" style="left:0;width:@((100 * shard.EstimatedMilliseconds / max).ToString("0.##", CultureInfo.InvariantCulture))%"></span>
+                            </span>
+                            <span class="muted small right">@Fmt.Duration(shard.EstimatedMilliseconds)</span>
+                        </div>
+                        <div class="step">
+                            <span class="label faint small">hash split</span>
+                            <span class="track"><span class="bar wait" style="left:0;width:@((100 * hashLoads[shard.Index - 1] / max).ToString("0.##", CultureInfo.InvariantCulture))%"></span></span>
+                            <span class="muted small right">@Fmt.Duration(hashLoads[shard.Index - 1])</span>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    /// <summary>Changed files.</summary>
+    [SupplyParameterFromQuery(Name = "files")] public string? Files { get; set; }
+
+    /// <summary>Git ref to diff against.</summary>
+    [SupplyParameterFromQuery(Name = "since")] public string? Since { get; set; }
+
+    /// <summary>Shard count.</summary>
+    [SupplyParameterFromQuery(Name = "shards")] public int? Shards { get; set; }
+}

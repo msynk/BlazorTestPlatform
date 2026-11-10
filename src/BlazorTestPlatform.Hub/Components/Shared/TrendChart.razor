@@ -1,0 +1,90 @@
+@* A small server-rendered SVG line chart: no script, no library. *@
+@{
+    const double W = 640, Left = 40, Right = 10, Top = 10;
+    var h = (double)Height;
+    var bottom = h - 22;
+    var count = Labels.Count;
+    var max = Max ?? Math.Max(1e-9, Series.SelectMany(s => s.Values).DefaultIfEmpty(0).Max()) * 1.1;
+    var min = Math.Min(Min, max - 1e-9);
+    double X(int i) => count <= 1 ? (Left + W - Right) / 2 : Left + (W - Left - Right) * i / (count - 1);
+    double Y(double v) => bottom - (bottom - Top) * Math.Clamp((v - min) / (max - min), 0, 1);
+    string P(double v) => v.ToString("0.#", CultureInfo.InvariantCulture);
+}
+<figure class="chart-figure" style="margin:0">
+    <svg class="chart" viewBox="0 0 @P(W) @P(h)" role="img" aria-label="@Caption">
+        @for (var g = 0; g <= 4; g++)
+        {
+            var value = min + (max - min) * g / 4;
+            <line class="grid-line" x1="@P(Left)" x2="@P(W - Right)" y1="@P(Y(value))" y2="@P(Y(value))" />
+            @Text(Left - 6, Y(value) + 3, "end", Format(value))
+        }
+        @if (count > 0)
+        {
+            @Text(X(0), h - 6, "start", Labels[0])
+            @if (count > 1)
+            {
+                @Text(X(count - 1), h - 6, "end", Labels[count - 1])
+            }
+        }
+        @foreach (var series in Series)
+        {
+            var points = string.Join(' ', series.Values.Select((v, i) => $"{P(X(i))},{P(Y(v))}"));
+            @if (Area && series.Values.Count > 1)
+            {
+                <polygon class="@(series.Css)-fill area" points="@($"{P(X(0))},{P(bottom)} {points} {P(X(series.Values.Count - 1))},{P(bottom)}")" />
+            }
+            <polyline class="@series.Css" points="@points" />
+            @for (var i = 0; i < series.Values.Count; i++)
+            {
+                <circle class="@(series.Css)-fill" cx="@P(X(i))" cy="@P(Y(series.Values[i]))" r="2.5"><title>@series.Name · @(i < Labels.Count ? Labels[i] : string.Empty): @Format(series.Values[i])</title></circle>
+            }
+        }
+    </svg>
+    @if (Series.Count > 1 || ShowLegend)
+    {
+        <figcaption class="legend" style="margin-top:6px">
+            @foreach (var series in Series)
+            {
+                <span style="color: var(--h-@(series.Css switch { "pass" => "pass", "fail" => "fail", "flaky" => "flaky", _ => "accent" }))">@series.Name</span>
+            }
+        </figcaption>
+    }
+</figure>
+
+@code {
+    /// <summary>X labels.</summary>
+    [Parameter] public IReadOnlyList<string> Labels { get; set; } = [];
+
+    /// <summary>Series.</summary>
+    [Parameter] public IReadOnlyList<ChartSeries> Series { get; set; } = [];
+
+    /// <summary>Y maximum (default: the largest value plus 10%).</summary>
+    [Parameter] public double? Max { get; set; }
+
+    /// <summary>Y minimum (default 0).</summary>
+    [Parameter] public double Min { get; set; }
+
+    /// <summary>Format values as percentages.</summary>
+    [Parameter] public bool Percent { get; set; }
+
+    /// <summary>Format values as durations.</summary>
+    [Parameter] public bool Milliseconds { get; set; }
+
+    /// <summary>Fill under the lines.</summary>
+    [Parameter] public bool Area { get; set; }
+
+    /// <summary>Show the legend for a single series.</summary>
+    [Parameter] public bool ShowLegend { get; set; }
+
+    /// <summary>Height in viewBox units.</summary>
+    [Parameter] public int Height { get; set; } = 170;
+
+    /// <summary>Accessible description.</summary>
+    [Parameter] public string Caption { get; set; } = "Trend";
+
+    // Razor reserves <text>, so SVG text elements are written as markup.
+    private static MarkupString Text(double x, double y, string anchor, string content) => new(string.Create(CultureInfo.InvariantCulture,
+        $"<text class=\"axis\" x=\"{x:0.#}\" y=\"{y:0.#}\" text-anchor=\"{anchor}\">{System.Net.WebUtility.HtmlEncode(content)}</text>"));
+
+    private string Format(double value) => Percent ? Fmt.Percent(value) : Milliseconds ? Fmt.Duration(value) : value >= 100 ? Fmt.Number(value) : value.ToString("0.##", CultureInfo.InvariantCulture);
+}

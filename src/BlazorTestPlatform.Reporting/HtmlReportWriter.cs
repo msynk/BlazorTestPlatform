@@ -143,7 +143,13 @@ public static class HtmlReportWriter
             h.Append(" open");
         }
 
-        h.Append("><summary><span class=\"badge ").Append(outcome).Append("\">").Append(r.Outcome).Append("</span><strong>").Append(E(r.Name)).Append("</strong>");
+        h.Append("><summary><span class=\"badge ").Append(outcome).Append("\">").Append(r.Outcome).Append("</span>");
+        if (r.Quarantine is { } quarantine)
+        {
+            h.Append("<span class=\"badge skipped\" title=\"").Append(E(quarantine.Reason)).Append("\">quarantined</span>");
+        }
+
+        h.Append("<strong>").Append(E(r.Name)).Append("</strong>");
         foreach (var chip in new[] { r.Driver, r.HostingModel, r.Viewport, r.Theme, JUnitReportWriter.ArgsLabel(r) })
         {
             if (!string.IsNullOrEmpty(chip))

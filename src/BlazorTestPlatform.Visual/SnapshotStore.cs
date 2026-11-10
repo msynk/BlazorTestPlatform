@@ -340,6 +340,8 @@ public sealed class SnapshotStore
             DiffPath = diffPath,
             DiffPixels = comparison?.DiffPixels ?? 0,
             DiffRatio = comparison?.DiffRatio ?? 0,
+            DiffFingerprint = comparison is { DiffPixels: > 0 } ? comparison.Fingerprint : null,
+            DiffBounds = comparison is { DiffPixels: > 0, DiffBounds: { } b } ? [b.X, b.Y, b.Width, b.Height] : null,
             Width = actual.Width,
             Height = actual.Height,
         };

@@ -1,0 +1,208 @@
+@page "/_btp/visual"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var changes = Data.Results
+        .Where(r => r.Visual is { IsFailure: true })
+        .GroupBy(r => r.Visual!.SnapshotName, StringComparer.Ordinal)
+        .Select(g => g.First())
+        .OrderBy(r => r.Visual!.DiffFingerprint ?? "~", StringComparer.Ordinal)
+        .ThenBy(r => r.Visual!.SnapshotName, StringComparer.Ordinal)
+        .ToArray();
+    var groups = changes.Where(r => r.Visual!.DiffFingerprint is not null).GroupBy(r => r.Visual!.DiffFingerprint!).ToDictionary(g => g.Key, g => g.ToArray());
+
+    <PageHeader Title="Visual review" Description="Snapshots that differ from their baselines. Compare them side by side, with a slider, as an overlay, flickering (strobe) or as the diff alone; accept intended changes (the baseline is replaced, ready to commit) or reject regressions. Changes with the same shape are grouped, so one decision can cover them all.">
+        <a class="btn @(Tab == "baselines" ? null : "btn-primary")" href="@HubUrls.Page("visual")">Changes (@changes.Length)</a>
+        <a class="btn @(Tab == "baselines" ? "btn-primary" : null)" href="@HubUrls.Page("visual?tab=baselines")">Baselines</a>
+    </PageHeader>
+
+    @if (Tab == "baselines")
+    {
+        var snapshots = Data.Results.Where(r => r.Visual is { BaselinePath: not null } v && !v.IsFailure).GroupBy(r => r.StoryId).Take(60).ToArray();
+        @if (snapshots.Length == 0)
+        {
+            <div class="card empty"><strong>No snapshots in the results</strong>Run the browser suites (<code>dotnet test</code>) to compare stories against their baselines.</div>
+        }
+        <div class="stack">
+            @foreach (var story in snapshots)
+            {
+                <section class="card">
+                    <header><div><h2>@story.First().Name</h2><p>@story.First().Title</p></div><a class="btn btn-small" href="@HubUrls.Story(story.Key)">Story</a></header>
+                    <div class="body row" style="align-items:flex-start;gap:16px">
+                        @foreach (var r in story.GroupBy(x => x.Visual!.SnapshotName).Select(g => g.First()).Take(8))
+                        {
+                            <figure style="margin:0;max-width:260px">
+                                @if (Data.FileUrl(r.Visual!.BaselinePath) is { } url)
+                                {
+                                    <a href="@url"><img src="@url" alt="@r.Visual.SnapshotName" loading="lazy" style="max-width:100%;max-height:160px;border:1px solid var(--h-border);border-radius:6px" /></a>
+                                }
+                                <figcaption class="small muted mono wrap-anywhere">@Path.GetFileName(r.Visual.SnapshotName) <span class="badge @r.Visual.Status.ToString().ToLowerInvariant()">@r.Visual.Status</span></figcaption>
+                            </figure>
+                        }
+                    </div>
+                </section>
+            }
+        </div>
+    }
+    else if (changes.Length == 0)
+    {
+        <div class="card empty">
+            <strong>No visual changes to review</strong>
+            Every snapshot in the latest results matches its baseline. <a href="@HubUrls.Page("visual?tab=baselines")">Browse the baselines</a>.
+        </div>
+    }
+    else
+    {
+        var selected = changes.FirstOrDefault(r => r.Visual!.SnapshotName == Snapshot) ?? changes[0];
+        var visual = selected.Visual!;
+        var index = Array.IndexOf(changes, selected);
+        var similar = visual.DiffFingerprint is { } fp && groups.TryGetValue(fp, out var group) ? group : [selected];
+        var rejected = Data.VisualDecisions.Any(d => d.Snapshot == visual.SnapshotName && d.Fingerprint == visual.DiffFingerprint);
+        var expected = Data.FileUrl(visual.BaselinePath);
+        var actual = Data.FileUrl(visual.ActualPath);
+        var diff = Data.FileUrl(visual.DiffPath);
+
+        <div class="review">
+            <section class="card review-list" aria-label="Changes">
+                @foreach (var r in changes)
+                {
+                    var v = r.Visual!;
+                    var count = v.DiffFingerprint is { } f && groups.TryGetValue(f, out var g) ? g.Length : 1;
+                    var isRejected = Data.VisualDecisions.Any(d => d.Snapshot == v.SnapshotName && d.Fingerprint == v.DiffFingerprint);
+                    <a href="@Link(v.SnapshotName)" class="@(r == selected ? "active" : null)" aria-current="@(r == selected ? "true" : null)">
+                        <strong>@r.Name</strong>
+                        <span class="small muted">@r.Title</span>
+                        <span class="row small">
+                            <span class="badge @v.Status.ToString().ToLowerInvariant()">@v.Status</span>
+                            @if (v.DiffRatio > 0) { <span class="muted">@Fmt.Percent(v.DiffRatio, 2)</span> }
+                            @if (count > 1) { <span class="tag">@count similar</span> }
+                            @if (isRejected) { <span class="tag alert">rejected</span> }
+                        </span>
+                        <span class="small faint mono wrap-anywhere">@Path.GetFileName(v.SnapshotName)</span>
+                    </a>
+                }
+            </section>
+
+            <section class="card">
+                <header>
+                    <div>
+                        <h2>@selected.Name <span class="badge @visual.Status.ToString().ToLowerInvariant()">@visual.Status</span> @if (rejected) { <span class="tag alert">rejected</span> }</h2>
+                        <p class="mono">@visual.SnapshotName · @Fmt.Cell(selected.Driver, selected.HostingModel, selected.Viewport, selected.Theme)@(visual.DiffPixels > 0 ? $" · {visual.DiffPixels:N0} px ({visual.DiffRatio:P2})" : null)</p>
+                    </div>
+                    <div class="row">
+                        <a class="btn btn-small" href="@Link(changes[(index - 1 + changes.Length) % changes.Length].Visual!.SnapshotName)" data-review-prev>← Prev</a>
+                        <span class="muted small">@(index + 1) / @changes.Length</span>
+                        <a class="btn btn-small" href="@Link(changes[(index + 1) % changes.Length].Visual!.SnapshotName)" data-review-next>Next →</a>
+                    </div>
+                </header>
+                <div class="body stack">
+                    @if (visual.Note is { } note)
+                    {
+                        <div class="callout warn small">@note</div>
+                    }
+                    <div class="viewer" data-viewer data-mode="split">
+                        <div class="viewer-toolbar" role="toolbar" aria-label="Comparison mode">
+                            @foreach (var (mode, label) in new[] { ("split", "Side by side"), ("slider", "Slider"), ("overlay", "Overlay"), ("strobe", "Strobe"), ("diff", "Diff") })
+                            {
+                                <button type="button" class="btn btn-small" data-mode-button="@mode" aria-pressed="false">@label</button>
+                            }
+                            <label class="range split small">Split <input type="range" min="0" max="100" value="50" data-split aria-label="Slider position" /></label>
+                            <label class="range opacity small">Opacity <input type="range" min="0" max="100" value="50" data-opacity aria-label="Overlay opacity" /></label>
+                            @if (visual.DiffBounds is { Count: 4 })
+                            {
+                                <button type="button" class="btn btn-small" data-zoom>Find the change</button>
+                            }
+                        </div>
+                        <div class="viewer-stage">
+                            <figure class="pane expected" data-bounds="@Bounds(visual)">
+                                <figcaption>Baseline</figcaption>
+                                @if (expected is not null)
+                                {
+                                    <img src="@expected" alt="Baseline of @visual.SnapshotName" />
+                                }
+                                else
+                                {
+                                    <div class="empty small">No baseline yet: accepting the actual image creates it.</div>
+                                }
+                            </figure>
+                            <figure class="pane actual" data-bounds="@Bounds(visual)">
+                                <figcaption>Actual</figcaption>
+                                @if (actual is not null)
+                                {
+                                    <img src="@actual" alt="Actual rendering of @visual.SnapshotName" />
+                                }
+                            </figure>
+                            <figure class="pane diff">
+                                <figcaption>Diff</figcaption>
+                                @if (diff is not null)
+                                {
+                                    <img src="@diff" alt="Differing pixels of @visual.SnapshotName" />
+                                }
+                                else
+                                {
+                                    <div class="empty small">No diff image (the baseline is missing or the size changed).</div>
+                                }
+                            </figure>
+                        </div>
+                    </div>
+
+                    @if (Options.AllowChanges)
+                    {
+                        <div class="row">
+                            <form method="post" action="@HubUrls.Page("actions/visual")">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="returnUrl" value="@Link(changes[(index + 1) % changes.Length].Visual!.SnapshotName)" />
+                                <input type="hidden" name="snapshot" value="@visual.SnapshotName" />
+                                <button class="btn btn-primary" type="submit" name="decision" value="accept" data-review-accept>Accept <kbd>a</kbd></button>
+                                <button class="btn btn-danger" type="submit" name="decision" value="reject" data-review-reject>Reject <kbd>r</kbd></button>
+                            </form>
+                            @if (similar.Length > 1)
+                            {
+                                <form method="post" action="@HubUrls.Page("actions/visual")">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="returnUrl" value="@HubUrls.Page("visual")" />
+                                    @foreach (var r in similar)
+                                    {
+                                        <input type="hidden" name="snapshot" value="@r.Visual!.SnapshotName" />
+                                    }
+                                    <button class="btn" type="submit" name="decision" value="accept" data-review-accept-group>Accept all @similar.Length similar <kbd>g</kbd></button>
+                                </form>
+                            }
+                            <span class="muted small">Accepting copies the actual image over the baseline in <code>@Path.GetFileName(Data.Settings.SnapshotDirectoryPath)/</code>: review the change in git and commit it.</span>
+                        </div>
+                    }
+                    <div class="kbd-help"><span><kbd>j</kbd>/<kbd>k</kbd> next/previous</span><span><kbd>1</kbd>–<kbd>5</kbd> modes</span><span><kbd>a</kbd> accept</span><span><kbd>r</kbd> reject</span><span><kbd>g</kbd> accept the group</span></div>
+
+                    @if (similar.Length > 1)
+                    {
+                        <details class="more">
+                            <summary>@similar.Length snapshots changed the same way</summary>
+                            <ul class="small">@foreach (var r in similar) { <li><a href="@Link(r.Visual!.SnapshotName)" class="mono">@r.Visual.SnapshotName</a></li> }</ul>
+                        </details>
+                    }
+                    <div class="row small">
+                        <a href="@HubUrls.Result(selected.Key)">Result details</a>
+                        @if (WorkbenchUrl(selected.StoryId, selected.HostingModel) is { } workbench)
+                        {
+                            <a href="@workbench">Open in workbench</a>
+                        }
+                    </div>
+                </div>
+            </section>
+        </div>
+    }
+}
+
+@code {
+    /// <summary>Selected snapshot.</summary>
+    [SupplyParameterFromQuery(Name = "snapshot")] public string? Snapshot { get; set; }
+
+    /// <summary>Tab.</summary>
+    [SupplyParameterFromQuery(Name = "tab")] public string? Tab { get; set; }
+
+    private static string Link(string snapshot) => HubUrls.Page("visual?snapshot=" + Uri.EscapeDataString(snapshot));
+
+    private static string? Bounds(VisualResult visual) => visual.DiffBounds is { Count: 4 } b ? string.Join(',', b) : null;
+}

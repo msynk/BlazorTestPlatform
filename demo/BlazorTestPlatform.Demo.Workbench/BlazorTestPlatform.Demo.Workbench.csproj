@@ -7,6 +7,7 @@
   <ItemGroup>
     <ProjectReference Include="..\BlazorTestPlatform.Demo.Workbench.Client\BlazorTestPlatform.Demo.Workbench.Client.csproj" />
     <ProjectReference Include="..\BlazorTestPlatform.Demo.UI.Stories\BlazorTestPlatform.Demo.UI.Stories.csproj" />
+    <ProjectReference Include="..\..\src\BlazorTestPlatform.Hub\BlazorTestPlatform.Hub.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
   </ItemGroup>
 

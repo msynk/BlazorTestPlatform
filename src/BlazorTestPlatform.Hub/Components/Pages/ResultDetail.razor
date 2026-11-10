@@ -1,0 +1,289 @@
+@page "/_btp/result"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var result = Key is null ? null : Data.Result(Key);
+    var stability = Key is null ? null : Data.StabilityOf(Key);
+    var archived = result is null ? stability?.Last : null;
+
+    @if (result is null && archived is null)
+    {
+        <PageHeader Title="Result not found" Description="@($"No result has the key {Key}.")" />
+    }
+    else if (result is null)
+    {
+        <PageHeader Title="@archived!.Name" Description="@($"{archived.Title} · {Fmt.Cell(archived.Driver, archived.HostingModel, archived.Viewport, archived.Theme)} · only in the archive (the results directory no longer has it).")" />
+        <section class="card"><div class="body stack"><div class="row"><OutcomeBadge Outcome="archived.Outcome" /><HistoryStrip Points="stability!.Points" /></div>@if (archived.Error is { } error) { <div class="error-box">@error</div> }</div></section>
+    }
+    else
+    {
+        var category = FailureAnalysis.Categorize(result);
+        var explanation = FailureAnalysis.Explain(category);
+        var signature = FailureAnalysis.Signature(result);
+        var cluster = signature is null ? null : Data.Clusters.FirstOrDefault(c => c.Signature == signature);
+        var prompt = result.Outcome == StoryOutcome.Failed ? FailureAnalysis.ToPrompt(result) : null;
+
+        <PageHeader Title="@result.Name" Description="@($"{result.Title} · {Fmt.Cell(result.Driver, result.HostingModel, result.Viewport, result.Theme)}")">
+            <a class="btn" href="@HubUrls.Story(result.StoryId)">All cells</a>
+            @if (WorkbenchUrl(result.StoryId, result.HostingModel) is { } workbench)
+            {
+                <a class="btn" href="@workbench">Reproduce in workbench</a>
+            }
+            <a class="btn" href="@($"{HubOptions.RoutePrefix}/api/results/{Uri.EscapeDataString(result.Key)}")">JSON</a>
+        </PageHeader>
+
+        <section class="card" style="margin-bottom:16px">
+            <div class="body stack">
+                <div class="row">
+                    <OutcomeBadge Outcome="result.Outcome" Quarantined="@(result.Quarantine is not null)" />
+                    @if (stability is not null)
+                    {
+                        <StabilityBadge Status="stability.Status" />
+                        <Tags Items="stability.Tags" />
+                        <HistoryStrip Points="stability.Points" />
+                        @if (stability.FlakeRate > 0)
+                        {
+                            <span class="muted small">flake rate @Fmt.Percent(stability.FlakeRate) (95%: @Fmt.Percent(stability.FlakeRateLow)–@Fmt.Percent(stability.FlakeRateHigh)) over @stability.Runs runs</span>
+                        }
+                    }
+                </div>
+                <div class="row small muted">
+                    <span>@result.Attempts attempt(s)</span><span>·</span><span>@Fmt.Duration(result.DurationMilliseconds)</span><span>·</span><span>started @Fmt.When(result.StartedAt)</span>
+                    @if (result.SourceFile is { } file)
+                    {
+                        <span>·</span><span class="mono">@Path.GetFileName(file):@result.SourceLine</span>
+                    }
+                </div>
+                @if (result.Quarantine is { } quarantine)
+                {
+                    <div class="callout warn"><strong>Quarantined</strong> by <code>@quarantine.Pattern</code>: @quarantine.Reason. This failure is reported but does not fail the build.</div>
+                }
+            </div>
+        </section>
+
+        @if (result.Outcome == StoryOutcome.Failed)
+        {
+            <section class="card" style="margin-bottom:16px">
+                <header>
+                    <div><h2>Failure <span class="badge fail">@explanation.Label</span></h2><p>@explanation.LikelyCause</p></div>
+                    @if (cluster is not null)
+                    {
+                        <a class="btn btn-small" href="@HubUrls.Page("failures#" + cluster.Signature)">@(cluster.Keys.Count == 1 ? "Error history" : $"{cluster.Keys.Count} cells share this error")</a>
+                    }
+                </header>
+                <div class="body stack">
+                    <div class="error-box">@result.Error</div>
+                    <p><strong>Next step:</strong> @explanation.NextStep</p>
+                    @if (result.AttemptErrors.Count > 0)
+                    {
+                        <details class="more"><summary>Earlier attempts (@result.AttemptErrors.Count)</summary><ul>@foreach (var attempt in result.AttemptErrors) { <li class="mono small wrap-anywhere">@attempt</li> }</ul></details>
+                    }
+                    @if (result.StackTrace is { Length: > 0 } stack)
+                    {
+                        <details class="more"><summary>Stack trace</summary><pre class="code">@stack</pre></details>
+                    }
+                    <details class="more">
+                        <summary>Copy as prompt (for an assistant or an issue)</summary>
+                        <p class="muted small" style="margin:8px 0">Built from this result alone, deterministically. Nothing is sent anywhere.</p>
+                        <pre class="code" id="prompt">@prompt</pre>
+                        <div class="row" style="margin-top:8px">
+                            <button class="btn btn-small" type="button" data-copy="prompt">Copy</button>
+                            @if (Options.RepositoryUrl is { } repo)
+                            {
+                                <a class="btn btn-small" href="@IssueUrl(repo, result, prompt!)" target="_blank" rel="noopener">Open a GitHub issue</a>
+                            }
+                        </div>
+                    </details>
+                    @if (Options.AllowChanges && result.Quarantine is null)
+                    {
+                        <details class="more">
+                            <summary>Quarantine this story</summary>
+                            <form method="post" action="@HubUrls.Page("actions/quarantine")" class="filters" style="margin-top:8px">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="returnUrl" value="@CurrentUrl" />
+                                <div class="field"><label for="pattern">Pattern</label><input id="pattern" name="pattern" type="text" value="@result.StoryId" /></div>
+                                <div class="field"><label for="reason">Reason</label><input id="reason" name="reason" type="text" placeholder="Why, and which issue tracks it" required /></div>
+                                <div class="field"><label for="owner">Owner</label><input id="owner" name="owner" type="text" /></div>
+                                <div class="field"><label for="expires">Until</label><input id="expires" name="expires" type="date" /></div>
+                                <button class="btn" type="submit">Quarantine</button>
+                            </form>
+                        </details>
+                    }
+                </div>
+            </section>
+        }
+        else if (result.SkipReason is { } skip)
+        {
+            <div class="callout" style="margin-bottom:16px"><strong>Skipped:</strong> @skip</div>
+        }
+
+        <div class="grid two">
+            <section class="card">
+                <header><div><h2>Timeline</h2><p>Every action, assertion and wait of the final attempt.</p></div></header>
+                <div class="body"><StepTimeline Steps="result.Steps" /></div>
+            </section>
+
+            <div class="stack">
+                @if (result.Visual is { } visual)
+                {
+                    <section class="card">
+                        <header><div><h2>Visual snapshot <span class="badge @visual.Status.ToString().ToLowerInvariant()">@visual.Status</span></h2><p class="mono">@visual.SnapshotName</p></div>
+                            @if (visual.IsFailure)
+                            {
+                                <a class="btn btn-small" href="@HubUrls.Page("visual?snapshot=" + Uri.EscapeDataString(visual.SnapshotName))">Review</a>
+                            }
+                        </header>
+                        <div class="body stack">
+                            @if (Data.FileUrl(visual.DiffPath ?? visual.ActualPath ?? visual.BaselinePath) is { } image)
+                            {
+                                <img src="@image" alt="Snapshot of @result.Name" style="max-width:100%;border:1px solid var(--h-border);border-radius:6px" />
+                            }
+                            <span class="muted small">@visual.Width×@visual.Height px@(visual.DiffPixels > 0 ? $" · {visual.DiffPixels:N0} px differ ({visual.DiffRatio:P2})" : null)@(visual.RendererKey is { } renderer ? $" · {renderer}" : null)</span>
+                            @if (visual.Note is { } note)
+                            {
+                                <div class="callout warn small">@note</div>
+                            }
+                        </div>
+                    </section>
+                }
+
+                @if (result.Accessibility is { } a11y)
+                {
+                    <section class="card">
+                        <header><div><h2>Accessibility</h2><p>@a11y.Engine · @a11y.PassedRules rules passed · @a11y.Violations.Count violations · @a11y.Incomplete.Count need review</p></div></header>
+                        <div class="body stack">
+                            @foreach (var violation in a11y.Violations)
+                            {
+                                <div>
+                                    <div class="row"><span class="badge @violation.Impact.ToString().ToLowerInvariant()">@violation.Impact</span><strong>@violation.RuleId</strong>@if (result.AccessibilityFailures.Contains(violation.RuleId)) { <span class="tag alert">fails the gate</span> }@foreach (var criterion in violation.WcagCriteria) { <span class="chip">WCAG @criterion</span> }</div>
+                                    <p class="small">@violation.Help @if (violation.HelpUrl is { } help) { <a href="@help" target="_blank" rel="noopener">rule</a> }</p>
+                                    <ul class="small mono">@foreach (var node in violation.Nodes.Take(5)) { <li class="wrap-anywhere">@node.Target</li> }</ul>
+                                </div>
+                            }
+                            @if (a11y.Waivers.Count > 0)
+                            {
+                                <div class="callout small"><strong>Waived:</strong> @foreach (var waiver in a11y.Waivers) { <div><code>@waiver.RuleId</code> (@waiver.Source): @waiver.Justification</div> }</div>
+                            }
+                            @if (a11y.Violations.Count == 0)
+                            {
+                                <p class="muted">No violations.</p>
+                            }
+                        </div>
+                    </section>
+                }
+
+                @if (result.Performance is { } metrics)
+                {
+                    <section class="card">
+                        <header><div><h2>Render performance</h2><p>@metrics.Iterations iterations · median of render and play</p></div></header>
+                        <div class="body stack">
+                            <dl class="grid tiles" style="margin:0">
+                                <div class="tile"><dt>Root renders</dt><dd>@metrics.RootRenderCount</dd></div>
+                                <div class="tile"><dt>Total renders</dt><dd>@metrics.TotalRenderCount</dd></div>
+                                <div class="tile"><dt>Allocated</dt><dd>@Fmt.Bytes(metrics.AllocatedBytes)</dd></div>
+                                <div class="tile"><dt>Median</dt><dd>@Fmt.Duration(metrics.MedianMilliseconds)</dd></div>
+                            </dl>
+                            @if (result.PerformanceComparison is { } comparison)
+                            {
+                                <table class="table"><thead><tr><th>Metric</th><th class="num">Baseline</th><th class="num">Now</th><th></th></tr></thead>
+                                    <tbody>@foreach (var change in comparison.Changes) { <tr><td>@change.Metric</td><td class="num">@change.Baseline.ToString("0.##", CultureInfo.InvariantCulture)</td><td class="num">@change.Current.ToString("0.##", CultureInfo.InvariantCulture)</td><td>@if (change.FailsBuild) { <span class="badge fail">regression</span> } else if (change.IsRegression) { <span class="badge flaky">slower</span> } else if (change.IsImprovement) { <span class="badge pass">better</span> }</td></tr> }</tbody>
+                                </table>
+                            }
+                            @foreach (var violation in result.BudgetViolations)
+                            {
+                                <div class="callout bad small">Budget exceeded: @violation</div>
+                            }
+                        </div>
+                    </section>
+                }
+
+                @if (result.BrowserMetrics is { } browser)
+                {
+                    <section class="card">
+                        <header><div><h2>Browser runtime</h2><p>Reported by @result.Driver; null metrics are ones this browser does not report.</p></div></header>
+                        <div class="body">
+                            <dl class="grid tiles" style="margin:0">
+                                <div class="tile"><dt>Layout shift</dt><dd>@(browser.CumulativeLayoutShift?.ToString("0.###", CultureInfo.InvariantCulture) ?? "n/a")</dd></div>
+                                <div class="tile"><dt>LCP</dt><dd>@(browser.LargestContentfulPaintMilliseconds is { } lcp ? Fmt.Duration(lcp) : "n/a")</dd></div>
+                                <div class="tile"><dt>Long tasks</dt><dd>@(browser.LongTasks?.ToString(CultureInfo.InvariantCulture) ?? "n/a")</dd></div>
+                                <div class="tile"><dt>DOM nodes</dt><dd>@browser.DomNodes</dd></div>
+                            </dl>
+                        </div>
+                    </section>
+                }
+            </div>
+        </div>
+
+        <div class="grid two" style="margin-top:16px">
+            @if (result.Console.Count > 0)
+            {
+                <section class="card">
+                    <header><h2>Console (@result.Console.Count)</h2></header>
+                    <div class="body flush scroll-x"><table class="table"><tbody>@foreach (var entry in result.Console.Take(200)) { <tr><td class="nowrap"><span class="badge @(entry.Level is "error" or "pageerror" ? "fail" : entry.Level == "warning" ? "flaky" : "info")">@entry.Level</span></td><td class="mono small wrap-anywhere">@entry.Text</td><td class="num small">@Fmt.Duration(entry.AtMilliseconds)</td></tr> }</tbody></table></div>
+                </section>
+            }
+            @if (result.HttpRequests.Count > 0)
+            {
+                <section class="card">
+                    <header><div><h2>Mocked HTTP (@result.HttpRequests.Count)</h2><p>Requests the story's fake backend answered.</p></div></header>
+                    <div class="body flush scroll-x"><table class="table"><tbody>@foreach (var request in result.HttpRequests) { <tr><td class="mono small">@request.Method</td><td class="mono small wrap-anywhere">@request.RelativeUrl</td><td class="num">@(request.StatusCode == 0 ? "pending" : request.StatusCode.ToString(CultureInfo.InvariantCulture))</td></tr> }</tbody></table></div>
+                </section>
+            }
+            @if (result.Network.Count > 0)
+            {
+                <section class="card">
+                    <header><h2>Network (@result.Network.Count)</h2></header>
+                    <div class="body flush scroll-x"><table class="table"><tbody>@foreach (var entry in result.Network.Take(200)) { <tr><td class="mono small">@entry.Method</td><td class="mono small wrap-anywhere">@entry.Url</td><td class="num">@(entry.Failure ?? entry.Status.ToString(CultureInfo.InvariantCulture))</td><td class="num small">@(entry.DurationMilliseconds is { } d ? Fmt.Duration(d) : "—")</td></tr> }</tbody></table></div>
+                </section>
+            }
+            @if (result.Artifacts.Count > 0)
+            {
+                <section class="card">
+                    <header><div><h2>Artifacts</h2><p>Screenshots, traces and DOM snapshots kept for this run.</p></div></header>
+                    <div class="body">
+                        <ul>
+                            @foreach (var artifact in result.Artifacts)
+                            {
+                                <li>
+                                    @if (Data.FileUrl(artifact.Path) is { } url)
+                                    {
+                                        <a href="@url">@artifact.Kind</a>
+                                    }
+                                    else
+                                    {
+                                        <span>@artifact.Kind</span>
+                                    }
+                                    <span class="muted small">@artifact.Description</span>
+                                    @if (artifact.Kind == "trace")
+                                    {
+                                        <div class="small muted">Open with <code>pwsh playwright.ps1 show-trace @Path.GetFileName(artifact.Path)</code> or drop it on trace.playwright.dev (processed in your browser).</div>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                </section>
+            }
+            @if (result.Markup is { Length: > 0 } markup)
+            {
+                <section class="card">
+                    <header><h2>Final markup</h2></header>
+                    <div class="body"><details class="more"><summary>Show</summary><pre class="code">@markup</pre></details></div>
+                </section>
+            }
+        </div>
+    }
+}
+
+@code {
+    /// <summary>Result key.</summary>
+    [SupplyParameterFromQuery(Name = "key")] public string? Key { get; set; }
+
+    private static string IssueUrl(string repository, StoryResult result, string prompt)
+    {
+        var body = prompt.Length > 3000 ? prompt[..3000] + "\n…" : prompt;
+        return $"{repository.TrimEnd('/')}/issues/new?title={Uri.EscapeDataString($"Story failing: {result.Title} / {result.Name} ({Fmt.Cell(result.Driver, result.HostingModel, result.Viewport, result.Theme)})")}&body={Uri.EscapeDataString(body)}";
+    }
+}

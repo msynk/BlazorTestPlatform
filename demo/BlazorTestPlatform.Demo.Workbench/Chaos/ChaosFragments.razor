@@ -1,0 +1,38 @@
+@using BlazorTestPlatform.Demo.UI
+@* Markup for the chaos stories. Each fragment reads DemoChaos when it renders, so a hub run gets its own faults. *@
+@code {
+    /// <summary>A save confirmation that is late on some runs.</summary>
+    public static RenderFragment Toast => @<div><Button>Save</Button> <p role="status">@(DemoChaos.ToastIsLate ? "Saving…" : "Saved")</p></div>;
+
+    /// <summary>A checkout total.</summary>
+    public static RenderFragment Total => @<dl><dt>Total</dt><dd data-testid="total">@(DemoChaos.TotalIsWrong ? "$41.99" : "$42.00")</dd></dl>;
+
+    /// <summary>An export toolbar whose button was renamed.</summary>
+    public static RenderFragment Export => @<div role="toolbar" aria-label="Report"><Button Variant="ButtonVariant.Secondary">@(DemoChaos.ExportIsRenamed ? "Download" : "Export CSV")</Button></div>;
+
+    // Stories capture their fragments when the catalog is built, so a fragment that varies by run decides when it renders.
+    private static readonly RenderFragment UnlabelledSearch = @<form role="search"><input type="search" /> <Button Type="submit">Search</Button></form>;
+    private static readonly RenderFragment LabelledSearch = @<form role="search"><label for="chaos-search">Search people</label> <input id="chaos-search" type="search" /> <Button Type="submit">Search</Button></form>;
+    private static readonly RenderFragment UnnamedAvatar = @<button type="button" class="c-user__avatar"><span aria-hidden="true">👤</span></button>;
+    private static readonly RenderFragment NamedAvatar = @<button type="button" class="c-user__avatar" aria-label="Ada Lovelace's profile"><span aria-hidden="true">👤</span></button>;
+
+    /// <summary>A search field with no label at all until it was fixed.</summary>
+    public static RenderFragment Search => builder => (DemoChaos.SearchIsUnlabelled ? UnlabelledSearch : LabelledSearch)(builder);
+
+    /// <summary>An icon-only avatar button that lost its name in the latest run.</summary>
+    public static RenderFragment Avatar => builder => (DemoChaos.AvatarIsUnnamed ? UnnamedAvatar : NamedAvatar)(builder);
+
+    /// <summary>A notification bell.</summary>
+    public static RenderFragment Bell => @<button type="button" aria-label="Notifications">🔔 <Badge Tone="BadgeTone.Danger" Appearance="BadgeAppearance.Solid" Size="BadgeSize.Small">3</Badge></button>;
+
+    /// <summary>An activity feed that grows, with a skipped heading level (known, moderate accessibility debt).</summary>
+    public static RenderFragment Feed => @<section aria-labelledby="chaos-feed"><h2 id="chaos-feed">Activity</h2>
+        <ul>
+            @for (var i = 0; i < DemoChaos.FeedItems; i++)
+            {
+                var item = i;
+                <li><h4>Update @item</h4><p>Ada Lovelace changed the plan.</p></li>
+            }
+        </ul>
+    </section>;
+}

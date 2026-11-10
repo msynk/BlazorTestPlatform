@@ -1,0 +1,112 @@
+@inherits LayoutComponentBase
+@inject HubStore Store
+@inject HubOptions Options
+@inject HubRunner Runner
+@inject NavigationManager Navigation
+@inject IServiceProvider Services
+
+<HeadContent>
+    <link rel="stylesheet" href="_content/BlazorTestPlatform.Hub/hub.css" />
+</HeadContent>
+
+@* Full page loads: pages are server-rendered and the script enhances each one. *@
+@if (allowed)
+{
+<div class="hub" data-enhance-nav="false">
+    <aside class="hub-nav">
+        <a class="hub-brand" href="@HubUrls.Page()">
+            <svg aria-hidden="true" width="26" height="26" viewBox="0 0 24 24"><path fill="currentColor" d="M3 3h8v8H3zm2 2v4h4V5zm8-2h8v8h-8zm2 2v4h4V5zM3 13h8v8H3zm2 2v4h4v-4zm11.3-2 1.4 2.9 3.2.5-2.3 2.2.5 3.2-2.8-1.5-2.9 1.5.6-3.2-2.3-2.2 3.2-.5z" /></svg>
+            <span>@Options.Title<small>Test hub</small></span>
+        </a>
+        <nav aria-label="Hub">
+            @foreach (var group in Groups)
+            {
+                <div>
+                    <h2>@group.Title</h2>
+                    <ul>
+                        @foreach (var item in group.Items)
+                        {
+                            <li>
+                                <NavLink href="@HubUrls.Page(item.Path)" Match="@(item.Path.Length == 0 ? NavLinkMatch.All : NavLinkMatch.Prefix)">
+                                    <span>@item.Label</span>
+                                    @if (item.Count is > 0)
+                                    {
+                                        <span class="count @(item.Alert ? "alert" : null)">@item.Count</span>
+                                    }
+                                </NavLink>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            }
+        </nav>
+    </aside>
+    <div class="hub-main">
+        <div class="hub-top">
+            <span class="crumbs">
+                @if (Data.History.Latest is { } latest)
+                {
+                    <span>Last run <a href="@HubUrls.Run(latest.Run.RunId)">@Fmt.Ago(latest.Run.FinishedAt)</a> · @latest.Run.Label</span>
+                }
+                else
+                {
+                    <span>No archived runs yet</span>
+                }
+            </span>
+            <span class="links">
+                @if (Runner.IsRunning)
+                {
+                    <a href="@HubUrls.Page("live")"><span class="pulse"></span> Run in progress</a>
+                }
+                @if (Options.WorkbenchUrl is { } workbench)
+                {
+                    <a href="@workbench">Workbench ↗</a>
+                }
+                <a href="@HubUrls.Page("integrations")">API &amp; exports</a>
+            </span>
+        </div>
+        <main class="hub-content" id="main">
+            @Body
+        </main>
+    </div>
+</div>
+<script suppress-error="BL9992" type="module" src="_content/BlazorTestPlatform.Hub/hub.js"></script>
+}
+
+@code {
+    private bool allowed;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        // The page inside is not rendered when access is denied, so the layout answers 404 itself.
+        allowed = await HubAccess.IsAllowedAsync(Options, Services);
+        if (!allowed)
+        {
+            Navigation.NotFound();
+        }
+    }
+
+    private HubSnapshot Data => Store.Current;
+
+    private sealed record NavItem(string Label, string Path, int? Count = null, bool Alert = false);
+
+    private sealed record NavGroup(string Title, IReadOnlyList<NavItem> Items);
+
+    private IEnumerable<NavGroup> Groups
+    {
+        get
+        {
+            var data = Data;
+            var failing = data.Results.Count(r => r.IsBlockingFailure);
+            var unstable = data.Stability.Count(s => s.Status is Stability.Flaky or Stability.Broken or Stability.Failing);
+            var visual = data.Results.Where(r => r.Visual is { IsFailure: true }).Select(r => r.Visual!.SnapshotName).Distinct().Count();
+            yield return new NavGroup("Overview", [new("Dashboard", string.Empty), new("Release readiness", "readiness")]);
+            yield return new NavGroup("Runs", [new("Runs", "runs", data.History.Runs.Count), new("Compare runs", "compare"), new("Run stories", "live")]);
+            yield return new NavGroup("Tests", [new("All tests", "tests", data.Results.Count), new("Failures", "failures", failing, failing > 0), new("Flaky & quarantine", "flaky", unstable, unstable > 0)]);
+            yield return new NavGroup("Reviews", [new("Visual review", "visual", visual, visual > 0), new("Accessibility", "accessibility", data.Results.Count(r => r.AccessibilityFailures.Count > 0), data.Results.Any(r => r.AccessibilityFailures.Count > 0))]);
+            yield return new NavGroup("Quality", [new("Performance", "performance"), new("Coverage & traceability", "coverage")]);
+            yield return new NavGroup("Workflow", [new("Impact & sharding", "impact"), new("Integrations", "integrations")]);
+        }
+    }
+}

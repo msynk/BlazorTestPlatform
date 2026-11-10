@@ -1,0 +1,129 @@
+@page "/_btp/flaky"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var today = DateOnly.FromDateTime(DateTime.UtcNow);
+    var keys = Data.Stability
+        .Where(s => Status is null ? s.Status is Stability.Flaky or Stability.Broken or Stability.Failing or Stability.Fixed : string.Equals(s.Status.ToString(), Status, StringComparison.OrdinalIgnoreCase))
+        .ToArray();
+    var flaky = Data.Stability.Where(s => s.Status == Stability.Flaky).ToArray();
+    var wasted = Data.Stability.Sum(s => s.WastedMilliseconds);
+
+    <PageHeader Title="Flaky tests &amp; quarantine" Description="Stability over the last runs, Trunk/Datadog style: Healthy, Failing (a fresh regression), Flaky (passes and fails), Broken (fails every time) and Fixed. Quarantine keeps a story running and reporting while its failures stop failing the build; entries live in quarantine.json, reviewed like code." />
+
+    <dl class="grid tiles" style="margin:0 0 16px">
+        <div class="tile flaky"><dt>Flaky</dt><dd>@flaky.Length</dd><div class="delta">@flaky.Count(s => s.Severity == FlakeSeverity.High) high · @flaky.Count(s => s.Severity == FlakeSeverity.Medium) medium · @flaky.Count(s => s.Severity == FlakeSeverity.Low) low</div></div>
+        <div class="tile fail"><dt>Broken</dt><dd>@Data.Stability.Count(s => s.Status == Stability.Broken)</dd></div>
+        <div class="tile fail"><dt>Failing</dt><dd>@Data.Stability.Count(s => s.Status == Stability.Failing)</dd><div class="delta">regressed recently</div></div>
+        <div class="tile pass"><dt>Fixed</dt><dd>@Data.Stability.Count(s => s.Status == Stability.Fixed)</dd></div>
+        <div class="tile quar"><dt>Quarantined</dt><dd>@Data.Quarantine.Entries.Count(e => e.IsActive(today))</dd><div class="delta">@Data.Quarantine.Entries.Count(e => !e.IsActive(today)) expired</div></div>
+        <div class="tile"><dt>Time lost</dt><dd>@Fmt.Duration(wasted)</dd><div class="delta">in failed or retried runs</div></div>
+    </dl>
+
+    <nav class="tabs" aria-label="Status">
+        <a href="@HubUrls.Page("flaky")" class="@(Status is null ? "active" : null)">Needs attention</a>
+        @foreach (var status in new[] { "Flaky", "Broken", "Failing", "Fixed", "Healthy", "New" })
+        {
+            <a href="@HubUrls.Page("flaky?status=" + status)" class="@(Status == status ? "active" : null)">@status</a>
+        }
+    </nav>
+
+    <section class="card" style="margin-bottom:16px">
+        <div class="body flush scroll-x">
+            <table class="table">
+                <thead><tr><th>Status</th><th>Story</th><th>History</th><th class="num">Flake rate</th><th class="num">Flips</th><th class="num">Runs</th><th>Quarantine</th></tr></thead>
+                <tbody>
+                    @foreach (var key in keys.Take(400))
+                    {
+                        var entry = Data.Quarantine.Find(key.Last.StoryId, key.Key, today);
+                        <tr>
+                            <td><StabilityBadge Status="key.Status" />@if (key.Severity != FlakeSeverity.None) { <div class="small muted">@key.Severity</div> }</td>
+                            <td class="title-cell"><a href="@HubUrls.Result(key.Key)"><strong>@key.Last.Name</strong></a><span class="muted small">@key.Last.Title · @Fmt.Cell(key.Last.Driver, key.Last.HostingModel, key.Last.Viewport, key.Last.Theme)</span><div><Tags Items="key.Tags" /></div></td>
+                            <td><HistoryStrip Points="key.Points" /></td>
+                            <td class="num">@(key.FlakeRate > 0 ? Fmt.Percent(key.FlakeRate) : "—")@if (key.FlakeRate > 0) { <div class="small muted">@Fmt.Percent(key.FlakeRateLow)–@Fmt.Percent(key.FlakeRateHigh)</div> }</td>
+                            <td class="num">@key.Flips</td>
+                            <td class="num">@key.Runs</td>
+                            <td>
+                                @if (entry is not null)
+                                {
+                                    <span class="badge quarantined" title="@entry.Reason">quarantined</span>
+                                }
+                                else if (Options.AllowChanges && key.Status is Stability.Flaky or Stability.Broken or Stability.Failing)
+                                {
+                                    <details>
+                                        <summary class="small" style="cursor:pointer;color:var(--h-accent)">Quarantine</summary>
+                                        <form method="post" action="@HubUrls.Page("actions/quarantine")" class="stack" style="margin-top:6px;min-width:240px">
+                                            <AntiforgeryToken />
+                                            <input type="hidden" name="returnUrl" value="@CurrentUrl" />
+                                            <input type="text" name="pattern" value="@key.Last.StoryId" aria-label="Pattern" />
+                                            <input type="text" name="reason" placeholder="Reason and issue" aria-label="Reason" required />
+                                            <input type="text" name="owner" placeholder="Owner" aria-label="Owner" />
+                                            <input type="date" name="expires" aria-label="Until" />
+                                            <button class="btn btn-small" type="submit">Quarantine</button>
+                                        </form>
+                                    </details>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            @if (keys.Length == 0)
+            {
+                <div class="empty"><strong>Nothing here</strong>@(Data.History.Runs.Count < 2 ? "Stability needs at least two archived runs." : "No results with this status in the window.")</div>
+            }
+        </div>
+    </section>
+
+    <section class="card" id="quarantine">
+        <header><div><h2>quarantine.json</h2><p class="mono small">@Data.Settings.QuarantineFilePath</p></div></header>
+        <div class="body flush scroll-x">
+            @if (Data.Quarantine.Entries.Count == 0)
+            {
+                <div class="empty">Nothing is quarantined. Quarantine a story from the table above, or with <code>btp quarantine add &lt;pattern&gt; --reason "…"</code>.</div>
+            }
+            else
+            {
+                <table class="table">
+                    <thead><tr><th>Pattern</th><th>Reason</th><th>Owner</th><th>Issue</th><th>Until</th><th class="num">Failing now</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var entry in Data.Quarantine.Entries)
+                        {
+                            var covered = Data.Results.Count(r => r.Quarantine?.Pattern == entry.Pattern);
+                            <tr>
+                                <td class="mono">@entry.Pattern</td>
+                                <td>@entry.Reason</td>
+                                <td>@(entry.Owner ?? "—")</td>
+                                <td>@(entry.Issue ?? "—")</td>
+                                <td>@if (entry.Expires is { } expires) { <span class="@(entry.IsActive(today) ? null : "badge fail")">@expires.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)@(entry.IsActive(today) ? null : " expired")</span> } else { <span class="muted">until removed</span> }</td>
+                                <td class="num">@covered</td>
+                                <td>
+                                    @if (Options.AllowChanges)
+                                    {
+                                        <form method="post" action="@HubUrls.Page("actions/quarantine")">
+                                            <AntiforgeryToken />
+                                            <input type="hidden" name="returnUrl" value="@CurrentUrl" />
+                                            <input type="hidden" name="pattern" value="@entry.Pattern" />
+                                            <input type="hidden" name="release" value="true" />
+                                            <button class="btn btn-small" type="submit">Release</button>
+                                        </form>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    /// <summary>Status filter.</summary>
+    [SupplyParameterFromQuery(Name = "status")] public string? Status { get; set; }
+
+    /// <inheritdoc />
+    protected override void OnParametersSet() => Status = string.IsNullOrEmpty(Status) ? null : Status;
+}

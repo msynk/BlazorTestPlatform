@@ -1,0 +1,164 @@
+@page "/_btp/accessibility"
+@layout HubLayout
+@inherits HubPageBase
+
+@if (Allowed)
+{
+    var scanned = Data.Results.Where(r => r.Accessibility is not null).ToArray();
+    var violations = scanned.SelectMany(r => r.Accessibility!.Violations.Select(v => (Result: r, Violation: v))).ToArray();
+    var byRule = violations.GroupBy(x => x.Violation.RuleId).OrderByDescending(g => g.Max(x => x.Violation.Impact)).ThenByDescending(g => g.Count()).ToArray();
+    var byComponent = violations.GroupBy(x => x.Result.Title).OrderByDescending(g => g.Count()).ToArray();
+    var incomplete = scanned.SelectMany(r => r.Accessibility!.Incomplete.Select(v => (Result: r, Violation: v))).GroupBy(x => x.Violation.RuleId).OrderByDescending(g => g.Count()).ToArray();
+    var waivers = scanned.SelectMany(r => r.Accessibility!.Waivers.Select(w => (Result: r, Waiver: w))).GroupBy(x => (x.Waiver.RuleId, x.Waiver.Justification)).ToArray();
+    var latest = Data.History.Latest;
+    IReadOnlyList<ViolationDelta> delta = latest is null ? [] : RunHistory.AccessibilityDelta(Data.History.Previous, latest);
+    var trend = Data.History.Trend();
+    var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+    <PageHeader Title="Accessibility" Description="axe-core in every browser run and 37 markup rules in bUnit, with a baseline that separates new violations from known debt, waivers that need a written reason, the needs-review queue axe could not decide, and the manual WCAG reviews that go stale when markup changes.">
+        <a class="btn" href="@HubUrls.Page("coverage#reviews")">Manual reviews</a>
+    </PageHeader>
+
+    <dl class="grid tiles" style="margin:0 0 16px">
+        <div class="tile"><dt>Results scanned</dt><dd>@scanned.Length</dd><div class="delta">@scanned.Count(r => r.Accessibility!.Violations.Count == 0) clean</div></div>
+        <div class="tile fail"><dt>Fail the gate</dt><dd>@Data.Results.Count(r => r.AccessibilityFailures.Count > 0)</dd><div class="delta">policy: @Data.Settings.Accessibility.FailOn and above</div></div>
+        <div class="tile"><dt>Critical / serious</dt><dd>@violations.Count(x => x.Violation.Impact == AccessibilityImpact.Critical) / @violations.Count(x => x.Violation.Impact == AccessibilityImpact.Serious)</dd></div>
+        <div class="tile"><dt>Moderate / minor</dt><dd>@violations.Count(x => x.Violation.Impact == AccessibilityImpact.Moderate) / @violations.Count(x => x.Violation.Impact == AccessibilityImpact.Minor)</dd></div>
+        <div class="tile flaky"><dt>Needs review</dt><dd>@incomplete.Sum(g => g.Count())</dd><div class="delta">axe "incomplete"</div></div>
+        <div class="tile"><dt>Waived</dt><dd>@waivers.Length</dd><div class="delta">with justification</div></div>
+    </dl>
+
+    <div class="grid two">
+        <section class="card">
+            <header><div><h2>Since the previous run</h2><p>New violations block; existing ones are known debt; fixed ones disappeared. Identity: result, rule and element.</p></div></header>
+            <div class="body">
+                <div class="row" style="margin-bottom:10px">
+                    <span class="badge fail">@delta.Count(d => d.Change == ViolationChange.New) new</span>
+                    <span class="badge">@delta.Count(d => d.Change == ViolationChange.Existing) existing</span>
+                    <span class="badge pass">@delta.Count(d => d.Change == ViolationChange.Fixed) fixed</span>
+                </div>
+                @if (delta.Count(d => d.Change != ViolationChange.Existing) == 0)
+                {
+                    <p class="muted">@(latest is null ? "No archived runs yet." : "No change in violations between the last two runs.")</p>
+                }
+                else
+                {
+                    <table class="table">
+                        <tbody>
+                            @foreach (var d in delta.Where(d => d.Change != ViolationChange.Existing).Take(30))
+                            {
+                                <tr>
+                                    <td><span class="badge @(d.Change == ViolationChange.New ? "fail" : "pass")">@d.Change</span></td>
+                                    <td><strong>@d.Violation.RuleId</strong> <span class="badge @d.Violation.Impact.ToString().ToLowerInvariant()">@d.Violation.Impact</span><div class="small muted"><a href="@HubUrls.Result(d.Key)">@d.Title / @d.Name</a> · <span class="mono">@d.Violation.Targets.FirstOrDefault()</span></div></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </section>
+        <section class="card">
+            <header><div><h2>Violations per run</h2><p>Accessibility debt over the archived runs.</p></div></header>
+            <div class="body">
+                @if (trend.Count == 0)
+                {
+                    <p class="muted">No archived runs yet.</p>
+                }
+                else
+                {
+                    <TrendChart Labels="@trend.Select(t => t.At.ToLocalTime().ToString("MMM d", CultureInfo.InvariantCulture)).ToArray()" Series="@([new ChartSeries("Violations", "fail", trend.Select(t => (double)t.AccessibilityViolations).ToArray())])" Area="true" Caption="Accessibility violations per run" />
+                }
+            </div>
+        </section>
+    </div>
+
+    <section class="card" style="margin-top:16px">
+        <header><div><h2>By rule</h2><p>Every violated rule in the latest results, worst first.</p></div></header>
+        <div class="body flush scroll-x">
+            @if (byRule.Length == 0)
+            {
+                <div class="empty"><strong>No violations</strong>@(scanned.Length == 0 ? "No result carries an accessibility scan yet." : "Every scanned result is clean.")</div>
+            }
+            else
+            {
+                <table class="table">
+                    <thead><tr><th>Rule</th><th>Impact</th><th>WCAG</th><th class="num">Stories</th><th class="num">Cells</th><th>Where</th></tr></thead>
+                    <tbody>
+                        @foreach (var rule in byRule)
+                        {
+                            var first = rule.First().Violation;
+                            <tr>
+                                <td><strong>@rule.Key</strong><div class="small muted">@first.Help@if (first.HelpUrl is { } url) { <span> · </span><a href="@url" target="_blank" rel="noopener">docs</a> }</div></td>
+                                <td><span class="badge @first.Impact.ToString().ToLowerInvariant()">@first.Impact</span></td>
+                                <td>@foreach (var criterion in first.WcagCriteria) { <span class="chip">@criterion</span> }</td>
+                                <td class="num">@rule.Select(x => x.Result.StoryId).Distinct().Count()</td>
+                                <td class="num">@rule.Count()</td>
+                                <td class="small">@foreach (var x in rule.GroupBy(x => x.Result.StoryId).Take(4)) { <div><a href="@HubUrls.Result(x.First().Result.Key)">@x.First().Result.Title / @x.First().Result.Name</a> <span class="mono muted">@x.First().Violation.Nodes.FirstOrDefault()?.Target</span></div> }</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </section>
+
+    <div class="grid two" style="margin-top:16px">
+        <section class="card">
+            <header><div><h2>By component</h2><p>Where the debt is.</p></div></header>
+            <div class="body flush">
+                <table class="table">
+                    <tbody>
+                        @foreach (var component in byComponent.Take(15))
+                        {
+                            <tr><td>@component.Key</td><td class="num">@component.Count() violations</td><td class="num">@component.Select(x => x.Violation.RuleId).Distinct().Count() rules</td></tr>
+                        }
+                        @if (byComponent.Length == 0)
+                        {
+                            <tr><td class="muted">No component has violations.</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        <section class="card">
+            <header><div><h2>Needs review</h2><p>Checks axe could not decide automatically (axe "incomplete"): a person has to look.</p></div></header>
+            <div class="body flush">
+                <table class="table">
+                    <tbody>
+                        @foreach (var rule in incomplete.Take(15))
+                        {
+                            <tr><td><strong>@rule.Key</strong><div class="small muted">@rule.First().Violation.Help</div></td><td class="num">@rule.Count() cells</td></tr>
+                        }
+                        @if (incomplete.Length == 0)
+                        {
+                            <tr><td class="muted">Nothing waiting for review.</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <section class="card" style="margin-top:16px">
+        <header><div><h2>Waivers and suppressions</h2><p>Rules turned off for a story with a written justification, and time-boxed suppressions from btp.json that resurface when they expire.</p></div></header>
+        <div class="body flush scroll-x">
+            <table class="table">
+                <thead><tr><th>Rule</th><th>Source</th><th>Justification</th><th>Applies to</th><th>Expires</th></tr></thead>
+                <tbody>
+                    @foreach (var waiver in waivers)
+                    {
+                        <tr><td class="mono">@waiver.Key.RuleId</td><td>@waiver.First().Waiver.Source</td><td>@waiver.Key.Justification</td><td class="small">@string.Join(", ", waiver.Select(x => x.Result.StoryId).Distinct().Take(4))</td><td>—</td></tr>
+                    }
+                    @foreach (var suppression in Data.Settings.Accessibility.Suppressions)
+                    {
+                        <tr><td class="mono">@suppression.RuleId</td><td>btp.json</td><td>@suppression.Justification</td><td class="small mono">@suppression.StoryPattern</td><td>@if (suppression.Expires is { } expires) { <span class="@(expires < today ? "badge fail" : null)">@expires.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</span> }</td></tr>
+                    }
+                    @if (waivers.Length == 0 && Data.Settings.Accessibility.Suppressions.Count == 0)
+                    {
+                        <tr><td colspan="5" class="muted">No waivers.</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}

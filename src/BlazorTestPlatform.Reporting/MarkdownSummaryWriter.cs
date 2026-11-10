@@ -18,13 +18,13 @@ public static class MarkdownSummaryWriter
         var md = new StringBuilder();
         md.AppendLine(summary.Success ? "## ✅ BlazorTestPlatform: all stories passed" : $"## ❌ BlazorTestPlatform: {summary.Failed} failing");
         md.AppendLine();
-        md.AppendLine("| Passed | Failed | Flaky | Skipped | Visual changes | A11y failures | Perf regressions |");
-        md.AppendLine("|---:|---:|---:|---:|---:|---:|---:|");
-        md.AppendLine(CultureInfo.InvariantCulture, $"| {summary.Passed} | {summary.Failed} | {summary.Flaky} | {summary.Skipped} | {summary.VisualChanges} | {summary.AccessibilityFailures} | {summary.PerformanceRegressions} |");
+        md.AppendLine("| Passed | Failed | Flaky | Quarantined | Skipped | Visual changes | A11y failures | Perf regressions |");
+        md.AppendLine("|---:|---:|---:|---:|---:|---:|---:|---:|");
+        md.AppendLine(CultureInfo.InvariantCulture, $"| {summary.Passed} | {summary.Failed} | {summary.Flaky} | {summary.Quarantined} | {summary.Skipped} | {summary.VisualChanges} | {summary.AccessibilityFailures} | {summary.PerformanceRegressions} |");
         md.AppendLine();
         md.AppendLine(CultureInfo.InvariantCulture, $"{summary.Stories} stories · drivers: {string.Join(", ", summary.Drivers)} · render modes: {string.Join(", ", summary.HostingModels)}");
 
-        var failed = summary.Results.Where(r => r.Outcome == StoryOutcome.Failed).ToArray();
+        var failed = summary.Results.Where(r => r.IsBlockingFailure).ToArray();
         if (failed.Length > 0)
         {
             md.AppendLine().AppendLine("### Failures").AppendLine();
@@ -36,6 +36,16 @@ public static class MarkdownSummaryWriter
             if (failed.Length > 30)
             {
                 md.AppendLine(CultureInfo.InvariantCulture, $"- …and {failed.Length - 30} more");
+            }
+        }
+
+        var quarantined = summary.Results.Where(r => r.Outcome == StoryOutcome.Failed && r.Quarantine is not null).ToArray();
+        if (quarantined.Length > 0)
+        {
+            md.AppendLine().AppendLine("### Quarantined (failed, not blocking)").AppendLine();
+            foreach (var result in quarantined.Take(30))
+            {
+                md.AppendLine(CultureInfo.InvariantCulture, $"- {Escape(result.Title)} / {Escape(result.Name)} `{JUnitReportWriter.Cell(result)}` — {Escape(result.Quarantine!.Reason)}");
             }
         }
 

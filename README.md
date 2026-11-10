@@ -1,6 +1,6 @@
 # BlazorTestPlatform
 
-**Write a component story once. Run it as a bUnit test, a real-browser interaction test, a visual snapshot, an accessibility audit, a render-performance check and a cross-hosting regression test. Browse it in a component workbench.**
+**Write a component story once. Run it as a bUnit test, a real-browser interaction test, a visual snapshot, an accessibility audit, a render-performance check and a cross-hosting regression test. Browse it in a component workbench, and review, analyze and decide in a self-hosted test hub.**
 
 BlazorTestPlatform is a quality platform for Blazor component libraries and apps. It does not replace bUnit or Playwright. It joins them, together with axe-core and a visual-regression engine, into one workflow built around a single source of truth: the **story**.
 
@@ -34,7 +34,8 @@ That one definition runs in all of these places:
 | **bUnit** (`BunitStoryRunner`) | Renders the story, runs the play script with browser-faithful keyboard, pointer and focus emulation, applies static accessibility rules, and checks render budgets | milliseconds |
 | **Real browsers** (`BrowserStoryRunner`) | Runs the same play script in Chromium, Firefox or WebKit under **Static SSR, Interactive Server, WebAssembly and Auto**, then takes a visual snapshot, runs an axe-core scan, and checks console errors and the Blazor error UI | seconds |
 | **Workbench** (`/_workbench`) | Lets you browse every story across themes, viewports and render modes, edit its parameters live with generated controls (kept in the URL, so links reproduce what you see), run its play script inside the frame (**▶ Run interactions**), and see its quality gates and manual review status | interactive |
-| **Reports** (`btp report`) | Produces an HTML report with a visual-diff viewer, timelines, accessibility and performance details and story state coverage, JUnit XML, a GitHub step summary, a self-updating pull-request comment and cross-run flake history | — |
+| **Test hub** (`/_btp`) | A self-hosted test platform website over your results and run history: dashboard and trends, runs and comparisons, stability (flaky, broken, fixed) with quarantine, failures grouped by cause, visual review with grouped accept/reject, accessibility baselines, performance trends, coverage and WCAG traceability, impact analysis and sharding, live in-memory runs and a release-readiness verdict ([guide](docs/hub.md)) | interactive |
+| **Reports** (`btp report`) | Produces an HTML report with a visual-diff viewer, timelines, accessibility and performance details and story state coverage, JUnit XML, a GitHub step summary, a self-updating pull-request comment, cross-run flake history and the run archive the hub reads | — |
 
 ## Why this exists
 
@@ -64,7 +65,9 @@ BlazorTestPlatform puts one layer above all of them:
 | **Accessibility tree snapshots** | `ctx.ExpectAriaSnapshotAsync(...)` asserts roles, names and states as a tree, identically in bUnit, Playwright and the in-app driver. |
 | **Workbench inspector and recorder** | Live actions, mocked requests, JS calls, console and accessibility tree of the selected story; **Record** turns interactions in the frame into a play function with unique, readable locators. |
 | **Any test framework** | xUnit v3, NUnit, MSTest and TUnit packages: stories as data rows with names, categories and skip reasons, and skipped runs reported as skipped. `btp init` scaffolds the test class, a first story and a GitHub, Azure Pipelines or GitLab pipeline. |
-| **CI integration** | SARIF 2.1.0 for code scanning, OpenTelemetry traces and metrics (`BtpTelemetry`), test impact analysis (`StoryImpact`, `BTP_CHANGED_SINCE`), sharding, JUnit, Markdown and pull-request comments. Story analyzers come with code fixes. |
+| **CI integration** | SARIF 2.1.0 for code scanning, OpenTelemetry traces and metrics (`BtpTelemetry`), test impact analysis (`StoryImpact`, `BTP_CHANGED_SINCE`), sharding and duration-balanced shard plans (`ShardPlan`), JUnit, Markdown and pull-request comments, and a run archive (`btp report --archive`) with commit, branch and CI metadata. Story analyzers come with code fixes. |
+| **Run history and triage** | Stability per result over archived runs (`RunHistory`: healthy, failing, flaky, broken, fixed, with a flake rate and its 95% interval), smart tags (new failure, still failing, fixed, slower), unique errors grouped by a normalized signature with a deterministic category, likely cause and next step (`FailureAnalysis`), run comparisons, and accessibility baselines that tell new violations from known debt. |
+| **Quarantine** | A committed `quarantine.json` (`btp quarantine add/remove/list`, or the hub): quarantined stories keep running and reporting, but their failures stop failing the build until the entry expires. |
 
 ## Packages
 
@@ -76,15 +79,16 @@ BlazorTestPlatform puts one layer above all of them:
 | `BlazorTestPlatform.Workbench` | Component workbench UI, story frames for every render mode, per-story service overrides, in-app play driver | Core, Components.Web |
 | `BlazorTestPlatform.Playwright` | Browser driver, matrix runner, axe-core, diagnostics, in-process/external/process hosts | Core, Workbench, Visual, Playwright, AxeCore, Mvc.Testing |
 | `BlazorTestPlatform.Visual` | PNG codec, perceptual diff, baseline store | Core |
-| `BlazorTestPlatform.Reporting` | HTML, JUnit, Markdown and SARIF reports, pull-request comments, flake history | Core |
+| `BlazorTestPlatform.Reporting` | HTML, JUnit, Markdown and SARIF reports, pull-request comments, flake history, the run archive, stability and failure analysis | Core |
+| `BlazorTestPlatform.Hub` | The self-hosted test hub (`/_btp`): history, triage, reviews, quality gates, live runs and a JSON API | Core, Reporting, Visual, Bunit, ASP.NET Core |
 | `BlazorTestPlatform.Xunit` / `.NUnit` / `.MSTest` / `.TUnit` | Stories and matrix cells as test-framework data rows; skipped runs reported as skips | Core and the framework |
-| `BlazorTestPlatform.Cli` (`btp`) | `init`, `report` (with `--pr-comment`, `--sarif`), `approve`, `perf approve`, `a11y init/status`, `flaky`, `clean` | Core, Visual, Reporting |
+| `BlazorTestPlatform.Cli` (`btp`) | `init`, `report` (with `--pr-comment`, `--sarif`, `--archive`), `approve`, `perf approve`, `quarantine add/remove/list`, `a11y init/status`, `flaky`, `clean` | Core, Visual, Reporting |
 
 Target framework: **.NET 10**.
 
 ## Quick start
 
-**See it first.** The complete working version of these steps is in [`demo/`](demo): a design system of 14 components (`BlazorTestPlatform.Demo.UI`), 90 stories, a workbench host (Server + WebAssembly) and a test project. Run the host and its home page gives a guided tour that opens the workbench at the story behind each feature:
+**See it first.** The complete working version of these steps is in [`demo/`](demo): a design system of 14 components (`BlazorTestPlatform.Demo.UI`), 90 stories, a host (Server + WebAssembly) with the workbench and the test hub, and a test project. Run the host: its home page is a guided tour of the whole platform, and on first start it records ten real in-memory runs, including stories that fail on purpose, so the hub has history, flaky and broken results, and accessibility changes to show:
 
 ```bash
 dotnet run --project demo/BlazorTestPlatform.Demo.Workbench    # http://localhost:5288
@@ -160,6 +164,7 @@ btp perf approve       # accept intended render-performance changes
 * [Cross-hosting matrix](docs/cross-hosting.md): render modes, hydration, prerendering and hosts
 * [Quality gates](docs/quality-gates.md): visual regression, accessibility (automated and manual review), render performance and story state coverage
 * [Test frameworks](docs/test-frameworks.md): xUnit, NUnit, MSTest and TUnit integration, and `btp init`
+* [The test hub](docs/hub.md): hosting, the run archive, pages, stability, failure categories, quarantine and the JSON API
 * [Diagnostics, reports and CI](docs/ci.md): timelines, traces, flake history, the `btp` CLI, pull-request comments, SARIF, OpenTelemetry, impact analysis, GitHub Actions, Azure Pipelines, GitLab and mutation testing
 * [Configuration](docs/configuration.md): `btp.json` and `BTP_*` environment variables
 * [Architecture](docs/architecture.md): how the pieces fit, and how to write a new driver
@@ -186,8 +191,8 @@ The latest preview is `0.1.0-preview.2`; [CHANGELOG.md](CHANGELOG.md) lists what
 
 ```
 src/        the packages
-tests/      unit and driver tests for every package (633 tests)
-demo/       a design system, its stories, a workbench host with a guided tour (Server + WASM), end-to-end tests
+tests/      unit and driver tests for every package (661 tests)
+demo/       a design system, its stories, a host with the tour, workbench and test hub (Server + WASM), end-to-end tests
 docs/       guides
 ```
 

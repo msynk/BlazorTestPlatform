@@ -1,0 +1,27 @@
+<PageTitle>@Title · @Options.Title</PageTitle>
+<div class="page-head">
+    <div>
+        <h1>@Title</h1>
+        @if (Description is not null)
+        {
+            <p>@Description</p>
+        }
+    </div>
+    @if (ChildContent is not null)
+    {
+        <div class="actions">@ChildContent</div>
+    }
+</div>
+
+@code {
+    [Inject] private HubOptions Options { get; set; } = default!;
+
+    /// <summary>Title.</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    /// <summary>One or two sentences on what the page shows.</summary>
+    [Parameter] public string? Description { get; set; }
+
+    /// <summary>Actions.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

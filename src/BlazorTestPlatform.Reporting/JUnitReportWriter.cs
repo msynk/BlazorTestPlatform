@@ -24,8 +24,8 @@ public static class JUnitReportWriter
             var suite = new XElement("testsuite",
                 new XAttribute("name", Text(group.Key)),
                 new XAttribute("tests", group.Count()),
-                new XAttribute("failures", group.Count(r => r.Outcome == StoryOutcome.Failed)),
-                new XAttribute("skipped", group.Count(r => r.Outcome == StoryOutcome.Skipped)),
+                new XAttribute("failures", group.Count(r => r.IsBlockingFailure)),
+                new XAttribute("skipped", group.Count(r => r.Outcome == StoryOutcome.Skipped || (r.Outcome == StoryOutcome.Failed && r.Quarantine is not null))),
                 new XAttribute("time", Seconds(group.Sum(r => r.DurationMilliseconds))));
 
             foreach (var result in group)
@@ -37,6 +37,11 @@ public static class JUnitReportWriter
 
                 switch (result.Outcome)
                 {
+                    // Quarantined: reported as skipped (it must not fail the CI job), with the failure kept in the output.
+                    case StoryOutcome.Failed when result.Quarantine is { } quarantine:
+                        testCase.Add(new XElement("skipped", new XAttribute("message", Text($"quarantined: {quarantine.Reason}"))));
+                        testCase.Add(new XElement("system-out", new XCData(Text($"QUARANTINED ({quarantine.Pattern}): {result.Error}"))));
+                        break;
                     case StoryOutcome.Failed:
                         testCase.Add(new XElement("failure",
                             new XAttribute("message", Text(FirstLine(result.Error ?? "failed"))),

@@ -39,9 +39,22 @@ public sealed class TourTests
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("Run it as every kind of test.", body, StringComparison.Ordinal);
+        Assert.Contains("A test platform for Blazor", body, StringComparison.Ordinal);
         Assert.Contains("href=\"/_workbench?story=overlays-dialog--keyboard&amp;play=1\"", body, StringComparison.Ordinal);
+        Assert.Contains("href=\"/_btp/visual\"", body, StringComparison.Ordinal);
         Assert.DoesNotContain("tour-missing", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Every_hub_page_the_tour_links_to_responds()
+    {
+        await using var host = new WebApplicationFactory<Program>();
+        using var client = host.CreateClient();
+        foreach (var page in Tour.HubPages)
+        {
+            using var response = await client.GetAsync(BlazorTestPlatform.Hub.HubUrls.Page(page.Split('#')[0]), TestContext.Current.CancellationToken);
+            Assert.True(response.StatusCode == HttpStatusCode.OK, $"/_btp/{page} answered {(int)response.StatusCode}");
+        }
     }
 
     private static string? RepositoryRoot()
