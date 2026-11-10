@@ -18,4 +18,5 @@ public sealed class PeopleClient(HttpClient http)
 
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
 [JsonSerializable(typeof(Person[]))]
+[JsonSerializable(typeof(SignUpRequest))]
 public sealed partial class DemoJsonContext : JsonSerializerContext;

@@ -18,6 +18,7 @@ public sealed class BrowserEmulationStories : Stories<BrowserEmulationPanel>
         stories.Defaults(s => s.NoVisual().Matrix(m => m.ExcludedHostingModels.Add(HostingModel.StaticServer)));
 
         stories.Add("Geolocation", s => s
+            .Description("Geolocation(...) grants the permission and fakes the position; SetGeolocationAsync moves it mid-play. BrowserBudget(...) limits layout shift and DOM size in real browsers.")
             .Geolocation(52.37, 4.89)
             .BrowserBudget(b =>
             {
@@ -37,6 +38,7 @@ public sealed class BrowserEmulationStories : Stories<BrowserEmulationPanel>
 
         // WebAssembly only: under Interactive Server, going offline would also cut the circuit.
         stories.Add("Offline", s => s
+            .Description("SetOfflineAsync flips navigator.onLine. Requires(...) declares the capability, so bUnit and the in-app driver report the story as skipped, with the reason.")
             .Requires(DriverCapabilities.BrowserEmulation, "goes offline from play")
             .Matrix(m => m.HostingModels.Add(HostingModel.InteractiveWebAssembly))
             .Play(async ctx =>
@@ -50,6 +52,7 @@ public sealed class BrowserEmulationStories : Stories<BrowserEmulationPanel>
             }));
 
         stories.Add("Slow network", s => s
+            .Description("NetworkLatency(...) slows every HTTP request the page makes.")
             .NetworkLatency(TimeSpan.FromMilliseconds(400))
             .Matrix(m => m.HostingModels.Add(HostingModel.InteractiveServer))
             .Play(async ctx =>

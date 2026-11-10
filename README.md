@@ -84,7 +84,13 @@ Target framework: **.NET 10**.
 
 ## Quick start
 
-The complete working version of these steps is in [`demo/`](demo): a design system (`BlazorTestPlatform.Demo.UI`), its stories, a workbench host (Server + WebAssembly) and a test project. The project runs 49 stories in bUnit, 76 cross-hosting browser cases, visual/axe cases across themes and viewports, 90 Firefox and WebKit cases, and 38 in-app play runs, plus driver-parity, story-coverage and review gates.
+**See it first.** The complete working version of these steps is in [`demo/`](demo): a design system of 14 components (`BlazorTestPlatform.Demo.UI`), 90 stories, a workbench host (Server + WebAssembly) and a test project. Run the host and its home page gives a guided tour that opens the workbench at the story behind each feature:
+
+```bash
+dotnet run --project demo/BlazorTestPlatform.Demo.Workbench    # http://localhost:5288
+```
+
+[demo/README.md](demo/README.md) maps every feature to its story, code and test. The test project runs the 90 stories in bUnit, 129 cross-hosting browser cases, 194 visual and axe-core cases across themes and viewports, 132 Firefox and WebKit cases and 62 in-app play runs, plus driver-parity, pairwise-coverage, impact-analysis, story-coverage and manual-review gates.
 
 **1. Write stories** in a class library that references your components and `BlazorTestPlatform.Core` (see [docs/stories.md](docs/stories.md)).
 
@@ -180,8 +186,8 @@ The latest preview is `0.1.0-preview.2`; [CHANGELOG.md](CHANGELOG.md) lists what
 
 ```
 src/        the packages
-tests/      unit and driver tests for every package (613 tests)
-demo/       BlazorTestPlatform.Demo.UI design system, stories, workbench host (Server + WASM), end-to-end tests
+tests/      unit and driver tests for every package (633 tests)
+demo/       a design system, its stories, a workbench host with a guided tour (Server + WASM), end-to-end tests
 docs/       guides
 ```
 

@@ -79,6 +79,14 @@ public sealed class AsyncLoaderStories : Stories<AsyncLoader>
         stories.Add("Frozen clock", s => s.UseFakeTime(new DateTimeOffset(2030, 1, 2, 9, 0, 0, TimeSpan.Zero)));
 }
 
+public sealed class DelayedSaveStories : Stories<DelayedSave>
+{
+    public override string Title => "Tests/Delayed save";
+
+    protected override void Define(StoryCollectionBuilder<DelayedSave> stories) =>
+        stories.Add("Default", s => s.UseFakeTime(new DateTimeOffset(2030, 1, 2, 9, 0, 0, TimeSpan.Zero)));
+}
+
 public sealed class GreetingStories : Stories<Greeting>
 {
     public override string Title => "Tests/Greeting";

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components;
 
 namespace BlazorTestPlatform.Demo.UI.Stories;
 
+/// <summary>A WAI-ARIA widget tested by keyboard: roving tabindex, arrow keys, Home and End, and focus moved by the component.</summary>
 public sealed class TabsStories : Stories<Tabs>
 {
     private static readonly IReadOnlyList<Tabs.TabItem> Items =
@@ -21,8 +22,10 @@ public sealed class TabsStories : Stories<Tabs>
             .Arg(t => t.Items, Items)
             .Bind(t => t.SelectedIndex, 0));
 
-        stories.Add("Default");
-        stories.Add("Second tab selected", s => s.Bind(t => t.SelectedIndex, 1));
+        stories.Add("Default", s => s.Description("Items is a list of records with RenderFragment content: any parameter type works as an argument."));
+        stories.Add("Second tab selected", s => s
+            .Description("SelectedIndex is bound, so clicking a tab in the frame updates the story's value.")
+            .Bind(t => t.SelectedIndex, 1));
 
         stories.Add("Keyboard navigation", s => s
             .Description("WAI-ARIA tabs: one tab stop, arrows move between tabs, Home/End jump, Tab enters the panel.")

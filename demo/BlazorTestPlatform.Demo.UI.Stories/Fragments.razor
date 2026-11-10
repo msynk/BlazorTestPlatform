@@ -1,0 +1,47 @@
+@namespace BlazorTestPlatform.Demo.UI.Stories
+@using BlazorTestPlatform.Demo.UI
+
+@* Render fragments for stories, written in Razor. Story collections stay in .cs files (the catalog generator only
+   reads C#), and use these fields: .Template(l => l.ItemTemplate, Fragments.PersonCard). *@
+@code {
+    /// <summary>An item template for <see cref="PersonList"/>: name, email and a team badge.</summary>
+    public static readonly RenderFragment<Person> PersonCard = person =>
+        @<div class="c-person-card">
+            <strong>@person.Name</strong>
+            <Badge Tone="@TeamTone(person.Team)" Size="BadgeSize.Small">@person.Team</Badge>
+            <span class="c-person-card__email">@person.Email</span>
+        </div>;
+
+    /// <summary>Empty-state content for <see cref="PersonList"/>.</summary>
+    public static readonly RenderFragment InviteTeammates =
+        @<div class="c-sink__row">
+            <p class="c-todo__empty">No teammates yet.</p>
+            <a class="c-button c-button--secondary c-button--small" href="invite">Invite your team</a>
+        </div>;
+
+    /// <summary>The design system on one page: one snapshot per theme and viewport catches a change to shared tokens.</summary>
+    public static readonly RenderFragment KitchenSink =
+        @<div class="c-sink">
+            <div class="c-sink__row">
+                <Button>Save changes</Button>
+                <Button Variant="ButtonVariant.Secondary">Cancel</Button>
+                <Button Variant="ButtonVariant.Danger" Size="ButtonSize.Small">Delete</Button>
+                <Button Loading="true">Saving…</Button>
+            </div>
+            <div class="c-sink__row">
+                <Badge Tone="BadgeTone.Info">Info</Badge>
+                <Badge Tone="BadgeTone.Success" Dot="true">Live</Badge>
+                <Badge Tone="BadgeTone.Warning" Appearance="BadgeAppearance.Outline">Beta</Badge>
+                <Badge Tone="BadgeTone.Danger" Appearance="BadgeAppearance.Solid">Blocked</Badge>
+            </div>
+            <TextField Label="Project name" Value="Apollo" Hint="Shown on invoices." Id="sink-project" />
+            <Alert Severity="AlertSeverity.Warning" Title="Scheduled maintenance">The API is read-only on Sunday from 02:00 to 03:00 UTC.</Alert>
+        </div>;
+
+    private static BadgeTone TeamTone(string team) => team switch
+    {
+        "Design" => BadgeTone.Info,
+        "Engineering" => BadgeTone.Success,
+        _ => BadgeTone.Warning,
+    };
+}

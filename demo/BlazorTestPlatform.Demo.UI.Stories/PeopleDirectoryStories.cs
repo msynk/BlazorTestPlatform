@@ -29,15 +29,17 @@ public sealed class PeopleDirectoryStories : Stories<PeopleDirectory>
                 http.Get("api/people?team=Support").RespondJson([], DemoJsonContext.Default.PersonArray);
             }));
 
-        stories.Add("Loaded");
+        stories.Add("Loaded", s => s.Description("The collection defaults answer GET api/people from MockHttp, a fake backend scoped to the story. The component's typed HttpClient never notices."));
 
-        stories.Add("Empty team", s => s.MockHttp(http => http.Get("api/people").RespondJson([], DemoJsonContext.Default.PersonArray)));
+        stories.Add("Empty team", s => s.Description("A story adds its own rules; later rules win.").MockHttp(http => http.Get("api/people").RespondJson([], DemoJsonContext.Default.PersonArray)));
 
         stories.Add("Loading", s => s
+            .Description("Never() keeps the request pending, so the loading state is a stable story.")
             .MockHttp(http => http.Get("api/people").Never())
             .Prerender(false));
 
         stories.Add("Server error with retry", s => s
+            .Description("Times(1) answers the first request with a 500, then falls back to the defaults: Retry succeeds. ExpectRequest counts both requests.")
             .MockHttp(http => http.Get("api/people").RespondStatus(500).Times(1))
             .Play(async ctx =>
             {
@@ -47,7 +49,7 @@ public sealed class PeopleDirectoryStories : Stories<PeopleDirectory>
                 await ctx.ExpectRequest("GET", "api/people").ToHaveBeenMadeAsync(times: 2);
             }));
 
-        stories.Add("Filter by team", s => s.Play(async ctx =>
+        stories.Add("Filter by team", s => s.Description("Selecting a team sends the query string the mock expects.").Play(async ctx =>
         {
             await ctx.Expect(ctx.GetByRole("listitem")).ToHaveCountAsync(3);
 

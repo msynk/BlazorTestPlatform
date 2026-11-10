@@ -1,6 +1,22 @@
 {
   "schema": "https://blazortestplatform.dev/schemas/performance-baseline-v1.json",
   "stories": {
+    "data-person-list--large-list": {
+      "rootRenderCount": 1,
+      "totalRenderCount": 1,
+      "allocatedBytes": 718816,
+      "medianMilliseconds": 10.194,
+      "recordedAt": "2026-11-10T05:23:07.4978839+00:00",
+      "environment": ".NET 10.0.14; Microsoft Windows 10.0.26100"
+    },
+    "data-person-list--sort-by-name": {
+      "rootRenderCount": 2,
+      "totalRenderCount": 2,
+      "allocatedBytes": 24240,
+      "medianMilliseconds": 1.699,
+      "recordedAt": "2026-11-10T05:23:01.1994038+00:00",
+      "environment": ".NET 10.0.14; Microsoft Windows 10.0.26100"
+    },
     "inputs-button--click-raises-onclick": {
       "rootRenderCount": 1,
       "totalRenderCount": 1,

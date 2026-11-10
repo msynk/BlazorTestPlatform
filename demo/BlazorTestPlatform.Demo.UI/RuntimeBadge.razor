@@ -1,0 +1,5 @@
+@* Shows where the component's code runs: on the server (static SSR, Interactive Server) or in the browser (WebAssembly). *@
+<p class="c-runtime">
+    <span>Running on</span>
+    <span class="c-runtime__value" data-testid="runtime">@(OperatingSystem.IsBrowser() ? "WebAssembly" : "Server")</span>
+</p>

@@ -1,0 +1,105 @@
+@* Confirmation dialog (WAI-ARIA modal dialog pattern): opening moves focus to the safest action, Escape cancels, the
+   page behind becomes inert, and closing returns focus to the button that opened it. *@
+<div class="c-dialog-anchor" inert="@open">
+    <button type="button" class="c-button c-button--@(Destructive ? "danger" : "primary") c-button--medium" @ref="trigger" @onclick="ShowAsync">@TriggerText</button>
+</div>
+
+@if (open)
+{
+    <div class="c-dialog__backdrop">
+        <div class="c-dialog" role="dialog" aria-modal="true" aria-labelledby="@($"{IdPrefix}-title")" aria-describedby="@($"{IdPrefix}-body")"
+             @onkeydown="OnKeyDownAsync">
+            <h2 class="c-dialog__title" id="@($"{IdPrefix}-title")">@Title</h2>
+            <div class="c-dialog__body" id="@($"{IdPrefix}-body")">@ChildContent</div>
+            <div class="c-dialog__actions">
+                <button type="button" class="c-button c-button--secondary c-button--medium" @ref="cancel" @onclick="CancelAsync">@CancelText</button>
+                <button type="button" class="c-button c-button--@(Destructive ? "danger" : "primary") c-button--medium" @onclick="ConfirmAsync">@ConfirmText</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private ElementReference trigger;
+    private ElementReference cancel;
+    private bool open;
+    private bool? appliedOpen;
+    private FocusTarget pendingFocus;
+
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    [Parameter] public string TriggerText { get; set; } = "Open";
+
+    [Parameter] public string ConfirmText { get; set; } = "Confirm";
+
+    [Parameter] public string CancelText { get; set; } = "Cancel";
+
+    /// <summary>Styles the trigger and the confirm button as dangerous actions.</summary>
+    [Parameter] public bool Destructive { get; set; }
+
+    /// <summary>Whether the dialog is open. Bind it (<c>@bind-Open</c>) to open the dialog from outside.</summary>
+    [Parameter] public bool Open { get; set; }
+
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Raised when the person confirms.</summary>
+    [Parameter] public EventCallback OnConfirm { get; set; }
+
+    [Parameter] public string IdPrefix { get; set; } = "dialog";
+
+    protected override void OnParametersSet()
+    {
+        // Only a new value from the parent opens or closes the dialog, so a re-render with the same value keeps local state.
+        if (appliedOpen != Open)
+        {
+            appliedOpen = Open;
+            if (open != Open)
+            {
+                open = Open;
+                pendingFocus = Open ? FocusTarget.Cancel : FocusTarget.None;
+            }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var target = pendingFocus;
+        pendingFocus = FocusTarget.None;
+        if (target == FocusTarget.Cancel)
+        {
+            await cancel.FocusAsync();
+        }
+        else if (target == FocusTarget.Trigger)
+        {
+            await trigger.FocusAsync();
+        }
+    }
+
+    private Task ShowAsync() => SetOpenAsync(true);
+
+    private Task CancelAsync() => SetOpenAsync(false);
+
+    private async Task ConfirmAsync()
+    {
+        await OnConfirm.InvokeAsync();
+        await SetOpenAsync(false);
+    }
+
+    private Task OnKeyDownAsync(KeyboardEventArgs e) => e.Key == "Escape" ? CancelAsync() : Task.CompletedTask;
+
+    private async Task SetOpenAsync(bool value)
+    {
+        open = value;
+        pendingFocus = value ? FocusTarget.Cancel : FocusTarget.Trigger;
+        await OpenChanged.InvokeAsync(value);
+    }
+
+    private enum FocusTarget
+    {
+        None,
+        Cancel,
+        Trigger,
+    }
+}

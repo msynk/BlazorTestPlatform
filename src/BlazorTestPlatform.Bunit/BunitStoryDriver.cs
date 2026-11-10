@@ -22,6 +22,9 @@ public sealed class BunitStoryDriver : IStoryDriver
     // Rounds of FocusAsync calls made by focus/blur handlers themselves; caps focus ping-pong between two handlers.
     private const int MaxFocusRounds = 16;
 
+    // How long an action waits for an async event handler before moving on without it (see DispatchAsync).
+    private static readonly TimeSpan DetachedHandlerGrace = TimeSpan.FromSeconds(1);
+
     private readonly BunitContext _context;
     private readonly IRenderedComponent<StoryRoot> _root;
     private readonly StoryRenderContext _renderContext;
@@ -882,9 +885,30 @@ public sealed class BunitStoryDriver : IStoryDriver
             return false;
         }
 
+        Task dispatch;
         try
         {
-            await element.TriggerEventAsync(eventName, args).ConfigureAwait(false);
+            dispatch = element.TriggerEventAsync(eventName, args);
+        }
+        catch (MissingEventHandlerException)
+        {
+            return false;
+        }
+
+        // A browser never waits for an async handler: once it has yielded, the next input can arrive. Waiting for it
+        // here would deadlock a handler that awaits the story's fake clock (a delayed MockHttp response, a timer) until
+        // the play script advances it. Handlers that finish soon are still awaited, so their effects are in place for
+        // the next step; a handler that fails later is reported by the renderer, like any unhandled component error.
+        if (!dispatch.IsCompleted
+            && await Task.WhenAny(dispatch, Task.Delay(DetachedHandlerGrace)).ConfigureAwait(false) != dispatch)
+        {
+            _ = dispatch.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            return true;
+        }
+
+        try
+        {
+            await dispatch.ConfigureAwait(false);
             return true;
         }
         catch (MissingEventHandlerException)

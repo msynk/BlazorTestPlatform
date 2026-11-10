@@ -1,0 +1,76 @@
+@* A list with templating points: how each person renders (ItemTemplate), what an empty list shows (EmptyContent), and
+   the row spacing a page or layout cascades down (Density). *@
+<section class="c-people @(Density == Density.Compact ? "c-people--compact" : null)" aria-labelledby="@($"{IdPrefix}-title")">
+    <div class="c-people__header">
+        <h2 id="@($"{IdPrefix}-title")" class="c-todo__title">@Label</h2>
+        @if (Sortable && People.Count > 1)
+        {
+            <button type="button" class="c-button c-button--secondary c-button--small" aria-pressed="@(sorted ? "true" : "false")" @onclick="ToggleSortAsync">Sort by name</button>
+        }
+    </div>
+
+    @if (People.Count == 0)
+    {
+        @if (EmptyContent is not null)
+        {
+            @EmptyContent
+        }
+        else
+        {
+            <p class="c-todo__empty">Nobody here yet.</p>
+        }
+    }
+    else
+    {
+        <ul class="c-people__list">
+            @foreach (var person in Ordered)
+            {
+                <li class="c-people__item">
+                    @if (ItemTemplate is not null)
+                    {
+                        @ItemTemplate(person)
+                    }
+                    else
+                    {
+                        <span class="c-user__avatar" aria-hidden="true">@Initials(person.Name)</span>
+                        <span><strong>@person.Name</strong><br /><span class="c-people__meta">@person.Email · @person.Team</span></span>
+                    }
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    private bool sorted;
+
+    [Parameter] public string Label { get; set; } = "People";
+
+    [Parameter] public IReadOnlyList<Person> People { get; set; } = [];
+
+    /// <summary>Renders one person. Defaults to an avatar, the name and the contact line.</summary>
+    [Parameter] public RenderFragment<Person>? ItemTemplate { get; set; }
+
+    /// <summary>Shown instead of the list when there is nobody to show.</summary>
+    [Parameter] public RenderFragment? EmptyContent { get; set; }
+
+    /// <summary>Offers a toggle that sorts the list by name.</summary>
+    [Parameter] public bool Sortable { get; set; }
+
+    [Parameter] public EventCallback<bool> OnSortChanged { get; set; }
+
+    [Parameter] public string IdPrefix { get; set; } = "person-list";
+
+    [CascadingParameter] public Density Density { get; set; }
+
+    private IEnumerable<Person> Ordered => sorted ? People.OrderBy(p => p.Name, StringComparer.Ordinal) : People;
+
+    private Task ToggleSortAsync()
+    {
+        sorted = !sorted;
+        return OnSortChanged.InvokeAsync(sorted);
+    }
+
+    private static string Initials(string name) =>
+        string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
+}

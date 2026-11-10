@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Demo overhaul
+
+* **Guided tour**: the demo host's home page (`dotnet run --project demo/BlazorTestPlatform.Demo.Workbench`) explains what the platform does and opens the workbench at the story behind each feature, with its play script running where that helps. [demo/README.md](demo/README.md) maps every feature to its story, code and test; every story has a description that the workbench shows.
+* **New showcase components and stories**: pairwise variants with a constraint (`Display/Badge`), focus management, Escape and an accessibility tree snapshot (`Overlays/Dialog`), a form that posts to a mocked API with a delayed response on fake time, a 409 and a network failure (`Patterns/Sign-up form`), computed args from `FakeData`, Razor templates, a cascading-value decorator and render and browser budgets on a long list (`Data/Person list`), a visual mask for a value that differs per render mode (`Display/Runtime badge`), a composition story (`Overview/Kitchen sink`), and an accessibility rule waived with a justification.
+* **New demo tests**: `CombinatoricsTests` (the badge variants cover every pair; a pairwise data-driven test of sign-up input), `ImpactAnalysisTests` and `TourTests`. Variant matrices (`visual-matrix`) are now compared once per state, in Chromium on desktop/light, instead of sampling the primary button across themes, viewports and browsers.
+* **bUnit driver**: an action no longer waits for an async event handler that is still running after 1 s. A handler that awaited the story's fake clock (a delayed `MockHttp` response triggered by a click) deadlocked the play script, which then also ignored the story timeout. Browsers never wait for handlers either; a handler that fails later is still reported as an unhandled component error.
+
 ### Fixes from the review of the second pass
 
 * **CSS cascade in bUnit**: escaped quotes and braces in selectors (Tailwind's `.content-\[\'\'\]`) no longer split cascade layers at the wrong place and drop the rules after them.

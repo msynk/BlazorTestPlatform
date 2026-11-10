@@ -1,0 +1,20 @@
+@* A click handler that awaits the clock: with fake time it stays pending until the play script advances it. *@
+@inject TimeProvider Time
+
+<p role="status">@state</p>
+<button type="button" @onclick="SaveAsync">Save</button>
+
+@code {
+    private string state = "Idle";
+
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private async Task SaveAsync()
+    {
+        state = "Saving…";
+        StateHasChanged();
+        await Task.Delay(TimeSpan.FromSeconds(5), Time);
+        state = "Saved";
+        await OnSaved.InvokeAsync();
+    }
+}

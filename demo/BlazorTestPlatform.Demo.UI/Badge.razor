@@ -1,0 +1,24 @@
+@* A small status label. Four independent parameters make 60 combinations: the stories cover them pairwise. *@
+<span class="c-badge c-badge--@Tone.ToString().ToLowerInvariant() c-badge--@Appearance.ToString().ToLowerInvariant() c-badge--@Size.ToString().ToLowerInvariant()"
+      @attributes="AdditionalAttributes">
+    @if (Dot)
+    {
+        <span class="c-badge__dot" aria-hidden="true"></span>
+    }
+    @ChildContent
+</span>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    [Parameter] public BadgeTone Tone { get; set; } = BadgeTone.Neutral;
+
+    [Parameter] public BadgeAppearance Appearance { get; set; } = BadgeAppearance.Subtle;
+
+    [Parameter] public BadgeSize Size { get; set; } = BadgeSize.Medium;
+
+    /// <summary>Shows a status dot before the text. Small badges have no room for it.</summary>
+    [Parameter] public bool Dot { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)] public IReadOnlyDictionary<string, object>? AdditionalAttributes { get; set; }
+}

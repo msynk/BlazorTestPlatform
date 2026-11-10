@@ -22,7 +22,8 @@ public sealed class CrossHostingTests(WorkbenchFixture workbench)
 
 /// <summary>
 /// Visual regression + axe-core across themes and viewports. Baselines live in <c>__snapshots__</c>; review diffs in the
-/// HTML report and accept intended changes with <c>btp approve</c>.
+/// HTML report and accept intended changes with <c>btp approve</c>. Variant matrices (stories tagged
+/// <c>visual-matrix</c>) are about the component's states, so each state is compared once, on desktop in the light theme.
 /// </summary>
 public sealed class VisualTests(WorkbenchFixture workbench)
 {
@@ -33,8 +34,9 @@ public sealed class VisualTests(WorkbenchFixture workbench)
         .WithBrowsers(Browsers.Chromium);
 
     public static TheoryData<string> Cases => new(Matrix
-        .Expand(ComponentStoryTests.Catalog.Where(s => !s.Visual.Skip && (!s.HasTag("visual-matrix") || s.Name.Contains("Primary", StringComparison.Ordinal))))
+        .Expand(ComponentStoryTests.Catalog.Where(s => !s.Visual.Skip))
         .Where(c => c.Viewport == Viewport.Desktop || c.Theme == ThemeDefinition.Light)
+        .Where(c => !c.Story.HasTag("visual-matrix") || (c.Viewport == Viewport.Desktop && c.Theme == ThemeDefinition.Light))
         .InShard(Shard.FromEnvironment())
         .Select(c => c.Key));
 
@@ -47,7 +49,8 @@ public sealed class VisualTests(WorkbenchFixture workbench)
 /// <summary>
 /// Firefox and WebKit: every story's play script, visual snapshot and axe-core scan on desktop/light under Interactive
 /// Server, against <c>firefox-*</c> and <c>webkit-*</c> baselines. CI gates on the Linux ones, rendered in the same
-/// Playwright container as Chromium's.
+/// Playwright container as Chromium's. Variant matrices stay in Chromium: the states they enumerate don't depend on the
+/// browser engine.
 /// </summary>
 public sealed class CrossBrowserTests(WorkbenchFixture workbench)
 {
@@ -58,7 +61,7 @@ public sealed class CrossBrowserTests(WorkbenchFixture workbench)
         .WithBrowsers(Browsers.Firefox, Browsers.WebKit);
 
     public static TheoryData<string> Cases => new(Matrix
-        .Expand(ComponentStoryTests.Catalog.Where(s => !s.HasTag("visual-matrix") || s.Name.Contains("Primary", StringComparison.Ordinal)))
+        .Expand(ComponentStoryTests.Catalog.Where(s => !s.HasTag("visual-matrix")))
         .InShard(Shard.FromEnvironment())
         .Select(c => c.Key));
 

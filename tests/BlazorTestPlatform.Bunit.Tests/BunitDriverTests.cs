@@ -28,6 +28,24 @@ public sealed class BunitDriverTests
     }
 
     [Fact]
+    public async Task Actions_do_not_wait_for_handlers_that_wait_for_fake_time()
+    {
+        // As in a browser, the click returns once the handler yields; waiting for it would deadlock on the fake clock.
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var session = await BunitStoryRunner.RenderAsync(Catalog.Get("tests-delayed-save--default"), Options, cancellationToken);
+        var ctx = session.StoryContext;
+
+        await ctx.GetByRole("button", "Save").ClickAsync().WaitAsync(TimeSpan.FromSeconds(15), cancellationToken);
+        await ctx.Expect(ctx.GetByRole("status")).ToHaveTextAsync("Saving…");
+        await ctx.ExpectAction("OnSaved").NotToHaveBeenCalledAsync();
+
+        await ctx.AdvanceTimeAsync(TimeSpan.FromSeconds(5));
+
+        await ctx.Expect(ctx.GetByRole("status")).ToHaveTextAsync("Saved");
+        await ctx.ExpectAction("OnSaved").ToHaveBeenCalledAsync(times: 1);
+    }
+
+    [Fact]
     public async Task Args_set_component_parameters()
     {
         await using var session = await BunitStoryRunner.RenderAsync(Catalog.Get("tests-counter--by-five"), Options);

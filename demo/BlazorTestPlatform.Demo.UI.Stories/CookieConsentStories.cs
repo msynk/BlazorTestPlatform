@@ -14,6 +14,7 @@ public sealed class CookieConsentStories : Stories<CookieConsent>
     protected override void Define(StoryCollectionBuilder<CookieConsent> stories)
     {
         stories.Add("First visit", s => s
+            .Description("MockJS answers localStorage, here and in the browser (ApplyInBrowsers), and ExpectJSCall checks what the component wrote. bUnit evaluates demo.css per viewport: on a phone the detail sentence is hidden.")
             .MockJS(js => js
                 .ApplyInBrowsers()
                 .Setup<string?>("localStorage.getItem", null, CookieConsent.StorageKey)
@@ -31,6 +32,7 @@ public sealed class CookieConsentStories : Stories<CookieConsent>
             }));
 
         stories.Add("Returning visitor", s => s
+            .Description("A stored decision is read once and never written again.")
             .MockJS(js => js
                 .ApplyInBrowsers()
                 .Setup("localStorage.getItem", "declined", CookieConsent.StorageKey))

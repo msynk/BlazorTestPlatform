@@ -1,0 +1,87 @@
+@inject AccountsClient Accounts
+
+@* A pattern built from the design system's parts (TextField, Button, Alert) that talks to an API. *@
+<form class="c-signup" aria-labelledby="signup-title" novalidate @onsubmit="SubmitAsync">
+    <h2 id="signup-title" class="c-todo__title">Create your account</h2>
+
+    @if (status == Status.Created)
+    {
+        <Alert Severity="AlertSeverity.Success" Title="Account created">We sent a confirmation link to @email.</Alert>
+    }
+    else
+    {
+        @if (status == Status.Unreachable)
+        {
+            <Alert Severity="AlertSeverity.Error" Title="Couldn't create your account">The server could not be reached. Check your connection and try again.</Alert>
+        }
+
+        <TextField Label="Name" @bind-Value="name" Required="true" Error="@nameError" />
+        <TextField Label="Email" Type="email" @bind-Value="email" Required="true" Hint="We'll send a confirmation link." Error="@emailError" />
+        <div>
+            <Button Type="submit" Loading="@(status == Status.Submitting)">@(status == Status.Submitting ? "Creating account…" : "Create account")</Button>
+        </div>
+    }
+</form>
+
+@code {
+    private Status status;
+    private string? name;
+    private string? email;
+    private string? nameError;
+    private string? emailError;
+
+    /// <summary>Raised with the email address once the account exists.</summary>
+    [Parameter] public EventCallback<string> OnSignedUp { get; set; }
+
+    private async Task SubmitAsync()
+    {
+        if (status == Status.Submitting)
+        {
+            return;
+        }
+
+        name = name?.Trim();
+        email = email?.Trim();
+        nameError = string.IsNullOrEmpty(name) ? "Enter your name." : null;
+        emailError = string.IsNullOrEmpty(email) ? "Enter your email address."
+            : IsEmail(email) ? null
+            : "Enter a complete email address, like ada@example.com.";
+        if (nameError is not null || emailError is not null)
+        {
+            return;
+        }
+
+        status = Status.Submitting;
+        try
+        {
+            if (await Accounts.SignUpAsync(new SignUpRequest(name!, email!)) == SignUpOutcome.EmailTaken)
+            {
+                emailError = "That email address is already registered.";
+                status = Status.Editing;
+                return;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            status = Status.Unreachable;
+            return;
+        }
+
+        status = Status.Created;
+        await OnSignedUp.InvokeAsync(email);
+    }
+
+    private static bool IsEmail(string value)
+    {
+        var at = value.IndexOf('@', StringComparison.Ordinal);
+        return at > 0 && value.IndexOf('.', at) > at + 1 && !value.EndsWith('.');
+    }
+
+    private enum Status
+    {
+        Editing,
+        Submitting,
+        Unreachable,
+        Created,
+    }
+}

@@ -51,6 +51,7 @@ public static class DemoServiceCollectionExtensions
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<ITodoService, LocalTodoService>();
         services.AddHttpClient<PeopleClient>(client => client.BaseAddress = new Uri("https://api.demo.example/"));
+        services.AddHttpClient<AccountsClient>(client => client.BaseAddress = new Uri("https://api.demo.example/"));
         return services;
     }
 }

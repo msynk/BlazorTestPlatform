@@ -57,6 +57,10 @@ public sealed class PendingTodoFixture : StoryFixture
     }
 }
 
+/// <summary>
+/// Story fixtures: a reusable StoryFixture registers a seeded in-memory service in place of the app's slow one, in bUnit
+/// and, through the workbench's per-story service overrides, under Server and WebAssembly too.
+/// </summary>
 public sealed class TodoListStories : Stories<TodoList>
 {
     public override string Title => "Data/Todo list";
@@ -65,14 +69,19 @@ public sealed class TodoListStories : Stories<TodoList>
     {
         stories.Defaults(s => s.Arg(t => t.Title, "Sprint tasks"));
 
-        stories.Add("Seeded", s => s.UseFixture<TodoFixture>().Seed(2026));
-        stories.Add("Empty", s => s.UseFixture(new TodoFixture(0)));
+        stories.Add("Seeded", s => s
+            .Description("TodoFixture fills an in-memory ITodoService with FakeData. Seed(2026) pins the data; without it the seed comes from the story id.")
+            .UseFixture<TodoFixture>()
+            .Seed(2026));
+        stories.Add("Empty", s => s.Description("The same fixture with no items.").UseFixture(new TodoFixture(0)));
         stories.Add("Loading", s => s
+            .Description("A service that never answers captures the loading state. The snapshot waits for the loading text (Visual WaitForSelector).")
             .UseFixture<PendingTodoFixture>()
             .Prerender(false)
             .Visual(v => v.WaitForSelector = ".c-todo__loading"));
 
         stories.Add("Add a task", s => s
+            .Description("A form round trip: the Add button is disabled until there is text, the new item appears and the field clears.")
             .UseFixture(new TodoFixture(1))
             .Play(async ctx =>
             {
@@ -89,6 +98,7 @@ public sealed class TodoListStories : Stories<TodoList>
             }));
 
         stories.Add("Complete a task", s => s
+            .Description("CheckAsync clicks a checkbox and waits for it to be checked; the summary updates.")
             .UseFixture(new TodoFixture(2))
             .Play(async ctx =>
             {

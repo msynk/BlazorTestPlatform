@@ -32,6 +32,7 @@ public sealed class DriverParityStories : Stories<DriverParityPanel>
         stories.Defaults(s => s.NoVisual());
 
         stories.Add("Roles and names", s => s
+            .Description("Implicit roles and accessible names computed the same way by the C# engine (bUnit) and its browser port.")
             .Arg(p => p.Section, DriverParitySection.Landmarks)
             .Play(async ctx =>
             {
@@ -66,6 +67,7 @@ public sealed class DriverParityStories : Stories<DriverParityPanel>
 
         // One tree for every driver: roles, names and states computed by the C# engine (bUnit) and its JS port (browsers).
         stories.Add("Accessibility tree", s => s
+            .Description("ExpectAriaSnapshotAsync asserts roles, names and states as a tree, identically in every driver. The inspector shows the live tree.")
             .Arg(p => p.Section, DriverParitySection.Landmarks)
             .Play(ctx => ctx.ExpectAriaSnapshotAsync("""
                 - banner:
@@ -90,6 +92,7 @@ public sealed class DriverParityStories : Stories<DriverParityPanel>
                 """)));
 
         stories.Add("Text", s => s
+            .Description("Element text around block elements, line breaks and style elements matches what browsers report.")
             .Arg(p => p.Section, DriverParitySection.Text)
             .Play(async ctx =>
             {
@@ -102,6 +105,7 @@ public sealed class DriverParityStories : Stories<DriverParityPanel>
             }));
 
         stories.Add("Keyboard", s => s
+            .Description("Tab order skips disabled fieldsets and inert content; Enter submits, Space toggles: the same in every driver.")
             .Arg(p => p.Section, DriverParitySection.Keyboard)
             .Play(async ctx =>
             {

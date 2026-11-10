@@ -8,7 +8,7 @@ public static class WorkbenchSetup
 {
     public static void Configure(WorkbenchOptions options)
     {
-        options.Title = "Demo UI workbench";
+        options.Title = "BlazorTestPlatform demo";
         options.AddStoriesFromAssemblyOf<ButtonStories>();
         options.Viewports.Clear();
         options.Viewports.AddRange([Viewport.Mobile, Viewport.Tablet, Viewport.Desktop]);
