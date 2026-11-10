@@ -1,10 +1,10 @@
 <Solution>
-  <Folder Name="/samples/">
-    <Project Path="samples/Contoso.UI.Stories/Contoso.UI.Stories.csproj" />
-    <Project Path="samples/Contoso.UI.Tests/Contoso.UI.Tests.csproj" />
-    <Project Path="samples/Contoso.UI/Contoso.UI.csproj" />
-    <Project Path="samples/Contoso.Workbench.Client/Contoso.Workbench.Client.csproj" />
-    <Project Path="samples/Contoso.Workbench/Contoso.Workbench.csproj" />
+  <Folder Name="/demo/">
+    <Project Path="demo/BlazorTestPlatform.Demo.UI.Stories/BlazorTestPlatform.Demo.UI.Stories.csproj" />
+    <Project Path="demo/BlazorTestPlatform.Demo.UI.Tests/BlazorTestPlatform.Demo.UI.Tests.csproj" />
+    <Project Path="demo/BlazorTestPlatform.Demo.UI/BlazorTestPlatform.Demo.UI.csproj" />
+    <Project Path="demo/BlazorTestPlatform.Demo.Workbench.Client/BlazorTestPlatform.Demo.Workbench.Client.csproj" />
+    <Project Path="demo/BlazorTestPlatform.Demo.Workbench/BlazorTestPlatform.Demo.Workbench.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/BlazorTestPlatform.Accessibility/BlazorTestPlatform.Accessibility.csproj" />

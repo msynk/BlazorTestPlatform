@@ -1,6 +1,6 @@
 # Getting started
 
-This guide sets up the recommended layout: components, stories, a workbench host and one test project. The [`samples/`](../samples) folder contains exactly this layout and is the fastest way to see everything working.
+This guide sets up the recommended layout: components, stories, a workbench host and one test project. The [`demo/`](../demo) folder contains exactly this layout and is the fastest way to see everything working.
 
 ## 1. Project layout
 

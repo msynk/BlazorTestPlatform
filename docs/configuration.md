@@ -19,7 +19,7 @@ Settings are resolved in this order: environment variables, then `btp.json` in t
 | `BTP_PR_COMMENT_AUTHOR` | login that posts `btp report --pr-comment` comments when it is not a bot (a personal access token) | any bot account (`github-actions[bot]`) |
 | `BTP_HEADED` | `1`, `true` or `yes` to show the browser | headless |
 | `BTP_INSTALL_BROWSERS` | `1`, `true` or `yes` to install missing Playwright browsers automatically | off |
-| `BTP_BASE_URL` | address for `ExternalWorkbenchHost` (the sample's fixture switches to it automatically, e.g. to test a trimmed publish) | — |
+| `BTP_BASE_URL` | address for `ExternalWorkbenchHost` (the demo's fixture switches to it automatically, e.g. to test a trimmed publish) | — |
 | `BTP_BUNIT_VIEWPORT` | viewport bUnit evaluates `@media` queries against: a preset (`mobile`, `tablet`, `desktop`...) or `WIDTHxHEIGHT` | `desktop` |
 | `BTP_PLAYWRIGHT_IMAGE` | container image for `scripts/visual-tests.*` | derived from the `Microsoft.Playwright` version |
 | `BTP_PROJECT_DIR` | the test project directory (see above) | detected |

@@ -73,8 +73,8 @@ stories.Defaults(s => s
     .Services(services => services.AddTransient<PeopleClient>())       // the typed client under test
     .MockHttp(http =>
     {
-        http.Get("api/people").RespondJson(Everyone, ContosoJsonContext.Default.PersonArray);
-        http.Get("api/people?team=Design").RespondJson(Designers, ContosoJsonContext.Default.PersonArray);
+        http.Get("api/people").RespondJson(Everyone, DemoJsonContext.Default.PersonArray);
+        http.Get("api/people?team=Design").RespondJson(Designers, DemoJsonContext.Default.PersonArray);
     }));
 
 stories.Add("Server error with retry", s => s
@@ -132,7 +132,7 @@ await ctx.ExpectJSCall("analytics.track").NotToHaveBeenCalledAsync();
 var calls = await ctx.GetJSCallsAsync();                          // identifier, module, arguments, mocked
 ```
 
-Arguments are compared after formatting: strings as-is, numbers and dates in the invariant culture, and booleans as `true`/`false`. See `Feedback/Cookie consent` in the sample for a story that reads and writes `localStorage` deterministically in every render mode.
+Arguments are compared after formatting: strings as-is, numbers and dates in the invariant culture, and booleans as `true`/`false`. See `Feedback/Cookie consent` in the demo for a story that reads and writes `localStorage` deterministically in every render mode.
 
 ## Fake users
 

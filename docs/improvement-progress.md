@@ -12,7 +12,7 @@ dedicated automated test isolates it.
 |---|---|---|
 | Build | `dotnet build BlazorTestPlatform.slnx` | 0 warnings, 0 errors |
 | Unit and in-memory tests | `dotnet test --project tests/<project>` for each of the 7 projects | 339 passed |
-| End-to-end (bUnit, cross-hosting matrix, visual, axe, in-app play, Firefox, WebKit) | `dotnet test --project samples/Contoso.UI.Tests` | 398 passed (Windows, local baselines) |
+| End-to-end (bUnit, cross-hosting matrix, visual, axe, in-app play, Firefox, WebKit) | `dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests` | 398 passed (Windows, local baselines) |
 
 ## Audit
 
@@ -65,12 +65,12 @@ several were confirmed with throwaway harnesses or by running the new regression
 | S-7 | `TimeOnly` args lost sub-millisecond precision | P3 | Core | Verified | `DataHardeningTests.Time_values_with_sub_second_precision_round_trip` | — |
 | S-8 | `NextDecimal` returned `max` for negative ranges | P3 | Core | Verified | `DataHardeningTests.Next_decimal_*` (sequence unchanged for non-negative ranges) | — |
 | S-9 | Repeated matrix dimensions produced duplicate cells; in-memory keys accepted | P3 | Core | Verified | `DataHardeningTests.Matrix_dimensions_are_deduplicated_*` | — |
-| W-1 | Workbench live in Production with no activation or authorization | P0 | Workbench | Verified | `WorkbenchSecurityTests.*`, sample `WorkbenchAccessTests` (real host: 404 without markup), trimmed Production publish (123 cases) | getting-started.md, configuration.md |
+| W-1 | Workbench live in Production with no activation or authorization | P0 | Workbench | Verified | `WorkbenchSecurityTests.*`, demo `WorkbenchAccessTests` (real host: 404 without markup), trimmed Production publish (123 cases) | getting-started.md, configuration.md |
 | W-2 | Links could pass `javascript:`/`vbscript:`/`data:` URLs as args | P1 | Core, Workbench | Verified | `HardeningTests.Script_urls_are_recognized_*`, `Links_cannot_pass_script_urls_but_typed_values_can` | getting-started.md |
 | W-3 | Frame scopes disposed application singletons that stories override; options monitor disposed | P1 | Workbench | Verified (known disposable types, options monitor) | `WorkbenchSecurityTests.Disposable_application_singletons_*`, `The_application_options_monitor_survives_story_scopes` | test-data.md (factory-registered singletons remain a documented limitation) |
 | W-4 | Optional resolution of story-only service types threw | P1 | Workbench | Verified | `WorkbenchSecurityTests.Services_only_stories_register_stay_optional_elsewhere` | test-data.md |
 | W-5 | Play results posted to `*`; shell accepted any origin | P2 | Workbench | Implemented | full e2e suite | getting-started.md |
-| W-6 | In-app play fire-and-forget: unreported failures, leaked module, no capability check | P2 | Workbench | Implemented | sample `InAppPlayTests` (76 cases) | — |
+| W-6 | In-app play fire-and-forget: unreported failures, leaked module, no capability check | P2 | Workbench | Implemented | demo `InAppPlayTests` (76 cases) | — |
 | P-1 | Per-attempt browser timeout only cooperative | P2 | Playwright | Implemented | full e2e suite | cross-hosting.md |
 | P-2 | `WaitForAssets` hung on offscreen lazy images | P2 | Playwright | Implemented | full e2e suite | cross-hosting.md |
 | P-3 | Crashed browser stayed cached | P2 | Playwright | Implemented | full e2e suite | cross-hosting.md |
@@ -107,7 +107,7 @@ several were confirmed with throwaway harnesses or by running the new regression
 | Id | Description | Priority | Packages | Status | Tests | Docs |
 |---|---|---|---|---|---|---|
 | Q-1 | Pairwise (all-pairs) and constrained combinatorial variants; public `Combinatorics` | P2 | Core | Verified | `CombinatoricsTests` (12) | stories.md |
-| Q-2 | Deterministic sharding (`Shard`, `BTP_SHARD`, `InShard`) for distributed CI; used by the sample's browser suites | P2 | Core, samples | Verified | `ShardTests` (11) | ci.md, configuration.md |
+| Q-2 | Deterministic sharding (`Shard`, `BTP_SHARD`, `InShard`) for distributed CI; used by the demo's browser suites | P2 | Core, demo | Verified | `ShardTests` (11) | ci.md, configuration.md |
 | Q-3 | Versioned result files (`schemaVersion`); newer versions reported, not misread | P1 | Core | Verified | `HardeningTests.Results_carry_a_schema_version_*` | ci.md |
 
 ### Second pass: deferred items and the remaining mission scope
@@ -118,19 +118,19 @@ several were confirmed with throwaway harnesses or by running the new regression
 | B-12 | `<summary>` toggles `<details>` (+`toggle`), arrow keys in radio groups, textarea/contenteditable Enter, `buttons` bitmask, `preventDefault` on checkbox/radio clicks, `dragover`/`dragleave` drop semantics, Tab from the click point, `readonly` fill waiting; same rules in the in-app driver, `change` only on a real change | P2 | Bunit, Workbench | Verified (bUnit), Implemented (in-app, full e2e) | 9 `BrowserFidelityTests` (each failed without its change) | interactions.md |
 | A-1 | CSS cascade: `@layer` (statements, blocks, nested, anonymous, reversed for `!important`), `@container`, per-selector specificity of lists, `inherit`/`initial`/`unset`/`revert`, author `display` over `hidden`, bare boolean media features; missing stylesheets fail | P2 | Accessibility, Bunit | Verified | `CssVisibilityTests` (layers, layer order theory, container, lists, keywords, hidden override, boolean media), `JSAndCssTests` missing stylesheet | interactions.md |
 | A-2 | Names and roles in both engines: controls inside `aria-labelledby` targets, wrapping labels, `title=""`, `input type=file`, full ARIA 1.2 global attributes, `aria-level` exemption for `h1`-`h6` only | P3 | Accessibility, Workbench | Verified | `AccessibilityEngineTests` cases, `DriverParityTests` "names and roles" fixture | CHANGELOG |
-| A-3 | Names from content separate block and table-cell text (`Plan Team`), as browsers do (both engines) | P2 | Accessibility, Workbench | Verified | `AriaSnapshotTests.Text_in_separate_cells_*`, sample "Accessibility tree" story in every driver | CHANGELOG |
-| A-4 | Accessibility tree snapshots: `ctx.ExpectAriaSnapshotAsync`, `AriaSnapshot.Of`, JS port in `btp-driver.js`, `IStoryDriver.GetAriaSnapshotAsync` | P2 | Core, Accessibility, Bunit, Playwright, Workbench | Verified | `AriaSnapshotTests` (5), sample `Testing/Driver parity/Accessibility tree` under bUnit, 4 render modes, Firefox, WebKit, in-app | interactions.md, quality-gates.md |
+| A-3 | Names from content separate block and table-cell text (`Plan Team`), as browsers do (both engines) | P2 | Accessibility, Workbench | Verified | `AriaSnapshotTests.Text_in_separate_cells_*`, demo "Accessibility tree" story in every driver | CHANGELOG |
+| A-4 | Accessibility tree snapshots: `ctx.ExpectAriaSnapshotAsync`, `AriaSnapshot.Of`, JS port in `btp-driver.js`, `IStoryDriver.GetAriaSnapshotAsync` | P2 | Core, Accessibility, Bunit, Playwright, Workbench | Verified | `AriaSnapshotTests` (5), demo `Testing/Driver parity/Accessibility tree` under bUnit, 4 render modes, Firefox, WebKit, in-app | interactions.md, quality-gates.md |
 | S-10 | `HttpMock` named clients keep `AddHttpClient` base address, headers and delegating handlers | P2 | Core | Verified | `DataHardeningTests` named-client composition | test-data.md |
 | S-11 | Story option objects read-only once built (shared catalogs) | P2 | Core | Verified | `HardeningTests` read-only options, `BrowserBudgetTests.Story_budgets_are_frozen_once_built` | stories.md |
 | S-12 | JS mocks for `GetValueAsync`/`SetValueAsync`/`InvokeConstructorAsync`; in-process references of missing mocked modules | P3 | Core | Verified | `JSInteropTests` (property/constructor, strict get, in-process get, missing module) | test-data.md |
 | W-7 | Story registrations can depend on application services in the workbench (fallback resolver), disposed scopes reject use | P1 | Workbench | Verified | `ServiceOverrideTests` (app-service dependency, borrowed disposal, disposed scope) | test-data.md |
 | W-8 | Keyed and unregistered open-generic overrides flagged; overrides probed under every render mode and cached; reviews cached by file time; story host cancels play and releases its module on disposal | P3 | Workbench | Verified (probe, keyed), Implemented (caching, disposal) | `ServiceOverrideTests` (WebAssembly-only probe, keyed flag) | CHANGELOG |
-| W-9 | Workbench inspector (actions, requests, JS calls, console, accessibility tree) and interaction recorder generating play code with unique readable locators | P2 | Workbench | Verified | sample `WorkbenchInspectorTests` (recorder under Server and WebAssembly, tree), also against the trimmed Production publish | getting-started.md |
+| W-9 | Workbench inspector (actions, requests, JS calls, console, accessibility tree) and interaction recorder generating play code with unique readable locators | P2 | Workbench | Verified | demo `WorkbenchInspectorTests` (recorder under Server and WebAssembly, tree), also against the trimmed Production publish | getting-started.md |
 | V-5 | Translucent pixels compared after compositing (alpha-only changes detected) | P3 | Visual | Verified | `VisualTests` alpha case | CHANGELOG |
 | V-6 | Baselines written by an attempt that fails another check are reverted | P3 | Visual, Playwright | Verified | `VisualTests` revert case | CHANGELOG |
 | P-8 | Process host retries startup when the port is taken | P3 | Playwright | Implemented | — | CHANGELOG |
-| P-9 | Browser emulation: geolocation, permissions, latency, offline (`DriverCapabilities.BrowserEmulation`) | P2 | Core, Playwright, Workbench | Verified | sample `Testing/Browser emulation` stories in Chromium (Server, WebAssembly, Auto), Firefox and WebKit; `BrowserEmulationTests` (requirements, validation, bUnit skips) | interactions.md |
-| P-10 | Browser runtime metrics (CLS, LCP, long tasks, DOM nodes, heap) on results, `BrowserBudget` with not-reported limits listed | P2 | Core, Playwright | Verified | `BrowserBudgetTests` (4), sample `BrowserMetricsTests` (Chromium, Firefox) | quality-gates.md |
+| P-9 | Browser emulation: geolocation, permissions, latency, offline (`DriverCapabilities.BrowserEmulation`) | P2 | Core, Playwright, Workbench | Verified | demo `Testing/Browser emulation` stories in Chromium (Server, WebAssembly, Auto), Firefox and WebKit; `BrowserEmulationTests` (requirements, validation, bUnit skips) | interactions.md |
+| P-10 | Browser runtime metrics (CLS, LCP, long tasks, DOM nodes, heap) on results, `BrowserBudget` with not-reported limits listed | P2 | Core, Playwright | Verified | `BrowserBudgetTests` (4), demo `BrowserMetricsTests` (Chromium, Firefox) | quality-gates.md |
 | G-3 | BTP005 ignores stories added in exclusive branches | P3 | Generators | Verified | `StoryAnalyzerTests` exclusive branches | CHANGELOG |
 | G-4 | Core packs the generator (and code fixes) from wherever they were built | P3 | packaging | Verified | `dotnet pack` with `-o` and `--artifacts-path` (generator), pack check below (code fixes) | CHANGELOG |
 | G-5 | Code fixes for BTP001, BTP002, BTP003, BTP005 in a separate `BlazorTestPlatform.CodeFixes` assembly packed under `analyzers/dotnet/cs` | P2 | CodeFixes, Core | Verified | `StoryCodeFixTests` (5, each applies the fix and re-runs the analyzer) | stories.md, CHANGELOG |

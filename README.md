@@ -84,7 +84,7 @@ Target framework: **.NET 10**.
 
 ## Quick start
 
-The complete working version of these steps is in [`samples/`](samples): a design system (`Contoso.UI`), its stories, a workbench host (Server + WebAssembly) and a test project. The project runs 49 stories in bUnit, 76 cross-hosting browser cases, visual/axe cases across themes and viewports, 90 Firefox and WebKit cases, and 38 in-app play runs, plus driver-parity, story-coverage and review gates.
+The complete working version of these steps is in [`demo/`](demo): a design system (`BlazorTestPlatform.Demo.UI`), its stories, a workbench host (Server + WebAssembly) and a test project. The project runs 49 stories in bUnit, 76 cross-hosting browser cases, visual/axe cases across themes and viewports, 90 Firefox and WebKit cases, and 38 in-app play runs, plus driver-parity, story-coverage and review gates.
 
 **1. Write stories** in a class library that references your components and `BlazorTestPlatform.Core` (see [docs/stories.md](docs/stories.md)).
 
@@ -181,14 +181,14 @@ The latest preview is `0.1.0-preview.2`; [CHANGELOG.md](CHANGELOG.md) lists what
 ```
 src/        the packages
 tests/      unit and driver tests for every package (613 tests)
-samples/    Contoso.UI design system, stories, workbench host (Server + WASM), end-to-end tests
+demo/       BlazorTestPlatform.Demo.UI design system, stories, workbench host (Server + WASM), end-to-end tests
 docs/       guides
 ```
 
 ```bash
 dotnet build BlazorTestPlatform.slnx
 dotnet test --project tests/BlazorTestPlatform.Bunit.Tests       # or any test project
-dotnet test --project samples/Contoso.UI.Tests                   # needs Playwright browsers
+dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests      # needs Playwright browsers
 scripts/visual-tests.sh                                          # browser suites in the CI container (Docker)
 ```
 

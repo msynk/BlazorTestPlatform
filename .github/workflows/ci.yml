@@ -67,14 +67,14 @@ jobs:
       # After a Playwright upgrade this fails with one message that points to the "Regenerate visual baselines"
       # workflow, instead of a wall of screenshot mismatches.
       - name: Baselines match the pinned Playwright version
-        run: dotnet test --project samples/Contoso.UI.Tests -c Release --no-build -- --filter-class '*BaselineProvenanceTests'
+        run: dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests -c Release --no-build -- --filter-class '*BaselineProvenanceTests'
 
       # CI never writes baselines: missing or changed screenshots fail the build (BtpSettings defaults on CI).
       # Container jobs run as root with HOME=/github/home (owned by another user), and Firefox refuses to start there.
       - name: End-to-end (bUnit, cross-hosting matrix, visual, axe, in-app play)
         env:
           HOME: /root
-        run: dotnet test --project samples/Contoso.UI.Tests -c Release --no-build
+        run: dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests -c Release --no-build
 
       - name: Report
         if: always()
@@ -82,8 +82,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: >
           dotnet run --project src/BlazorTestPlatform.Cli -c Release --
-          report -p samples/Contoso.UI.Tests
-          --junit samples/Contoso.UI.Tests/TestResults/btp/junit.xml
+          report -p demo/BlazorTestPlatform.Demo.UI.Tests
+          --junit demo/BlazorTestPlatform.Demo.UI.Tests/TestResults/btp/junit.xml
           --github-summary --history .btp/history.json
           ${{ github.event_name == 'pull_request' && '--pr-comment' || '' }}
 
@@ -100,7 +100,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: btp-report
-          path: samples/Contoso.UI.Tests/TestResults/btp
+          path: demo/BlazorTestPlatform.Demo.UI.Tests/TestResults/btp
           retention-days: 14
 
   trimmed-publish:
@@ -117,16 +117,16 @@ jobs:
         with:
           global-json-file: global.json
       - name: Publish (trimmed WebAssembly client)
-        run: dotnet publish samples/Contoso.Workbench -c Release -o /tmp/workbench -p:TrimmerSingleWarn=false -warnaserror:IL2026,IL2060,IL2070,IL2072,IL2091
+        run: dotnet publish demo/BlazorTestPlatform.Demo.Workbench -c Release -o /tmp/workbench -p:TrimmerSingleWarn=false -warnaserror:IL2026,IL2060,IL2070,IL2072,IL2091
       - name: Start the published workbench
         run: |
-          (cd /tmp/workbench && ASPNETCORE_ENVIRONMENT=Production dotnet Contoso.Workbench.dll --urls http://127.0.0.1:5288 > /tmp/workbench.log 2>&1 &)
+          (cd /tmp/workbench && ASPNETCORE_ENVIRONMENT=Production dotnet BlazorTestPlatform.Demo.Workbench.dll --urls http://127.0.0.1:5288 > /tmp/workbench.log 2>&1 &)
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:5288/_workbench > /dev/null && exit 0; sleep 1; done
           cat /tmp/workbench.log; exit 1
       - name: Cross-hosting, in-app play, live controls and the inspector against the published app
         env:
           BTP_BASE_URL: http://127.0.0.1:5288
-        run: dotnet test --project samples/Contoso.UI.Tests -c Release -- --filter-class '*CrossHostingTests' --filter-class '*InAppPlayTests' --filter-class '*ArgControlsTests' --filter-class '*WorkbenchInspectorTests'
+        run: dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests -c Release -- --filter-class '*CrossHostingTests' --filter-class '*InAppPlayTests' --filter-class '*ArgControlsTests' --filter-class '*WorkbenchInspectorTests'
 
   pack:
     runs-on: ubuntu-latest

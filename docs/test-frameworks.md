@@ -121,7 +121,7 @@ writes into the test project:
 
 * `btp.json` with the default gates (accessibility failing on `serious`, visual threshold 0.1)
 * `StoryTests.cs`: every story as an in-memory test for the chosen framework, as above
-* with `--component Contoso.UI.Button`: `ButtonStories.cs`, a first story collection for the component
+* with `--component BlazorTestPlatform.Demo.UI.Button`: `ButtonStories.cs`, a first story collection for the component
 * with `--ci`: a pipeline for GitHub Actions (`.github/workflows/blazor-ui-tests.yml`), Azure Pipelines
   (`azure-pipelines.blazor-ui-tests.yml`) or GitLab (`.gitlab/blazor-ui-tests.gitlab-ci.yml`) at the repository root,
   running on the Playwright image that matches the Playwright version BlazorTestPlatform uses, with JUnit results,

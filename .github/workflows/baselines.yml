@@ -64,7 +64,7 @@ jobs:
           BTP_UPDATE_SNAPSHOTS: ${{ inputs.mode }}
           HOME: /root
         run: >
-          dotnet test --project samples/Contoso.UI.Tests -c Release --
+          dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests -c Release --
           --filter-class '*CrossHostingTests' --filter-class '*VisualTests' --filter-class '*CrossBrowserTests' --filter-class '*InAppPlayTests'
 
       - name: Commit regenerated baselines
@@ -72,7 +72,7 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add samples/Contoso.UI.Tests/__snapshots__
+          git add demo/BlazorTestPlatform.Demo.UI.Tests/__snapshots__
           if git diff --cached --quiet; then
             echo "Baselines already match Playwright ${{ needs.versions.outputs.playwright }}."
             exit 0
@@ -86,5 +86,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: btp-baselines-report
-          path: samples/Contoso.UI.Tests/TestResults/btp
+          path: demo/BlazorTestPlatform.Demo.UI.Tests/TestResults/btp
           retention-days: 14

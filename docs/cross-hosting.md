@@ -51,9 +51,9 @@ Interactive modes are prerendered, as in production. If a story's first render n
 The source generator emits a reflection-free story catalog, and Core and the workbench are trimming-safe: they build with zero trim warnings. To verify a real trimmed WebAssembly publish, point the browser suite at it:
 
 ```bash
-dotnet publish samples/Contoso.Workbench -c Release -o out
-(cd out && dotnet Contoso.Workbench.dll --urls http://127.0.0.1:5288 &)
-BTP_BASE_URL=http://127.0.0.1:5288 dotnet test --project samples/Contoso.UI.Tests -- --filter-class '*CrossHostingTests' --filter-class '*InAppPlayTests'
+dotnet publish demo/BlazorTestPlatform.Demo.Workbench -c Release -o out
+(cd out && dotnet BlazorTestPlatform.Demo.Workbench.dll --urls http://127.0.0.1:5288 &)
+BTP_BASE_URL=http://127.0.0.1:5288 dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests -- --filter-class '*CrossHostingTests' --filter-class '*InAppPlayTests'
 ```
 
 CI runs the same check in the `trimmed-publish` job, a little stricter: the publish treats trim warnings as errors, the app runs with `ASPNETCORE_ENVIRONMENT=Production`, and the live-controls tests (`*ArgControlsTests`) run against it too. It caught a real bug before release: the trimmer removed the story host from WebAssembly clients, because the server requests it by name only.

@@ -194,7 +194,7 @@ await ctx.ExpectAriaSnapshotAsync("""
 States are `checked`/`checked=false` (native and ARIA), `disabled`, `expanded`/`expanded=false` and `level=N` for
 headings. Hidden and `aria-hidden` content is left out. bUnit computes the tree with the C# engine and the browser
 drivers with its JavaScript port, so the same snapshot passes or fails under every driver (`DriverParityTests` and
-the sample's "Accessibility tree" story hold them to it). The failure message shows the actual tree, ready to paste;
+the demo's "Accessibility tree" story hold them to it). The failure message shows the actual tree, ready to paste;
 `ctx.GetAriaSnapshotAsync()` returns it, and `AriaSnapshot.Of(markup)` computes it for any markup. The workbench
 inspector shows the live tree of the selected story.
 
@@ -206,7 +206,7 @@ inspector shows the live tree of the selected story.
 | Playwright (`PlaywrightStoryDriver`) | Test process, driving a real browser: elements are found with the shared locator script, then acted on with real Playwright input | `BrowserStoryRunner` |
 | In-app (`InAppStoryDriver`) | Inside the story frame, in the Server circuit or the WebAssembly runtime, driving the real DOM | The workbench **Run interactions** button, and `StoryPageOptions.AutoPlay` |
 
-The in-app driver uses the browser's own activation behaviour (`click()`, focus, form submission) and honours `@onkeydown:preventDefault`. It emulates what scripts cannot trigger with trusted input: Tab movement, typing and Backspace, change-on-blur, Enter and Space activation, and the event sequences of hover, pointer and drag actions, following the same rules as bUnit. The sample's tests run every play script through all three drivers, and `DriverParityTests` compares roles, names, text and state across them element by element.
+The in-app driver uses the browser's own activation behaviour (`click()`, focus, form submission) and honours `@onkeydown:preventDefault`. It emulates what scripts cannot trigger with trusted input: Tab movement, typing and Backspace, change-on-blur, Enter and Space activation, and the event sequences of hover, pointer and drag actions, following the same rules as bUnit. The demo's tests run every play script through all three drivers, and `DriverParityTests` compares roles, names, text and state across them element by element.
 
 ## Fake time
 
