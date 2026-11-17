@@ -87,7 +87,13 @@ Task<string> GetMarkupAsync(CancellationToken ct);
 // Optional (default implementations return nothing):
 Task<IReadOnlyList<HttpRequestRecord>> GetHttpRequestsAsync(CancellationToken ct);
 Task<IReadOnlyList<JSCallRecord>> GetJSCallsAsync(CancellationToken ct);
+// Optional (default implementations throw NotSupportedException; the checks are then recorded as skipped):
+Task<IReadOnlyList<ElementMeasurement>> MeasureAsync(LocatorChain locator, string? cssProperty, string? pseudoElement, CancellationToken ct);
+Task<AccessibilityReport> ScanAccessibilityAsync(AccessibilityPolicy policy, StoryAccessibilityOptions storyOptions, CancellationToken ct);
+Task<VisualResult> MatchScreenshotAsync(string name, LocatorChain? target, bool fullPage, CancellationToken ct);
 ```
+
+A runner applies `RunPolicy.Apply(story, result, settings)` to each finished result (expected failures, `BTP_FAIL_ON_FLAKY`, quarantine and the `BTP_MAX_FAILURES` count) and, before starting a story, `StoryRunFilter.ExcludeReason(story, settings)` and `RunPolicy.StopReason(settings)`, which give the reason to report it as skipped.
 
 To support JS mocks and `ExpectJSCall`, wrap the `IJSRuntime` your host gives components with `StoryJSRuntime.Create(runtime, story.JSInterop, log, mode)` when the story declares mocks (`story.JSInterop` is null otherwise). `JSMockMode.Answer` answers mocks in the wrapper, `AnsweredByInner` lets a mocking runtime such as bUnit's answer them and only records, and `RecordOnly` records while real JavaScript answers.
 

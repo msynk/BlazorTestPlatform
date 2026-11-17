@@ -25,9 +25,13 @@
     <ProjectReference Include="..\BlazorTestPlatform.CodeFixes\BlazorTestPlatform.CodeFixes.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
   </ItemGroup>
 
-  <!-- Packs the generator from wherever it was built (bin/, -output, -artifacts-path or UseArtifactsOutput). -->
+  <!--
+    Packs the generator from wherever it was built (bin/, -output, -artifacts-path or UseArtifactsOutput). The analyzers/
+    folder is shared by every target framework, so it is added once, by the pack build itself (BeforePack), whether it
+    packs every framework or one (-p:TargetFramework=...).
+  -->
   <PropertyGroup>
-    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);_BtpPackStoryGenerator</TargetsForTfmSpecificContentInPackage>
+    <BeforePack>$(BeforePack);_BtpPackStoryGenerator</BeforePack>
   </PropertyGroup>
 
   <Target Name="_BtpPackStoryGenerator">
@@ -40,8 +44,8 @@
     <Error Condition="!Exists('@(_BtpStoryGenerator)')" Text="The story generator was not built: @(_BtpStoryGenerator). Build the solution (or the Generators project) before packing Core." />
     <Error Condition="!Exists('@(_BtpStoryCodeFixes)')" Text="The story code fixes were not built: @(_BtpStoryCodeFixes). Build the solution (or the CodeFixes project) before packing Core." />
     <ItemGroup>
-      <TfmSpecificPackageFile Include="@(_BtpStoryGenerator)" PackagePath="analyzers/dotnet/cs" />
-      <TfmSpecificPackageFile Include="@(_BtpStoryCodeFixes)" PackagePath="analyzers/dotnet/cs" />
+      <None Include="@(_BtpStoryGenerator)" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+      <None Include="@(_BtpStoryCodeFixes)" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
     </ItemGroup>
   </Target>
 

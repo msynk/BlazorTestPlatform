@@ -113,6 +113,8 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
     private readonly List<CapabilityRequirement> _requirements = [];
     private BrowserEmulation _emulation = BrowserEmulation.None;
     private Performance.BrowserBudget? _browserBudget;
+    private Results.ExpectedFailure? _expectedFailure;
+    private bool _slow;
 
     internal StoryBuilder(string name)
     {
@@ -522,6 +524,43 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
         return this;
     }
 
+    /// <summary>
+    /// Marks a known failure, as Playwright's <c>test.fail()</c> or pytest's strict <c>xfail</c>: the story keeps running
+    /// everywhere, a failure is reported as expected (and passes), and a run that passes on its first attempt fails with
+    /// "expected to fail", so the annotation goes once the bug is fixed. A failure on any attempt counts, so intermittent
+    /// known issues do not fail on a retry. <paramref name="when"/> limits it to some runs:
+    /// <c>ExpectFailure("#123: focus is lost after hydration", run =&gt; run.HostingModel == HostingModel.InteractiveWebAssembly)</c>.
+    /// Prefer it to <c>Skip</c> for bugs: the story still reports when it starts passing.
+    /// </summary>
+    public StoryBuilder<TComponent> ExpectFailure(string reason, Func<Results.StoryRunInfo, bool>? when = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        _expectedFailure = new Results.ExpectedFailure(reason, when);
+        return this;
+    }
+
+    /// <summary>
+    /// Marks the story as not working yet (Playwright's <c>test.fixme()</c>): runners skip it with the reason, prefixed
+    /// "Fix me", and it gets the <c>fixme</c> tag so a report or tag filter can list them. It still shows in the workbench.
+    /// </summary>
+    public StoryBuilder<TComponent> Fixme(string reason)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        _skipReason = "Fix me: " + reason;
+        _tags.Add("fixme");
+        return this;
+    }
+
+    /// <summary>
+    /// Marks the story as slow (Playwright's <c>test.slow()</c>): runners triple its timeout (its own <c>Timeout</c>, else
+    /// the runner's default), for stories that load a lot or start a cold WebAssembly runtime.
+    /// </summary>
+    public StoryBuilder<TComponent> Slow()
+    {
+        _slow = true;
+        return this;
+    }
+
     /// <inheritdoc cref="IStoryBuilder.Metadata" />
     public StoryBuilder<TComponent> Metadata(string key, object? value)
     {
@@ -640,6 +679,8 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
             SourceFile = source.File,
             SourceLine = source.Line,
             Order = order,
+            ExpectedFailure = _expectedFailure,
+            IsSlow = _slow,
         });
     }
 

@@ -52,7 +52,17 @@ public sealed class VisualOptions : StoryOptionsBase
     /// <summary>Maximum ratio (0..1) of differing pixels tolerated.</summary>
     public double? MaxDiffRatio { get; set { ThrowIfReadOnly(); field = value; } }
 
-    /// <summary>CSS selectors whose boxes are masked before capture (timestamps, avatars, ads...).</summary>
+    /// <summary>
+    /// Elements with this attribute are masked in every visual snapshot, as Chromatic's <c>data-chromatic="ignore"</c>:
+    /// mark a timestamp, a random avatar or a live chart in the component's markup (<c>&lt;time data-btp-ignore&gt;</c>)
+    /// instead of listing a selector in each story. The box stays, so a change of its size or position still shows.
+    /// </summary>
+    public const string IgnoreAttribute = "data-btp-ignore";
+
+    /// <summary>The CSS selector of <see cref="IgnoreAttribute"/>.</summary>
+    public const string IgnoreSelector = "[" + IgnoreAttribute + "]";
+
+    /// <summary>CSS selectors whose boxes are masked before capture (timestamps, avatars, ads...). <see cref="IgnoreSelector"/> is always masked.</summary>
     public List<string> Masks { get; } = [];
 
     /// <summary>Capture the full page instead of the story root element.</summary>

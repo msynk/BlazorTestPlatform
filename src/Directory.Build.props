@@ -2,6 +2,12 @@
 
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
 
+  <!-- Every supported framework: inner builds get TargetFramework as a global property, which this does not override. -->
+  <PropertyGroup>
+    <TargetFramework></TargetFramework>
+    <TargetFrameworks>$(BtpTargetFrameworks)</TargetFrameworks>
+  </PropertyGroup>
+
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>

@@ -1,0 +1,10 @@
+@* Accessible until opened: the revealed image has no alternative text. *@
+<button @onclick="() => open = true">Show picture</button>
+@if (open)
+{
+    <img src="picture.png" />
+}
+
+@code {
+    private bool open;
+}

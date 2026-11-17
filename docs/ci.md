@@ -67,6 +67,20 @@ Every command takes `-p <project>`, the test project directory with `btp.json`. 
 
 On GitHub Actions it reads the repository, the pull request number and the API address from the workflow's environment. It needs a token that can write pull-request comments, passed as `GITHUB_TOKEN`. Pull requests from forks get a read-only token: the command then prints a warning and the build continues. Outside Actions, pass `--pr` and `--repository`. The comment links to the workflow run, where the HTML report is attached; pass `--report-url` to link a published report instead.
 
+## Run selection and control
+
+| Switch | What it does | Like |
+|---|---|---|
+| `BTP_TAGS="smoke && !visual"` | runs the stories whose tags match a boolean expression | Vitest `--tags-filter`, pytest `-m` |
+| `BTP_GREP=dialog` / `BTP_GREP_INVERT=chaos` | runs (or leaves out) the stories whose id or path matches | Playwright `--grep` / `--grep-invert` |
+| `BTP_LAST_FAILED=1` | reruns only the stories that failed in the results directory | Playwright `--last-failed`, pytest `--lf` |
+| `BTP_FAIL_ON_FLAKY=1` | fails runs that only passed on a retry | Playwright `--fail-on-flaky-tests` |
+| `BTP_MAX_FAILURES=10` | after 10 blocking failures, reports the stories that start afterwards as skipped | Playwright `--max-failures` |
+
+Stories left out are reported as skipped with the reason (never silently dropped), so a selection that matches nothing still shows what it skipped. `ExpectFailure(...)` on a story turns a known bug into an expected failure (see [writing stories](stories.md#known-failures-unfinished-and-slow-stories)); expected failures do not count toward `BTP_MAX_FAILURES`.
+
+The JUnit report writes the earlier attempts of flaky runs as Maven Surefire's `<flakyFailure>` elements and those of failed runs as `<rerunFailure>`, which Jenkins, GitLab and other CI systems read to show a test as flaky instead of plainly passed.
+
 ## Sharding
 
 Spread a large matrix over parallel CI jobs: each job runs one shard, and `btp report -r shard1 -r shard2 ...` merges their results.

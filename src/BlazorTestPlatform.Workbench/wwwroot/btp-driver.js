@@ -1097,7 +1097,41 @@ export function publishResult(storyId, result) {
     if (window.parent && window.parent !== window) window.parent.postMessage({ source: 'btp', type: 'play-result', storyId, ...result }, window.location.origin);
 }
 
+/** The share (0..1) of an element's box in the viewport, as an IntersectionObserver reports it (Playwright's toBeInViewport). */
+function viewportRatio(e) {
+    return new Promise(resolve => {
+        const observer = new IntersectionObserver(entries => {
+            observer.disconnect();
+            resolve(entries.length ? entries[entries.length - 1].intersectionRatio : 0);
+        });
+        observer.observe(e);
+    });
+}
+
+/**
+ * Computed style (of a pseudo-element, when given), viewport share (when asked) and box of the match:
+ * IStoryDriver.MeasureAsync. Assertions are strict, so only a single match is measured; other counts return empty entries.
+ */
+export async function measure(steps, property, pseudo, wantRatio) {
+    const matches = resolve(steps);
+    if (matches.length !== 1) return matches.map(() => ({}));
+    const e = matches[0];
+    const box = e.getBoundingClientRect();
+    return [{
+        style: property ? getComputedStyle(e, pseudo || null).getPropertyValue(property) : null,
+        ratio: wantRatio ? await viewportRatio(e) : 0,
+        x: box.x, y: box.y, width: box.width, height: box.height,
+    }];
+}
+
+/** The single element a locator chain matches, or why there is none (screenshots of a locator). */
+export function single(stepsJson) {
+    const matches = resolve(JSON.parse(stepsJson));
+    return matches.length === 1 ? matches[0] : matches.length === 0 ? 'no element matches' : `strict mode violation: ${matches.length} elements match`;
+}
+
 // JSON entry points (the .NET side passes and receives strings, which keeps interop trimming-safe).
+export async function measureJson(stepsJson, property, pseudo, wantRatio) { return JSON.stringify(await measure(JSON.parse(stepsJson), property, pseudo, wantRatio)); }
 export function queryJson(stepsJson) { return JSON.stringify(queryAll(JSON.parse(stepsJson))); }
 export function performJson(stepsJson, actionJson) { return perform(JSON.parse(stepsJson), JSON.parse(actionJson)); }
 export function actionTargetJson(stepsJson, actionJson) { return actionTarget(JSON.parse(stepsJson), JSON.parse(actionJson)); }

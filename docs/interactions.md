@@ -177,6 +177,25 @@ It works in bUnit, Playwright (through the story frame bridge) and the in-app dr
 JSON: primitives, enums, GUIDs and dates always, other types where reflection-based JSON is enabled.
 
 JS-call arguments are compared after `JSCallLog.Format`, the same under every driver: strings as they are, numbers and dates in the invariant culture, booleans as `true`/`false`, collections as `[1, 2, 3]`, dictionaries as `{"key": value}` (strings inside collections are quoted), and other objects as their camelCase JSON, which is what JS interop sends. In trimmed WebAssembly apps, where reflection-based JSON is unavailable, other objects fall back to `ToString()`.
+### Styles and layout
+
+`ToHaveCssAsync(property, value)` compares an element's computed style as the browser reports it (`rgb(...)` for colors, pixels for lengths; kebab-case or camelCase names; `pseudoElement: "::before"` reads a pseudo-element), and `ToBeInViewportAsync(ratio)` checks that the element intersects the viewport, or that at least `ratio` of it does (as Playwright's `toHaveCSS` and `toBeInViewport`). Both are strict, auto-waiting, negatable and soft like the other assertions. They need a driver that applies CSS and lays pages out (`DriverCapabilities.Css`, `Layout`): Playwright and the in-app driver evaluate them, and bUnit records them in the timeline as skipped while the play script goes on, so one script keeps working everywhere.
+
+```csharp
+await ctx.Expect(ctx.GetByRole("tabpanel")).ToHaveCssAsync("paddingTop", "16px");
+await ctx.Expect(ctx.GetByRole("dialog")).ToBeInViewportAsync(ratio: 1);
+```
+
+### Screenshots and accessibility in the middle of play
+
+`ctx.ExpectScreenshotAsync("menu-open")` compares a screenshot of the current state with a committed baseline, as Playwright's `toHaveScreenshot('name')`: the story root, an element (`target: ctx.GetByRole("menu")`) or the whole page (`fullPage: true`, for overlays rendered outside the story). Baselines sit next to the story's own snapshot (`{story-id}/{viewport}.{theme}.{browser}-{platform}.menu-open.png`), use the story's tolerances and masks, are written when missing locally and approved with `btp approve` or in the hub. Names are unique within a story; `initial` is reserved. bUnit and the in-app driver record the check as skipped.
+
+`ctx.ExpectAccessibleAsync("menu open")` scans the story now and fails when the accessibility policy fails, with the story's disabled rules and waivers: the states play passes through (an open menu, a validation error) that the scan after play never sees. bUnit applies its markup rules, browsers run axe-core, and the in-app driver records the check as skipped.
+
+### Attachments and step timeouts
+
+`ctx.Attach("cart.json", json)` (text or bytes) attaches a file to the run, as Playwright's `testInfo.attach`: runners write it with the run's artifacts (`TestResults/btp/artifacts/<key>/attachments/`), reports link it, and the xUnit, NUnit, MSTest and TUnit packages attach it to the test result whatever the outcome. `ctx.StepAsync("load the picture", body, TimeSpan.FromSeconds(2))` fails at that step, with its name, when it takes longer than its own timeout.
+
 ## Grouping and timelines
 
 `await ctx.StepAsync("open the menu", async () => { ... })` nests actions on the timeline. Every action, assertion, wait and check is recorded with its start offset and duration. The timeline appears in results, in the HTML report and in failure messages.

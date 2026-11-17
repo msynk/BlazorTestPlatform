@@ -124,6 +124,27 @@ public sealed class HardeningTests
         Assert.Contains("\"schemaVersion\": 1", File.ReadAllText(Path.Combine(store.ResultsDirectory, "a~bunit.json")), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Result_files_missing_newer_lists_read_them_as_empty()
+    {
+        // The JSON reader sets every init property, so a list a file does not mention would be null without a guard.
+        var store = new ResultsStore(NewDirectory());
+        File.WriteAllText(Path.Combine(store.ResultsDirectory.EnsureDirectory(), "c~bunit.json"), "{\"key\":\"c|bunit\",\"storyId\":\"c\",\"title\":\"C\",\"name\":\"c\",\"driver\":\"bunit\"}");
+
+        var result = Assert.Single(store.ReadAll());
+
+        Assert.NotNull(result.Screenshots);
+        Assert.Empty(result.VisualComparisons());
+        Assert.NotNull(result.AttemptErrors);
+        Assert.NotNull(result.Steps);
+        Assert.NotNull(result.AccessibilityFailures);
+        Assert.NotNull(result.BudgetViolations);
+        Assert.NotNull(result.Console);
+        Assert.NotNull(result.Network);
+        Assert.NotNull(result.HttpRequests);
+        Assert.NotNull(result.Artifacts);
+    }
+
     [Theory]
     [InlineData("..")]
     [InlineData(".")]
@@ -255,4 +276,9 @@ public sealed class HardeningTests
         policy.Suppressions.Add(new AccessibilitySuppression { RuleId = "color-contrast", Justification = "global" });
         Assert.True(policy.Evaluate(report).Passed);
     }
+}
+
+internal static class DirectoryTestExtensions
+{
+    public static string EnsureDirectory(this string path) => Directory.CreateDirectory(path).FullName;
 }

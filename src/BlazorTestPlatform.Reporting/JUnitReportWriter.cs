@@ -47,12 +47,28 @@ public static class JUnitReportWriter
                             new XAttribute("message", Text(FirstLine(result.Error ?? "failed"))),
                             new XAttribute("type", Text(result.ErrorType ?? "StoryFailure")),
                             new XCData(Text(string.Join(Environment.NewLine, new[] { result.Error, result.StackTrace }.Where(s => s is not null))))));
+
+                        // Maven Surefire's rerun elements (read by Jenkins, GitLab and others): the earlier attempts' failures.
+                        foreach (var error in result.AttemptErrors)
+                        {
+                            testCase.Add(new XElement("rerunFailure", new XAttribute("message", Text(FirstLine(error))), new XAttribute("type", "StoryFailure"), new XElement("stackTrace", new XCData(Text(error)))));
+                        }
+
                         break;
                     case StoryOutcome.Skipped:
                         testCase.Add(new XElement("skipped", new XAttribute("message", Text(result.SkipReason ?? "skipped"))));
                         break;
                     case StoryOutcome.Flaky:
+                        // Surefire's flaky elements: CI systems that read them show the test as flaky, not plainly passed.
+                        foreach (var error in result.AttemptErrors)
+                        {
+                            testCase.Add(new XElement("flakyFailure", new XAttribute("message", Text(FirstLine(error))), new XAttribute("type", "StoryFailure"), new XElement("stackTrace", new XCData(Text(error)))));
+                        }
+
                         testCase.Add(new XElement("system-out", new XCData(Text($"FLAKY: passed after {result.Attempts} attempts.{Environment.NewLine}{string.Join(Environment.NewLine, result.AttemptErrors)}"))));
+                        break;
+                    case StoryOutcome.Passed when result.ExpectedFailure is { } expected:
+                        testCase.Add(new XElement("system-out", new XCData(Text($"EXPECTED FAILURE ({expected}): {result.Error}"))));
                         break;
                 }
 

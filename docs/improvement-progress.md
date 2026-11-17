@@ -169,6 +169,29 @@ Research and the full gap list, including what was deferred and why: [reports/Te
 | T-17 | Right-to-left and high-contrast themes | P2 | Core, Accessibility, Playwright, Workbench | Verified | `CultureAndThemeTests`; `ThemeEmulationTests` (Chromium, Firefox, WebKit) | quality-gates.md |
 | T-18 | `aria-errormessage` announcement rule in memory (axe found it in a new demo story; bUnit did not) | P2 | Accessibility | Verified | `AccessibilityEngineTests` (6 cases) | quality-gates.md |
 
+### Fourth pass: .NET 11 and run control
+
+Research and the full gap list, including what was deferred and why: [reports/Gap analysis, fourth pass.md](../reports/Gap%20analysis%2C%20fourth%20pass.md).
+
+| Id | Description | Priority | Packages | Status | Tests | Docs |
+|---|---|---|---|---|---|---|
+| U-1 | `net10.0;net11.0` for every library and test project, per-framework ASP.NET Core packages, bUnit 2.15.2, SDK 11 in global.json, CI and container scripts | P1 | build | Verified | every unit suite on both frameworks; `dotnet pack` (lib/net10.0, lib/net11.0, matching dependency groups, analyzers once) | getting-started.md, README |
+| U-2 | Story host bridge import threw into the renderer on a closed circuit (BL0016); false positives suppressed with reasons | P2 | Workbench | Implemented | build with no BL0016 warnings; full e2e | CHANGELOG |
+| U-3 | `btp init` pipelines install the .NET versions the project and global.json need | P2 | Cli | Verified | `ScaffoldingTests.Pipelines_install_every_dotnet_*` | CHANGELOG |
+| U-4 | `dotnet run --project src/BlazorTestPlatform.Cli` ambiguous once multi-targeted | P1 | Cli | Verified | the CI report command run locally | — |
+| U-5 | Lists missing from older result files read as null on .NET 10 (`btp approve` crashed) | P1 | Core | Verified | `HardeningTests.Result_files_missing_newer_lists_read_them_as_empty` (fails on net10.0 without the change) | CHANGELOG |
+| U-6 | `ExpectFailure(reason, when)`, `Fixme`, `Slow` | P1 | Core, Bunit, Playwright, Workbench | Verified | `RunPolicyTests`, `RunControlTests` | stories.md |
+| U-7 | Tag expressions, grep, last failed (`BTP_TAGS`, `BTP_GREP`, `BTP_GREP_INVERT`, `BTP_LAST_FAILED`), reported as skipped | P1 | Core, Bunit, Playwright | Verified | `RunPolicyTests` (precedence, errors, filters, last failed read once), `RunControlTests` | configuration.md, ci.md, test-frameworks.md |
+| U-8 | `BTP_FAIL_ON_FLAKY`, `BTP_MAX_FAILURES` (`RunPolicy`) | P2 | Core, Bunit, Playwright | Verified | `RunPolicyTests` | configuration.md, ci.md |
+| U-9 | JUnit `flakyFailure`/`rerunFailure`, expected failures in JUnit, CTRF and HTML | P2 | Reporting | Verified | `RunControlReportingTests` | ci.md |
+| U-10 | Named screenshots in play (`ExpectScreenshotAsync`), with approve, hub, HTML, SARIF, attachments, revert | P1 | Core, Playwright, Visual, Reporting, Hub, Cli | Verified | demo `navigation-tabs--states-in-play` in Chromium (4 render modes, 2 viewports, 2 themes), Firefox and WebKit; a corrupted baseline failed with "changed size" and `btp approve` restored it; `RunControlReportingTests`; `PlayApiAdditionsTests` (names) | interactions.md, quality-gates.md |
+| U-11 | `ExpectAccessibleAsync` in the middle of play | P2 | Core, Bunit, Playwright | Verified | `PlayApiAdditionsTests` (passes closed, fails with `image-alt` once opened); demo story in browsers | interactions.md |
+| U-12 | `ToHaveCssAsync`, `ToBeInViewportAsync`, `IStoryDriver.MeasureAsync` | P2 | Core, Playwright, Workbench | Verified | demo story in Chromium, Firefox, WebKit and the in-app driver; `PlayApiAdditionsTests` (skipped in bUnit) | interactions.md |
+| U-13 | `ctx.Attach`, `StepAsync` timeout | P2 | Core, Bunit, Playwright | Verified | `PlayApiAdditionsTests`; demo attachment in browser results | interactions.md, test-frameworks.md |
+| U-14 | `data-btp-ignore` masked in every snapshot | P3 | Core, Playwright | Implemented | full e2e (no demo component uses it) | quality-gates.md |
+| U-16 | Fixes from an independent review of this pass: runs left out by selection or `BTP_MAX_FAILURES` no longer overwrite the key's last result (a filtered run hid failures from `BTP_LAST_FAILED`); a failed named screenshot fails the run even when play caught its exception; skipped runs keep play attachments; a step timeout no longer relabels a `TimeoutException` the step threw; `MeasureAsync` measures only a single match and the viewport only when asked; SARIF keeps a hard failure next to a soft screenshot mismatch; named screenshots follow the story's `FullPage`; a hung browser attempt is waited for once, not twice | P1 | Core, Bunit, Playwright, Reporting, Workbench | Verified (selection: `RunControlTests.Stories_a_filtered_run_leaves_out_*`), Implemented (rest; full e2e) | CHANGELOG |
+| U-15 | Container scripts pass `BTP_GREP`, `BTP_GREP_INVERT`, `BTP_TAGS`, `BTP_SHARD` | P3 | scripts | Verified | Linux baselines of the new story rendered with `BTP_GREP=... scripts/visual-tests.sh --update` | ci.md |
+
 ## Verification log
 
 | Date | Command | Result |
@@ -190,6 +213,13 @@ Research and the full gap list, including what was deferred and why: [reports/Te
 | 2026-11-17 | unit and in-memory suites (12 projects) | 709 tests: 701 passed, 8 skipped by design (Accessibility 168, Bunit 116, Cli 11, Core 240, Generators 18, MSTest 6, NUnit 6, Reporting 42, TUnit 6, Visual 42, Workbench 46, Xunit 8) |
 | 2026-11-17 | trimmed publish with `-warnaserror:IL2026,IL2060,IL2070,IL2072,IL2091`, then the published app in `Production` with `--filter-class '*CrossHostingTests' '*InAppPlayTests' '*ArgControlsTests' '*WorkbenchInspectorTests'` | no trimming warnings; 233 passed (JavaScript callbacks in trimmed WebAssembly included) |
 | 2026-11-17 | `dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests` (full suite with the play API stories, theme emulation, snapshot parity and the orphaned-baseline gate) | 735 passed. An earlier partial run had one Auto-mode sign-up form fill time out under load; it passed on every rerun |
+| 2026-11-17 | `dotnet build BlazorTestPlatform.slnx -c Release` with the .NET 11 SDK (fourth pass, `net10.0;net11.0`) | 0 warnings, 0 errors |
+| 2026-11-17 | unit and in-memory suites (12 projects), each on net10.0 and net11.0 | 1,502 tests: 1,486 passed, 16 skipped by design (751 per framework: Accessibility 168, Bunit 126, Cli 12, Core 268, Generators 18, MSTest 6, NUnit 6, Reporting 45, TUnit 6, Visual 42, Workbench 46, Xunit 8) |
+| 2026-11-17 | `dotnet pack` Core, Bunit, Cli | Core and Bunit carry `lib/net10.0` and `lib/net11.0` with ASP.NET Core 10.0.15 and 11.0.0 dependency groups and the analyzers once; the tool is `tools/net10.0` |
+| 2026-11-17 | `BTP_GREP=navigation-tabs--states-in-play`: cross-hosting, visual, cross-browser and in-app suites on Windows, then with `BTP_UPDATE_SNAPSHOTS=none` | 494, then 568 passed; a baseline replaced by another image failed with "changed size", `btp approve` listed and restored it |
+| 2026-11-17 | `BTP_GREP=navigation-tabs--states-in-play scripts/visual-tests.sh --update`, then without `--update` (Playwright 1.63 container, SDK 11 and the .NET 10 runtime installed by the script) | 571 passed both times; 16 Linux baselines of the new story |
+| 2026-11-17 | `dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests` (full suite) | 745 of 747: the Tabs manual review was stale (the new story changed the fingerprint; the committed review was an unfilled template, refreshed from the gate's template) and one local Windows baseline (`account-user-badge--signed-in`, desktop dark) differed by 2 px; the same cells pass against the committed Linux baselines in the container (`BTP_GREP=account-user-badge`, 571 passed) |
+| 2026-11-17 | trimmed publish with `-warnaserror:IL2026,IL2060,IL2070,IL2072,IL2091`, the published app in `Production`, `--filter-class '*CrossHostingTests' '*InAppPlayTests' '*ArgControlsTests' '*WorkbenchInspectorTests'` | no trimming warnings; 239 passed |
 
 ## Deferred
 

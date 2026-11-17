@@ -4,6 +4,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.JSInterop;
 
+// BL0016 (.NET 11) asks for guarded interop calls. A driver's failures must reach the play script (they fail the story,
+// with the step that caused them), and StoryHost handles a disconnected frame around the whole run.
+#pragma warning disable BL0016
+
 namespace BlazorTestPlatform.Workbench;
 
 /// <summary>
@@ -146,6 +150,10 @@ public sealed class InAppStoryDriver : IStoryDriver
 
     /// <inheritdoc />
     public async Task<string> GetAriaSnapshotAsync(CancellationToken cancellationToken) => await _module.InvokeAsync<string>("ariaSnapshot", cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ElementMeasurement>> MeasureAsync(LocatorChain locator, string? cssProperty, string? pseudoElement, bool viewportRatio, CancellationToken cancellationToken) =>
+        DriverJson.Measurements(await _module.InvokeAsync<string>("measureJson", cancellationToken, DriverJson.Steps(locator), cssProperty, pseudoElement, viewportRatio));
 
     /// <inheritdoc />
     public Task<IReadOnlyList<HttpRequestRecord>> GetHttpRequestsAsync(CancellationToken cancellationToken) =>

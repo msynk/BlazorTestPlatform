@@ -27,7 +27,7 @@ public sealed record RunSummary
     public int Skipped => Results.Count(r => r.Outcome == StoryOutcome.Skipped);
 
     /// <summary>Visual snapshots that changed or are missing.</summary>
-    public int VisualChanges => Results.Count(r => r.Visual?.IsFailure == true);
+    public int VisualChanges => Results.Sum(r => r.VisualComparisons().Count(v => v.IsFailure));
 
     /// <summary>New visual baselines written in this run.</summary>
     public int NewBaselines => Results.Count(r => r.Visual?.Status is VisualStatus.NewBaseline);

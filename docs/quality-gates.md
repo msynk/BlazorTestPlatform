@@ -35,6 +35,14 @@ are not in its toolbar. Your own themes can set `Direction`, `ForcedColors` and 
 
 **Review.** A mismatch writes `expected`, `actual` and `diff` images under `TestResults/btp/visual/`. `btp report` shows them side by side, with a slider overlay. `btp approve [--filter 'inputs-*'] [--dry-run]` promotes the actual images to baselines.
 
+### Ignoring regions in markup
+
+An element with the `data-btp-ignore` attribute is masked in every visual snapshot, as Chromatic's `data-chromatic="ignore"`: put it on a timestamp, a random avatar or a live chart in the component's markup instead of listing a selector in each story (`Visual(v => v.Masks.Add(...))` still works). The box stays, so a change of its size or position still shows.
+
+### Screenshots of play states
+
+`ctx.ExpectScreenshotAsync("name")` takes more snapshots inside the play script, each with its own baseline next to the story's (see [interactions](interactions.md#screenshots-and-accessibility-in-the-middle-of-play)). They follow the same rules: written when missing locally, never on CI, reverted when the run fails another check, listed by `btp approve`, reviewed in the hub's visual page and the HTML report, and counted as visual changes in summaries and SARIF.
+
 ## Accessibility
 
 There are two engines, both reporting axe rule ids:

@@ -191,6 +191,112 @@ public sealed class LocatorAssertions
     public Task ToHaveRoleAsync(string role, TimeSpan? timeout = null) =>
         Single($"to have role \"{role}\"", e => (string.Equals(e.Role, role, StringComparison.OrdinalIgnoreCase), Quote(e.Role)), timeout);
 
+    /// <summary>
+    /// The element's computed <paramref name="property"/> (kebab-case or camelCase: <c>background-color</c>,
+    /// <c>backgroundColor</c>) equals <paramref name="expected"/>, as the browser reports it (<c>rgb(…)</c> for colors,
+    /// pixels for lengths), as Playwright's <c>toHaveCSS</c>; <paramref name="pseudoElement"/> reads <c>::before</c> or
+    /// <c>::after</c>. Needs a driver that applies CSS: drivers without <see cref="DriverCapabilities.Css"/> (bUnit) record the
+    /// check as skipped and the play script continues.
+    /// </summary>
+    public Task ToHaveCssAsync(string property, string expected, string? pseudoElement = null, TimeSpan? timeout = null)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        var name = CssPropertyName(property);
+        return MeasuredAsync($"to have CSS {name}{pseudoElement} \"{expected}\"", DriverCapabilities.Css, name, pseudoElement,
+            m => (string.Equals(m.ComputedStyle?.Trim(), expected.Trim(), StringComparison.Ordinal), Quote(m.ComputedStyle)), timeout);
+    }
+
+    /// <summary>The element's computed <paramref name="property"/> matches <paramref name="pattern"/> (see <see cref="ToHaveCssAsync(string, string, string?, TimeSpan?)"/>).</summary>
+    public Task ToHaveCssAsync(string property, Regex pattern, string? pseudoElement = null, TimeSpan? timeout = null)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+        var name = CssPropertyName(property);
+        return MeasuredAsync($"to have CSS {name}{pseudoElement} matching /{pattern}/", DriverCapabilities.Css, name, pseudoElement,
+            m => (m.ComputedStyle is { } value && pattern.IsMatch(value), Quote(m.ComputedStyle)), timeout);
+    }
+
+    /// <summary>
+    /// The element intersects the viewport, as Playwright's <c>toBeInViewport</c>: any part of it, or at least
+    /// <paramref name="ratio"/> (0..1) of its box. Needs a driver that lays pages out: drivers without
+    /// <see cref="DriverCapabilities.Layout"/> (bUnit) record the check as skipped and the play script continues.
+    /// </summary>
+    public Task ToBeInViewportAsync(double ratio = 0, TimeSpan? timeout = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(ratio);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(ratio, 1);
+        return MeasuredAsync(ratio > 0 ? $"to be in the viewport (at least {ratio:P0})" : "to be in the viewport", DriverCapabilities.Layout, null, null,
+            m => (ratio > 0 ? m.ViewportRatio >= ratio : m.ViewportRatio > 0, string.Create(CultureInfo.InvariantCulture, $"{m.ViewportRatio:P0} in the viewport")), timeout);
+    }
+
+    // background-color, backgroundColor and --custom-property all reach getComputedStyle(...).getPropertyValue in kebab-case.
+    private static string CssPropertyName(string property)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(property);
+        var trimmed = property.Trim();
+        if (trimmed.StartsWith("--", StringComparison.Ordinal))
+        {
+            return trimmed;
+        }
+
+        var name = new StringBuilder();
+        foreach (var c in trimmed)
+        {
+            if (char.IsUpper(c))
+            {
+                name.Append('-').Append(char.ToLowerInvariant(c));
+            }
+            else
+            {
+                name.Append(c);
+            }
+        }
+
+        return name.ToString();
+    }
+
+    // Layout and style checks: strict (exactly one element), auto-waiting, negatable and soft like the others. A driver
+    // without the capability cannot observe them: the check is recorded as skipped (the rest of the script still runs).
+    private Task MeasuredAsync(string description, DriverCapabilities capability, string? property, string? pseudoElement, Func<ElementMeasurement, (bool Pass, string Actual)> evaluate, TimeSpan? timeout)
+    {
+        var title = $"expect {(_soft ? "(soft) " : string.Empty)}{_locator} {(_negate ? "not " : string.Empty)}{description}";
+        if (!_context.Supports(capability))
+        {
+            _context.Recorder.Log($"{title}: skipped, the {_context.DriverName} driver has no {capability}");
+            return Task.CompletedTask;
+        }
+
+        var effectiveTimeout = _context.AssertionTimeout(timeout);
+        var check = () => _context.Recorder.RunAsync(title, StepKind.Assertion, async () =>
+        {
+            var (success, actual) = await Poll.UntilAsync(
+                async ct =>
+                {
+                    var all = await _context.Driver.MeasureAsync(_locator.Chain, property, pseudoElement, viewportRatio: capability == DriverCapabilities.Layout, ct).ConfigureAwait(false);
+                    if (all.Count != 1)
+                    {
+                        return (false, all.Count == 0 ? "element not found" : StrictViolation(all.Count));
+                    }
+
+                    var (pass, value) = evaluate(all[0]);
+                    return (pass != _negate, value);
+                },
+                effectiveTimeout,
+                _context.CancellationToken).ConfigureAwait(false);
+
+            if (!success)
+            {
+                throw new StoryAssertionException(new StringBuilder()
+                    .Append(CultureInfo.InvariantCulture, $"Expected {_locator} {(_negate ? "not " : string.Empty)}{description}")
+                    .AppendLine()
+                    .Append(CultureInfo.InvariantCulture, $"  Actual:   {actual}")
+                    .AppendLine()
+                    .Append(CultureInfo.InvariantCulture, $"  Driver:   {_context.DriverName} ({_context.HostingModel.ToToken()}), waited {effectiveTimeout.TotalMilliseconds:0} ms")
+                    .ToString());
+            }
+        });
+        return _soft ? _context.SoftAsync(check) : check();
+    }
+
     private Task Single(string description, Func<ElementInfo, (bool Pass, string Actual)> evaluate, TimeSpan? timeout, bool describeFocus = false) =>
         CheckAsync(description, all => all.Count switch
         {

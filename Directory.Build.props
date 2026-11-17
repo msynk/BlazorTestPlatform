@@ -1,7 +1,9 @@
 <Project>
 
   <PropertyGroup>
+    <!-- Applications (the demo) target the oldest supported framework; libraries and their tests target every one. -->
     <BtpTargetFramework>net10.0</BtpTargetFramework>
+    <BtpTargetFrameworks>net10.0;net11.0</BtpTargetFrameworks>
     <TargetFramework>$(BtpTargetFramework)</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>

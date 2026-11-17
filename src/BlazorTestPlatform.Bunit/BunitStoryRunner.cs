@@ -31,7 +31,7 @@ public static class BunitStoryRunner
         var settings = options.Settings ?? BtpSettings.Current;
         var runs = Math.Max(1, settings.RepeatEach);
         var result = await BurnIn.RunAsync(runs, _ => RunOnceAsync(story, options, settings, cancellationToken)).ConfigureAwait(false);
-        return runs > 1 && result.Outcome == StoryOutcome.Failed ? Write(options, settings, result) : result;
+        return runs > 1 && result.Outcome == StoryOutcome.Failed ? Write(story, options, settings, result) : result;
     }
 
     private static async Task<StoryResult> RunOnceAsync(Story story, BunitStoryOptions options, BtpSettings settings, CancellationToken cancellationToken)
@@ -48,16 +48,24 @@ public static class BunitStoryRunner
         var key = StoryResult.CreateKey(story.Id, "bunit", options.Viewport?.Name, options.Theme?.Name, ArgsKey(options.Args));
         using var activity = BtpTelemetry.StartStory(story, "bunit", HostingModel.InMemory.ToToken(), options.Viewport?.Name, options.Theme?.Name);
 
+        // Left out by the run's selection or its failure budget: reported, but not written, so the key keeps its last real
+        // result (BTP_LAST_FAILED must still see a failure that a filtered run did not rerun).
+        if ((StoryRunFilter.ExcludeReason(story, settings) ?? RunPolicy.StopReason(settings)) is { } notSelected)
+        {
+            return Base(story, key, started, options) with { Outcome = StoryOutcome.Skipped, SkipReason = notSelected };
+        }
+
         if ((story.SkipReason ?? story.UnsupportedReason(BunitStoryDriver.CapabilitiesFor(story), "bunit")) is { } skip)
         {
-            return Write(options, settings, Base(story, key, started, options) with { Outcome = StoryOutcome.Skipped, SkipReason = skip });
+            return Write(story, options, settings, Base(story, key, started, options) with { Outcome = StoryOutcome.Skipped, SkipReason = skip });
         }
 
         var recorder = new StepRecorder();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(options.Timeout ?? story.Timeout ?? TimeSpan.FromSeconds(30));
+        timeout.CancelAfter(options.Timeout ?? story.TimeoutOr(TimeSpan.FromSeconds(30)));
 
         string? markup = null;
+        IReadOnlyList<ArtifactReference> attachments = [];
         IReadOnlyList<HttpRequestRecord> httpRequests = [];
         AccessibilityReport? a11y = null;
         IReadOnlyList<string> a11yFailures = [];
@@ -86,6 +94,7 @@ public static class BunitStoryRunner
                 finally
                 {
                     markup = Truncate(session.Markup, 20_000);
+                    attachments = WriteAttachments(session.StoryContext.Attachments, options, settings, key);
                     httpRequests = await session.Driver.GetHttpRequestsAsync(timeout.Token).ConfigureAwait(false);
                 }
 
@@ -130,7 +139,7 @@ public static class BunitStoryRunner
                 }
             }
 
-            return Write(options, settings, Base(story, key, started, options) with
+            return Write(story, options, settings, Base(story, key, started, options) with
             {
                 Outcome = StoryOutcome.Passed,
                 DurationMilliseconds = clock.Elapsed.TotalMilliseconds,
@@ -141,16 +150,18 @@ public static class BunitStoryRunner
                 BudgetViolations = budgetViolations,
                 Markup = markup,
                 HttpRequests = httpRequests,
+                Artifacts = attachments,
             });
         }
         catch (StorySkippedException ex)
         {
-            return Write(options, settings, Base(story, key, started, options) with
+            return Write(story, options, settings, Base(story, key, started, options) with
             {
                 Outcome = StoryOutcome.Skipped,
                 SkipReason = ex.Message,
                 Steps = recorder.Steps,
                 DurationMilliseconds = clock.Elapsed.TotalMilliseconds,
+                Artifacts = attachments,
             });
         }
         catch (Exception ex) when (cancellationToken.IsCancellationRequested)
@@ -161,9 +172,9 @@ public static class BunitStoryRunner
         catch (Exception ex)
         {
             var message = ex is OperationCanceledException && timeout.IsCancellationRequested
-                ? $"Story timed out after {(options.Timeout ?? story.Timeout ?? TimeSpan.FromSeconds(30)).TotalSeconds:0.#} s."
+                ? $"Story timed out after {(options.Timeout ?? story.TimeoutOr(TimeSpan.FromSeconds(30))).TotalSeconds:0.#} s."
                 : ex.Message;
-            return Write(options, settings, Base(story, key, started, options) with
+            return Write(story, options, settings, Base(story, key, started, options) with
             {
                 Outcome = StoryOutcome.Failed,
                 Error = message,
@@ -178,7 +189,26 @@ public static class BunitStoryRunner
                 BudgetViolations = budgetViolations,
                 Markup = markup,
                 HttpRequests = httpRequests,
+                Artifacts = attachments,
             });
+        }
+    }
+
+    // Files the play script attached go next to the run's other artifacts (only when results are written).
+    private static IReadOnlyList<ArtifactReference> WriteAttachments(IReadOnlyList<PlayAttachment> attachments, BunitStoryOptions options, BtpSettings settings, string key)
+    {
+        if (attachments.Count == 0 || !options.WriteResults)
+        {
+            return [];
+        }
+
+        try
+        {
+            return PlayAttachment.WriteAll(attachments, Path.Combine(settings.CreateResultsStore().ArtifactsDirectoryFor(key), "attachments"));
+        }
+        catch (IOException)
+        {
+            return [];
         }
     }
 
@@ -339,10 +369,11 @@ public static class BunitStoryRunner
         StartedAt = started,
     };
 
-    private static StoryResult Write(BunitStoryOptions options, BtpSettings settings, StoryResult result)
+    private static StoryResult Write(Story story, BunitStoryOptions options, BtpSettings settings, StoryResult result)
     {
-        result = settings.Quarantine.Apply(result);
-        BtpTelemetry.Complete(System.Diagnostics.Activity.Current is { OperationName: "btp.story" } story ? story : null, result);
+        // Expected failures, BTP_FAIL_ON_FLAKY, quarantine and the BTP_MAX_FAILURES count.
+        result = RunPolicy.Apply(story, result, settings);
+        BtpTelemetry.Complete(System.Diagnostics.Activity.Current is { OperationName: "btp.story" } activity ? activity : null, result);
         if (options.WriteResults)
         {
             try

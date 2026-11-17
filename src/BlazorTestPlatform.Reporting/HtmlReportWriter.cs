@@ -131,7 +131,7 @@ public static class HtmlReportWriter
     {
         var outcome = r.Outcome.ToString().ToLowerInvariant();
         var tags = new List<string> { outcome };
-        if (r.Visual?.IsFailure == true)
+        if (r.VisualComparisons().Any(v => v.IsFailure))
         {
             tags.Add("visual");
         }
@@ -149,6 +149,11 @@ public static class HtmlReportWriter
             h.Append("<span class=\"badge skipped\" title=\"").Append(E(quarantine.Reason)).Append("\">quarantined</span>");
         }
 
+        if (r.ExpectedFailure is { } expected)
+        {
+            h.Append("<span class=\"badge skipped\" title=\"").Append(E(expected)).Append("\">").Append(r.Outcome == StoryOutcome.Failed ? "unexpectedly passed" : "expected failure").Append("</span>");
+        }
+
         h.Append("<strong>").Append(E(r.Name)).Append("</strong>");
         foreach (var chip in new[] { r.Driver, r.HostingModel, r.Viewport, r.Theme, JUnitReportWriter.ArgsLabel(r) })
         {
@@ -161,6 +166,13 @@ public static class HtmlReportWriter
         if (r.Visual is { } v)
         {
             h.Append("<span class=\"chip ").Append(v.IsFailure ? "chip-bad" : string.Empty).Append("\">visual: ").Append(E(v.Status.ToString())).Append("</span>");
+        }
+
+        if (r.Screenshots.Count > 0)
+        {
+            var changed = r.Screenshots.Count(s => s.IsFailure);
+            h.Append("<span class=\"chip ").Append(changed > 0 ? "chip-bad" : string.Empty).Append("\">screenshots: ").Append(r.Screenshots.Count)
+                .Append(changed > 0 ? $", {changed} changed" : string.Empty).Append("</span>");
         }
 
         if (r.Attempts > 1)
@@ -194,6 +206,19 @@ public static class HtmlReportWriter
         if (r.Visual is { } visual)
         {
             RenderVisual(h, visual, assets);
+        }
+
+        // Named screenshots from play: the changed ones in full, the rest listed.
+        foreach (var screenshot in r.Screenshots.Where(s => s.IsFailure || s.Status == VisualStatus.NewBaseline))
+        {
+            RenderVisual(h, screenshot, assets);
+        }
+
+        if (r.Screenshots.Any(s => !(s.IsFailure || s.Status == VisualStatus.NewBaseline)))
+        {
+            h.Append("<p class=\"muted\">Screenshots that match: ");
+            h.Append(string.Join(", ", r.Screenshots.Where(s => !(s.IsFailure || s.Status == VisualStatus.NewBaseline)).Select(s => "<code>" + E(s.SnapshotName) + "</code>")));
+            h.Append("</p>");
         }
 
         if (r.Accessibility is { } a11y && a11y.Violations.Count > 0)

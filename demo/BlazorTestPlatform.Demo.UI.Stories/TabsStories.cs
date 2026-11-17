@@ -67,6 +67,23 @@ public sealed class TabsStories : Stories<Tabs>
 
                 await ctx.ExpectAction("SelectedIndexChanged").ToHaveBeenLastCalledWithAsync(0);
             }));
+
+        stories.Add("States in play", s => s
+            .Description("Named screenshots of the states play passes through (ExpectScreenshotAsync), computed styles (ToHaveCssAsync), the viewport (ToBeInViewportAsync), an accessibility scan in the middle of play (ExpectAccessibleAsync) and a file attached to the run (Attach). bUnit runs the scan and records the browser-only checks as skipped; the in-app driver checks styles and the viewport.")
+            .Play(async ctx =>
+            {
+                await ctx.ExpectScreenshotAsync("profile");
+
+                await ctx.GetByRole("tab", "Billing").ClickAsync();
+                var panel = ctx.GetByRole("tabpanel", "Billing");
+                await ctx.Expect(panel).ToBeVisibleAsync();
+                await ctx.Expect(panel).ToHaveCssAsync("paddingTop", "16px");
+                await ctx.Expect(panel).ToBeInViewportAsync(ratio: 1);
+                await ctx.ExpectAccessibleAsync("billing selected");
+                await ctx.ExpectScreenshotAsync("billing", ctx.GetByRole("tablist"));
+
+                ctx.Attach("selected-tab.txt", "Billing");
+            }));
     }
 
     private static RenderFragment Text(string text) => builder => builder.AddContent(0, text);

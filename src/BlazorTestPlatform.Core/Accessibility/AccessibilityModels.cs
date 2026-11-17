@@ -44,10 +44,10 @@ public sealed record AccessibilityViolation
     public string? HelpUrl { get; init; }
 
     /// <summary>Tags such as <c>wcag2aa</c>, <c>wcag143</c>, <c>best-practice</c>.</summary>
-    public IReadOnlyList<string> Tags { get; init; } = [];
+    public IReadOnlyList<string> Tags { get => field ?? []; init; } = [];
 
     /// <summary>Offending elements.</summary>
-    public IReadOnlyList<AccessibilityNode> Nodes { get; init; } = [];
+    public IReadOnlyList<AccessibilityNode> Nodes { get => field ?? []; init; } = [];
 
     /// <summary>Engine that produced the violation (<c>btp-markup</c>, <c>axe-core 4.x</c>).</summary>
     public string Engine { get; init; } = string.Empty;
@@ -66,19 +66,19 @@ public sealed record AccessibilityReport
     public required string Engine { get; init; }
 
     /// <summary>Violations found.</summary>
-    public IReadOnlyList<AccessibilityViolation> Violations { get; init; } = [];
+    public IReadOnlyList<AccessibilityViolation> Violations { get => field ?? []; init; } = [];
 
     /// <summary>Checks the engine could not decide (need manual review).</summary>
-    public IReadOnlyList<AccessibilityViolation> Incomplete { get; init; } = [];
+    public IReadOnlyList<AccessibilityViolation> Incomplete { get => field ?? []; init; } = [];
 
     /// <summary>Number of rules that passed.</summary>
     public int PassedRules { get; init; }
 
     /// <summary>Rules skipped because they were disabled.</summary>
-    public IReadOnlyList<string> DisabledRules { get; init; } = [];
+    public IReadOnlyList<string> DisabledRules { get => field ?? []; init; } = [];
 
     /// <summary>Rules the story is excused from, with the reasons (see <see cref="AccessibilityPolicy.WaiversFor"/>).</summary>
-    public IReadOnlyList<AccessibilityWaiver> Waivers { get; init; } = [];
+    public IReadOnlyList<AccessibilityWaiver> Waivers { get => field ?? []; init; } = [];
 }
 
 /// <summary>Where an <see cref="AccessibilityWaiver"/> comes from.</summary>
@@ -136,16 +136,16 @@ public sealed record AccessibilitySuppression
 public sealed record AccessibilityEvaluation
 {
     /// <summary>Violations that fail the gate.</summary>
-    public IReadOnlyList<AccessibilityViolation> Failures { get; init; } = [];
+    public IReadOnlyList<AccessibilityViolation> Failures { get => field ?? []; init; } = [];
 
     /// <summary>Violations below the impact threshold (reported as warnings).</summary>
-    public IReadOnlyList<AccessibilityViolation> Warnings { get; init; } = [];
+    public IReadOnlyList<AccessibilityViolation> Warnings { get => field ?? []; init; } = [];
 
     /// <summary>Violations covered by a suppression.</summary>
-    public IReadOnlyList<AccessibilityViolation> Suppressed { get; init; } = [];
+    public IReadOnlyList<AccessibilityViolation> Suppressed { get => field ?? []; init; } = [];
 
     /// <summary>Suppressions that matched but have expired.</summary>
-    public IReadOnlyList<AccessibilitySuppression> ExpiredSuppressions { get; init; } = [];
+    public IReadOnlyList<AccessibilitySuppression> ExpiredSuppressions { get => field ?? []; init; } = [];
 
     /// <summary>True when nothing fails the gate.</summary>
     public bool Passed => Failures.Count == 0;

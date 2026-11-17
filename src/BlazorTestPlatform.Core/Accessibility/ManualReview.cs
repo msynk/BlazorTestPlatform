@@ -114,7 +114,7 @@ public sealed record ComponentReview
     public string? AssistiveTechnology { get; init; }
 
     /// <summary>Per-check results.</summary>
-    public IReadOnlyList<ReviewItem> Items { get; init; } = [];
+    public IReadOnlyList<ReviewItem> Items { get => field ?? []; init; } = [];
 
     /// <summary>General notes.</summary>
     public string? Notes { get; init; }
@@ -189,7 +189,7 @@ public sealed record ReviewGateReport
     public DateTimeOffset EvaluatedAt { get; init; }
 
     /// <summary>One entry per component.</summary>
-    public IReadOnlyList<ReviewGateEntry> Entries { get; init; } = [];
+    public IReadOnlyList<ReviewGateEntry> Entries { get => field ?? []; init; } = [];
 
     /// <summary>Writes the report into a results directory and returns its path.</summary>
     public string Save(string resultsDirectory)

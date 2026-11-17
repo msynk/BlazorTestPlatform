@@ -87,7 +87,13 @@ public static class CtrfReportWriter
         writer.WriteNumber("start", result.StartedAt.ToUnixTimeMilliseconds());
         writer.WriteNumber("stop", result.StartedAt.AddMilliseconds(result.DurationMilliseconds).ToUnixTimeMilliseconds());
         writer.WriteString("suite", result.Title);
-        writer.WriteString("rawStatus", result.Outcome == StoryOutcome.Failed && result.Quarantine is not null ? "quarantined" : result.Outcome.ToString().ToLowerInvariant());
+        writer.WriteString("rawStatus", result switch
+        {
+            { Outcome: StoryOutcome.Failed, Quarantine: not null } => "quarantined",
+            { Outcome: StoryOutcome.Passed, ExpectedFailure: not null } => "expected-failure",
+            { Outcome: StoryOutcome.Failed, ExpectedFailure: not null } => "unexpected-pass",
+            _ => result.Outcome.ToString().ToLowerInvariant(),
+        });
         writer.WriteString("type", result.HostingModel is null or "memory" ? "component" : "browser");
 
         var message = result.Outcome switch
@@ -96,6 +102,7 @@ public static class CtrfReportWriter
             StoryOutcome.Failed => result.Error,
             StoryOutcome.Skipped => result.SkipReason,
             StoryOutcome.Flaky => $"Passed after {result.Attempts} attempts: {string.Join(" | ", result.AttemptErrors)}",
+            StoryOutcome.Passed when result.ExpectedFailure is { } expected => $"Expected failure ({expected}): {result.Error}",
             _ => null,
         };
         if (message is not null)

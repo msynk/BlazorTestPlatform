@@ -188,6 +188,50 @@ public sealed class PlaywrightStoryDriver : IStoryDriver
         await Page.EvaluateAsync<string?>(Scripts.AriaSnapshot).ConfigureAwait(false) ?? string.Empty;
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<ElementMeasurement>> MeasureAsync(LocatorChain locator, string? cssProperty, string? pseudoElement, bool viewportRatio, CancellationToken cancellationToken) =>
+        DriverJson.Measurements(await Page.EvaluateAsync<string?>(Scripts.Measure, new object?[] { DriverJson.Steps(locator), cssProperty, pseudoElement, viewportRatio }).ConfigureAwait(false));
+
+    /// <inheritdoc />
+    public Task<Accessibility.AccessibilityReport> ScanAccessibilityAsync(Accessibility.AccessibilityPolicy policy, StoryAccessibilityOptions storyOptions, CancellationToken cancellationToken) =>
+        AxeAccessibilityScanner.ScanAsync(Page, policy, storyOptions);
+
+    /// <summary>
+    /// Compares named screenshots for <see cref="MatchScreenshotAsync"/>: set by <see cref="BrowserStoryRunner"/>, which
+    /// owns the baselines, tolerances and the matrix cell. Without it the driver reports screenshots as not supported.
+    /// </summary>
+    internal Func<string, LocatorChain?, bool?, CancellationToken, Task<Results.VisualResult>>? ScreenshotMatcher { get; set; }
+
+    /// <inheritdoc />
+    public Task<Results.VisualResult> MatchScreenshotAsync(string name, LocatorChain? target, bool? fullPage, CancellationToken cancellationToken) =>
+        ScreenshotMatcher is { } matcher
+            ? matcher(name, target, fullPage, cancellationToken)
+            : throw new NotSupportedException("Named screenshots are compared by BrowserStoryRunner (it owns the baselines); this page was not opened by one.");
+
+    /// <summary>The element <paramref name="chain"/> resolves to with the workbench's locator engine, waiting up to <paramref name="timeout"/>.</summary>
+    internal async Task<IElementHandle> SingleElementAsync(LocatorChain chain, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var steps = DriverJson.Steps(chain);
+        IElementHandle? found = null;
+        var (success, problem) = await Poll.UntilAsync(
+            async _ =>
+            {
+                var handle = await Page.EvaluateHandleAsync(Scripts.Single, steps).ConfigureAwait(false);
+                if (handle is IElementHandle element)
+                {
+                    found = element;
+                    return (true, (string?)null);
+                }
+
+                var why = await handle.JsonValueAsync<string?>().ConfigureAwait(false);
+                await DisposeQuietlyAsync(handle).ConfigureAwait(false);
+                return (false, why);
+            },
+            timeout,
+            cancellationToken).ConfigureAwait(false);
+        return success ? found! : throw new StoryAssertionException($"Cannot take a screenshot of {chain}: {problem ?? "no element matches"}.");
+    }
+
+    /// <inheritdoc />
     public Task SetOfflineAsync(bool offline, CancellationToken cancellationToken) => Page.Context.SetOfflineAsync(offline);
 
     /// <inheritdoc />

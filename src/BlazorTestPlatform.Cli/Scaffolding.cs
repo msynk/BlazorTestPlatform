@@ -43,6 +43,9 @@ internal sealed record ScaffoldOptions
     /// which takes the project as <c>--project</c>; VSTest mode, the default, takes it as an argument.
     /// </summary>
     public bool TestingPlatform { get; init; }
+
+    /// <summary>The .NET channels (<c>10.0</c>, <c>11.0</c>) the pipeline installs, oldest first (see <see cref="Scaffolding.DotNetChannels"/>).</summary>
+    public IReadOnlyList<string> DotNetChannels { get; init; } = Scaffolding.DefaultChannels;
 }
 
 /// <summary>
@@ -50,7 +53,7 @@ internal sealed record ScaffoldOptions
 /// test, with skips reported as skips), an optional first story and an optional CI pipeline. Existing files are kept
 /// unless forced.
 /// </summary>
-internal static class Scaffolding
+internal static partial class Scaffolding
 {
     /// <summary>The Playwright version BlazorTestPlatform.Playwright depends on (its Docker image renders the baselines).</summary>
     public static string PlaywrightVersion { get; } =
@@ -86,16 +89,17 @@ internal static class Scaffolding
         var repository = options.RepositoryRoot ?? options.ProjectDirectory;
         var project = Path.GetRelativePath(repository, options.ProjectDirectory).Replace('\\', '/');
         var test = TestCommand(project, options.TestingPlatform);
+        var channels = options.DotNetChannels;
         switch (options.Ci)
         {
             case CiSystem.GitHub:
-                files.Add((Path.Combine(repository, ".github", "workflows", "blazor-ui-tests.yml"), GitHubWorkflow(project, test)));
+                files.Add((Path.Combine(repository, ".github", "workflows", "blazor-ui-tests.yml"), GitHubWorkflow(project, test, channels)));
                 break;
             case CiSystem.Azure:
-                files.Add((Path.Combine(repository, "azure-pipelines.blazor-ui-tests.yml"), AzurePipeline(project, test)));
+                files.Add((Path.Combine(repository, "azure-pipelines.blazor-ui-tests.yml"), AzurePipeline(project, test, channels)));
                 break;
             case CiSystem.GitLab:
-                files.Add((Path.Combine(repository, ".gitlab", "blazor-ui-tests.gitlab-ci.yml"), GitLabJob(project, test)));
+                files.Add((Path.Combine(repository, ".gitlab", "blazor-ui-tests.gitlab-ci.yml"), GitLabJob(project, test, channels)));
                 break;
         }
 
@@ -105,6 +109,96 @@ internal static class Scaffolding
     /// <summary>The <c>dotnet test</c> command for the project in the runner mode the repository uses.</summary>
     public static string TestCommand(string project, bool testingPlatform) =>
         testingPlatform ? $"dotnet test --project {project}" : $"dotnet test {project}";
+
+    /// <summary>The channel pipelines install when nothing in the repository names one.</summary>
+    public static IReadOnlyList<string> DefaultChannels { get; } = ["10.0"];
+
+    /// <summary>
+    /// The .NET channels a pipeline must install, oldest first: one per <c>netX.Y</c> target framework named by the project
+    /// files in <paramref name="projectDirectory"/> and the <c>Directory.Build.props</c> files above it (up to
+    /// <paramref name="repositoryRoot"/>), plus the SDK major version of the global.json that applies (the SDK that builds
+    /// every target framework). <see cref="DefaultChannels"/> when none is found.
+    /// </summary>
+    public static IReadOnlyList<string> DotNetChannels(string projectDirectory, string? repositoryRoot = null)
+    {
+        var channels = new SortedSet<Version>();
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(projectDirectory, "*.*proj").Concat(PropsAbove(projectDirectory, repositoryRoot)))
+            {
+                foreach (System.Text.RegularExpressions.Match match in TargetFrameworkPattern().Matches(File.ReadAllText(file)))
+                {
+                    channels.Add(new Version(
+                        int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture),
+                        int.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture)));
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // An unreadable project falls back to the global.json or the default.
+        }
+
+        if (GlobalJsonSdk(repositoryRoot ?? projectDirectory) is { } sdk)
+        {
+            channels.Add(new Version(sdk.Major, 0));
+        }
+
+        return channels.Count == 0 ? DefaultChannels : [.. channels.Select(v => $"{v.Major}.{v.Minor}")];
+    }
+
+    // Directory.Build.props files from the project up to the repository root, where target frameworks are often set.
+    private static IEnumerable<string> PropsAbove(string projectDirectory, string? repositoryRoot)
+    {
+        var stop = repositoryRoot is null ? null : Path.TrimEndingDirectorySeparator(Path.GetFullPath(repositoryRoot));
+        for (var current = new DirectoryInfo(projectDirectory); current is not null; current = current.Parent)
+        {
+            var props = Path.Combine(current.FullName, "Directory.Build.props");
+            if (File.Exists(props))
+            {
+                yield return props;
+            }
+
+            if (stop is null || string.Equals(Path.TrimEndingDirectorySeparator(current.FullName), stop, StringComparison.OrdinalIgnoreCase))
+            {
+                yield break;
+            }
+        }
+    }
+
+    // net10.0, net11.0, net10.0-browser (not netstandard2.0, netcoreapp3.1 or net48).
+    [System.Text.RegularExpressions.GeneratedRegex(@"\bnet(\d{1,2})\.(\d)(?![\d.])")]
+    private static partial System.Text.RegularExpressions.Regex TargetFrameworkPattern();
+
+    // The SDK version the nearest global.json pins, or null.
+    private static Version? GlobalJsonSdk(string directory)
+    {
+        for (var current = new DirectoryInfo(directory); current is not null; current = current.Parent)
+        {
+            var path = Path.Combine(current.FullName, "global.json");
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                using var json = JsonDocument.Parse(File.ReadAllText(path), new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+                return json.RootElement.ValueKind == JsonValueKind.Object
+                    && json.RootElement.TryGetProperty("sdk", out var sdk) && sdk.ValueKind == JsonValueKind.Object
+                    && sdk.TryGetProperty("version", out var version) && version.ValueKind == JsonValueKind.String
+                    && Version.TryParse(version.GetString()?.Split('-')[0], out var parsed)
+                        ? parsed
+                        : null;
+            }
+            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// True when the global.json that applies in <paramref name="directory"/> (the nearest one, as the SDK finds it)
@@ -276,7 +370,7 @@ internal static class Scaffolding
             """;
     }
 
-    public static string GitHubWorkflow(string project, string test) => $$$"""
+    public static string GitHubWorkflow(string project, string test, IReadOnlyList<string>? channels = null) => $$$"""
         # Blazor UI tests with BlazorTestPlatform: stories in memory (bUnit) and in real browsers, a report, JUnit results,
         # a pull-request summary and SARIF for code scanning. Generated by `btp init`.
         name: Blazor UI tests
@@ -306,7 +400,7 @@ internal static class Scaffolding
                   fetch-depth: 0   # story impact analysis (BTP_CHANGED_SINCE) needs the base branch
               - uses: actions/setup-dotnet@v4
                 with:
-                  dotnet-version: 10.0.x
+                  dotnet-version: {{{GitHubVersions(channels)}}}
               - name: Install btp
                 run: |
                   dotnet tool install --global BlazorTestPlatform.Cli
@@ -335,7 +429,7 @@ internal static class Scaffolding
 
         """;
 
-    public static string AzurePipeline(string project, string test) => $$$"""
+    public static string AzurePipeline(string project, string test, IReadOnlyList<string>? channels = null) => $$$"""
         # Blazor UI tests with BlazorTestPlatform on Azure Pipelines. Generated by `btp init`.
         trigger:
           branches:
@@ -357,10 +451,7 @@ internal static class Scaffolding
         steps:
           - checkout: self
             fetchDepth: 0   # story impact analysis needs the target branch
-          - task: UseDotNet@2
-            inputs:
-              packageType: sdk
-              version: 10.0.x
+        {{{AzureVersions(channels)}}}
           - script: |
               dotnet tool install --global BlazorTestPlatform.Cli
               echo "##vso[task.prependpath]$HOME/.dotnet/tools"
@@ -385,7 +476,7 @@ internal static class Scaffolding
 
         """;
 
-    public static string GitLabJob(string project, string test) => $$"""
+    public static string GitLabJob(string project, string test, IReadOnlyList<string>? channels = null) => $$"""
         # Blazor UI tests with BlazorTestPlatform on GitLab CI. Generated by `btp init`; include it from .gitlab-ci.yml:
         #   include:
         #     - local: .gitlab/blazor-ui-tests.gitlab-ci.yml
@@ -400,7 +491,7 @@ internal static class Scaffolding
                 BTP_CHANGED_SINCE: origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME
             - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
           before_script:
-            - curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --install-dir "$HOME/.dotnet"
+        {{GitLabVersions(channels)}}
             - export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
             - dotnet tool install --global BlazorTestPlatform.Cli
           script:
@@ -417,4 +508,17 @@ internal static class Scaffolding
               junit: junit.xml
 
         """;
+
+    // Every channel is installed as an SDK (an SDK carries its runtime), the newest last so it is the default.
+    private static IReadOnlyList<string> Channels(IReadOnlyList<string>? channels) => channels is { Count: > 0 } ? channels : DefaultChannels;
+
+    private static string GitHubVersions(IReadOnlyList<string>? channels) => Channels(channels) is { Count: 1 } one
+        ? one[0] + ".x"
+        : "|" + string.Concat(Channels(channels).Select(c => $"\n            {c}.x"));
+
+    private static string AzureVersions(IReadOnlyList<string>? channels) => string.Join("\n", Channels(channels).Select(c =>
+        $"  - task: UseDotNet@2\n    inputs:\n      packageType: sdk\n      version: {c}.x"));
+
+    private static string GitLabVersions(IReadOnlyList<string>? channels) => string.Join("\n", Channels(channels).Select(c =>
+        $"    - curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel {c} --install-dir \"$HOME/.dotnet\""));
 }

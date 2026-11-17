@@ -94,7 +94,7 @@ public sealed class BrowserStoryRunner
         // Burn-in (BtpSettings.RepeatEach): every run must pass on its first attempt.
         var runs = Math.Max(1, _settings.RepeatEach);
         var result = await BurnIn.RunAsync(runs, _ => RunWithRetriesAsync(cell, cancellationToken)).ConfigureAwait(false);
-        return runs > 1 && result.Outcome == StoryOutcome.Failed ? Write(result) : result;
+        return runs > 1 && result.Outcome == StoryOutcome.Failed ? Write(cell.Story, result) : result;
     }
 
     private async Task<StoryResult> RunWithRetriesAsync(MatrixCase cell, CancellationToken cancellationToken)
@@ -105,9 +105,16 @@ public sealed class BrowserStoryRunner
         var clock = Stopwatch.StartNew();
 
         var capabilities = PlaywrightStoryDriver.CapabilitiesFor(cell.HostingModel, cell.Story.FakeTimeStart is not null);
+        // Left out by the run's selection or its failure budget: reported, but not written, so the key keeps its last real
+        // result (BTP_LAST_FAILED must still see a failure that a filtered run did not rerun).
+        if ((StoryRunFilter.ExcludeReason(cell.Story, _settings) ?? RunPolicy.StopReason(_settings)) is { } notSelected)
+        {
+            return Base(cell, key, started) with { Outcome = StoryOutcome.Skipped, SkipReason = notSelected };
+        }
+
         if ((cell.Story.SkipReason ?? cell.Story.UnsupportedReason(capabilities, $"{cell.Browser} ({cell.HostingModel.ToToken()})")) is { } skip)
         {
-            return Write(Base(cell, key, started) with { Outcome = StoryOutcome.Skipped, SkipReason = skip });
+            return Write(cell.Story, Base(cell, key, started) with { Outcome = StoryOutcome.Skipped, SkipReason = skip });
         }
 
         var maxAttempts = 1 + Math.Max(0, _options.Retries ?? _settings.Retries);
@@ -137,7 +144,7 @@ public sealed class BrowserStoryRunner
         }
 
         var outcome = last!.Outcome == StoryOutcome.Passed && attemptErrors.Count > 0 ? StoryOutcome.Flaky : last.Outcome;
-        return Write(last with
+        return Write(cell.Story, last with
         {
             Outcome = outcome,
             Attempts = Math.Min(maxAttempts, attemptErrors.Count + 1),
@@ -166,17 +173,19 @@ public sealed class BrowserStoryRunner
         var artifacts = new List<ArtifactReference>();
         var artifactDirectory = Path.Combine(_settings.CreateResultsStore().ArtifactsDirectoryFor(key), $"attempt-{attempt}");
         var keepDiagnostics = _settings.Diagnostics;
-        var limit = _options.Timeout ?? story.Timeout ?? TimeSpan.FromSeconds(60);
+        var limit = _options.Timeout ?? story.TimeoutOr(TimeSpan.FromSeconds(60));
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(limit);
 
         StoryPage? page = null;
+        StoryContext? playContext = null;
         VisualResult? visual = null;
         AccessibilityReport? a11y = null;
         IReadOnlyList<string> a11yFailures = [];
         BrowserMetrics? metrics = null;
         IReadOnlyList<BudgetViolation> budgetViolations = [];
         var gate = new object();
+        Task? stopping = null;
         var abandoned = false;
         var closed = false;
 
@@ -207,6 +216,13 @@ public sealed class BrowserStoryRunner
             }
 
             var context = page.CreateStoryContext(recorder, _settings.DefaultTimeout, timeout.Token);
+            playContext = context;
+
+            // Named screenshots in play: the same capture, tolerances and baselines as the story snapshot.
+            page.Driver.ScreenshotMatcher = _options.Visual
+                ? (name, target, fullPage, ct) => CaptureAsync(page, recorder, name, attempt, ct, target, fullPage)
+                : null;
+            context.AccessibilityPolicy = _options.AccessibilityPolicy ?? _settings.Accessibility;
 
             // Snapshots taken before (or without) the play function get their own "initial" baseline, so static SSR —
             // which cannot run play scripts — is compared with the initial render instead of the post-play state.
@@ -272,9 +288,15 @@ public sealed class BrowserStoryRunner
                 throw new StoryAssertionException(DescribeVisualFailure(visual));
             }
 
+            // A named screenshot fails the run even when the play script caught the assertion it threw.
+            if (context.Screenshots.FirstOrDefault(s => s.IsFailure) is { } changed)
+            {
+                throw new StoryAssertionException(DescribeVisualFailure(changed));
+            }
+
             var markup = await SafeMarkupAsync(page).ConfigureAwait(false);
             var httpRequests = await SafeHttpRequestsAsync(page).ConfigureAwait(false);
-            var collected = new List<ArtifactReference>();
+            var collected = new List<ArtifactReference>(Attachments(context, artifactDirectory));
             if (keepDiagnostics == DiagnosticsMode.Always)
             {
                 // A timed-out attempt leaves the artifacts to the failure path, which writes the same files.
@@ -288,6 +310,7 @@ public sealed class BrowserStoryRunner
                 Attempts = attempt,
                 Steps = recorder.Steps,
                 Visual = visual,
+                Screenshots = context.Screenshots,
                 Accessibility = a11y,
                 Console = page.Diagnostics.Console,
                 Network = page.Diagnostics.Network,
@@ -301,7 +324,33 @@ public sealed class BrowserStoryRunner
         // Ends the attempt: no page is adopted after this, the open one is closed (which fails whatever the attempt is
         // still doing on it), and an attempt that is still running gets a bounded time to unwind, so it cannot change
         // the captured state, write artifacts or keep a baseline once its result has been decided.
-        async Task StopAsync(Task attemptTask)
+        // The failure path and the finally block both stop the attempt: a hung attempt is waited for once, not twice.
+        Task StopAsync(Task attemptTask)
+        {
+            var mine = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (Interlocked.CompareExchange(ref stopping, mine.Task, null) is { } existing)
+            {
+                return existing;
+            }
+
+            _ = CompleteAsync();
+            return mine.Task;
+
+            async Task CompleteAsync()
+            {
+                try
+                {
+                    await StopOnceAsync(attemptTask).ConfigureAwait(false);
+                    mine.SetResult();
+                }
+                catch (Exception ex)
+                {
+                    mine.SetException(ex);
+                }
+            }
+        }
+
+        async Task StopOnceAsync(Task attemptTask)
         {
             StoryPage? open;
             lock (gate)
@@ -343,7 +392,7 @@ public sealed class BrowserStoryRunner
         }
         catch (StorySkippedException ex)
         {
-            return Base(cell, key, started) with { Outcome = StoryOutcome.Skipped, SkipReason = ex.Message, Steps = recorder.Steps };
+            return Base(cell, key, started) with { Outcome = StoryOutcome.Skipped, SkipReason = ex.Message, Steps = recorder.Steps, Artifacts = Attachments(playContext, artifactDirectory) };
         }
         catch (Exception ex) when (cancellationToken.IsCancellationRequested)
         {
@@ -380,6 +429,8 @@ public sealed class BrowserStoryRunner
                 artifacts.Add(new ArtifactReference("diff", diff, "Visual difference"));
             }
 
+            artifacts.AddRange(Attachments(playContext, artifactDirectory));
+
             // A baseline written by this attempt (missing/changed update modes) shows a state that failed another check:
             // it must not become the reference.
             if (visual is not null && _snapshots.Revert(visual))
@@ -387,6 +438,22 @@ public sealed class BrowserStoryRunner
                 recorder.Log($"baseline '{visual.SnapshotName}' was not kept because the run failed");
                 visual = visual with { Note = "The baseline written by this run was removed because the run failed." };
             }
+
+            var screenshots = (playContext?.Screenshots ?? []).Select(shot =>
+            {
+                if (shot.DiffPath is { } shotDiff)
+                {
+                    artifacts.Add(new ArtifactReference("diff", shotDiff, $"Visual difference ({shot.SnapshotName})"));
+                }
+
+                if (_snapshots.Revert(shot))
+                {
+                    recorder.Log($"baseline '{shot.SnapshotName}' was not kept because the run failed");
+                    return shot with { Note = "The baseline written by this run was removed because the run failed." };
+                }
+
+                return shot;
+            }).ToArray();
 
             return Base(cell, key, started) with
             {
@@ -397,6 +464,7 @@ public sealed class BrowserStoryRunner
                 StackTrace = ex.StackTrace,
                 Steps = recorder.Steps,
                 Visual = visual,
+                Screenshots = screenshots,
                 Accessibility = a11y,
                 AccessibilityFailures = a11yFailures,
                 Console = failedPage?.Diagnostics.Console ?? [],
@@ -411,6 +479,24 @@ public sealed class BrowserStoryRunner
         finally
         {
             await StopAsync(attemptTask).ConfigureAwait(false);
+        }
+    }
+
+    // Files the play script attached go next to the attempt's other artifacts.
+    private IReadOnlyList<ArtifactReference> Attachments(StoryContext? context, string artifactDirectory)
+    {
+        if (context is null || !_options.WriteResults)
+        {
+            return [];
+        }
+
+        try
+        {
+            return PlayAttachment.WriteAll(context.Attachments, Path.Combine(artifactDirectory, "attachments"));
+        }
+        catch (IOException)
+        {
+            return [];
         }
     }
 
@@ -429,7 +515,7 @@ public sealed class BrowserStoryRunner
     /// <summary>Longest time one diagnostics step (screenshot, DOM, trace, markup) may take on a failing page.</summary>
     private static readonly TimeSpan DiagnosticsTimeout = TimeSpan.FromSeconds(10);
 
-    private async Task<VisualResult> CaptureAsync(StoryPage page, StepRecorder recorder, string? variant, int attempt, CancellationToken cancellationToken)
+    private async Task<VisualResult> CaptureAsync(StoryPage page, StepRecorder recorder, string? variant, int attempt, CancellationToken cancellationToken, Drivers.LocatorChain? target = null, bool? fullPage = null)
     {
         var story = page.Cell.Story;
         return await recorder.RunAsync(variant is null ? "visual snapshot" : $"visual snapshot ({variant})", StepKind.Check, async () =>
@@ -446,9 +532,29 @@ public sealed class BrowserStoryRunner
             }
 
             await page.Page.EvaluateAsync(Scripts.WaitForAssets).ConfigureAwait(false);
-            var masks = story.Visual.Masks.Select(m => page.Page.Locator(m)).ToArray();
+            // Elements marked in markup (data-btp-ignore, as Chromatic's data-chromatic="ignore") are masked in every story.
+            var masks = story.Visual.Masks.Append(VisualOptions.IgnoreSelector).Select(m => page.Page.Locator(m)).ToArray();
             byte[] png;
-            if (story.Visual.FullPage)
+            if (target is not null)
+            {
+                var element = await page.Driver.SingleElementAsync(target, _settings.DefaultTimeout, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    png = await element.ScreenshotAsync(new ElementHandleScreenshotOptions
+                    {
+                        Animations = ScreenshotAnimations.Disabled,
+                        Caret = ScreenshotCaret.Hide,
+                        Scale = ScreenshotScale.Css,
+                        Mask = masks,
+                        MaskColor = "#FF00FF",
+                    }).ConfigureAwait(false);
+                }
+                finally
+                {
+                    await element.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+            else if (fullPage ?? story.Visual.FullPage)
             {
                 png = await page.Page.ScreenshotAsync(new PageScreenshotOptions
                 {
@@ -637,10 +743,11 @@ public sealed class BrowserStoryRunner
         StartedAt = started,
     };
 
-    private StoryResult Write(StoryResult result)
+    private StoryResult Write(Story story, StoryResult result)
     {
-        result = _settings.Quarantine.Apply(result);
-        BtpTelemetry.Complete(System.Diagnostics.Activity.Current is { OperationName: "btp.story" } story ? story : null, result);
+        // Expected failures, BTP_FAIL_ON_FLAKY, quarantine and the BTP_MAX_FAILURES count.
+        result = RunPolicy.Apply(story, result, _settings);
+        BtpTelemetry.Complete(System.Diagnostics.Activity.Current is { OperationName: "btp.story" } activity ? activity : null, result);
         if (_options.WriteResults)
         {
             try

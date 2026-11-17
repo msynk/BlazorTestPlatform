@@ -57,6 +57,14 @@ public sealed class HubSnapshot
     /// <summary>The latest result of every key in the results directory.</summary>
     public IReadOnlyList<StoryResult> Results { get; }
 
+    /// <summary>
+    /// One entry per visual comparison: each result once per comparison, with <see cref="StoryResult.Visual"/> set to it
+    /// (the story snapshot, and every named screenshot taken in play), for the pages that review snapshots.
+    /// </summary>
+    public IReadOnlyList<StoryResult> VisualResults => _visualResults ??= [.. Results.SelectMany(r => r.VisualComparisons().Select(v => r with { Visual = v }))];
+
+    private IReadOnlyList<StoryResult>? _visualResults;
+
     /// <summary>Result files that could not be read.</summary>
     public IReadOnlyList<string> Unreadable { get; }
 

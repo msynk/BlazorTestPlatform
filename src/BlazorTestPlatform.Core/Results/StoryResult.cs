@@ -144,6 +144,10 @@ public sealed record NetworkEntry
 }
 
 /// <summary>Everything known about one story run (one matrix cell). Serialized to JSON for reports and CLI tooling.</summary>
+/// <remarks>
+/// Lists are never null: the source-generated JSON reader sets every init property, so a list a result file does not
+/// mention (a file written by an older version) would otherwise read as null.
+/// </remarks>
 public sealed record StoryResult
 {
     /// <summary>
@@ -220,22 +224,28 @@ public sealed record StoryResult
     public string? StackTrace { get; init; }
 
     /// <summary>Errors of earlier, failed attempts (flaky diagnostics).</summary>
-    public IReadOnlyList<string> AttemptErrors { get; init; } = [];
+    public IReadOnlyList<string> AttemptErrors { get => field ?? []; init; } = [];
 
     /// <summary>Skip reason.</summary>
     public string? SkipReason { get; init; }
 
     /// <summary>Execution timeline of the final attempt.</summary>
-    public IReadOnlyList<StepRecord> Steps { get; init; } = [];
+    public IReadOnlyList<StepRecord> Steps { get => field ?? []; init; } = [];
 
     /// <summary>Visual comparison.</summary>
     public VisualResult? Visual { get; init; }
+
+    /// <summary>The named screenshots the play script compared (<c>ctx.ExpectScreenshotAsync</c>), in order.</summary>
+    public IReadOnlyList<VisualResult> Screenshots { get => field ?? []; init; } = [];
+
+    /// <summary>Every visual comparison of the run: the story snapshot (<see cref="Visual"/>), then <see cref="Screenshots"/>.</summary>
+    public IEnumerable<VisualResult> VisualComparisons() => Visual is null ? Screenshots : [Visual, .. Screenshots];
 
     /// <summary>Accessibility scan.</summary>
     public AccessibilityReport? Accessibility { get; init; }
 
     /// <summary>Accessibility gate failures (rule ids).</summary>
-    public IReadOnlyList<string> AccessibilityFailures { get; init; } = [];
+    public IReadOnlyList<string> AccessibilityFailures { get => field ?? []; init; } = [];
 
     /// <summary>Measured render metrics.</summary>
     public RenderMetrics? Performance { get; init; }
@@ -244,22 +254,22 @@ public sealed record StoryResult
     public PerformanceComparison? PerformanceComparison { get; init; }
 
     /// <summary>Exceeded performance budgets (render budgets in bUnit, browser budgets in real browsers).</summary>
-    public IReadOnlyList<BudgetViolation> BudgetViolations { get; init; } = [];
+    public IReadOnlyList<BudgetViolation> BudgetViolations { get => field ?? []; init; } = [];
 
     /// <summary>Runtime metrics reported by a real browser (null for in-memory runs).</summary>
     public BrowserMetrics? BrowserMetrics { get; init; }
 
     /// <summary>Console messages and page errors.</summary>
-    public IReadOnlyList<ConsoleEntry> Console { get; init; } = [];
+    public IReadOnlyList<ConsoleEntry> Console { get => field ?? []; init; } = [];
 
     /// <summary>Network activity.</summary>
-    public IReadOnlyList<NetworkEntry> Network { get; init; } = [];
+    public IReadOnlyList<NetworkEntry> Network { get => field ?? []; init; } = [];
 
     /// <summary>Requests answered by the story's mocked HTTP backend.</summary>
-    public IReadOnlyList<HttpRequestRecord> HttpRequests { get; init; } = [];
+    public IReadOnlyList<HttpRequestRecord> HttpRequests { get => field ?? []; init; } = [];
 
     /// <summary>Files produced (screenshots, traces, DOM dumps...).</summary>
-    public IReadOnlyList<ArtifactReference> Artifacts { get; init; } = [];
+    public IReadOnlyList<ArtifactReference> Artifacts { get => field ?? []; init; } = [];
 
     /// <summary>Final markup (truncated) for diagnostics.</summary>
     public string? Markup { get; init; }
@@ -269,6 +279,12 @@ public sealed record StoryResult
     /// <see cref="QuarantineList"/>). Null for runs that passed or were not quarantined.
     /// </summary>
     public QuarantineEntry? Quarantine { get; init; }
+
+    /// <summary>
+    /// The reason of the story's expected failure (<c>ExpectFailure(...)</c>) when it decided this outcome: a failure that
+    /// was expected (reported as passed), or a run that passed although it was expected to fail (reported as failed).
+    /// </summary>
+    public string? ExpectedFailure { get; init; }
 
     /// <summary>True for passing outcomes (passed or flaky).</summary>
     public bool IsSuccess => Outcome is StoryOutcome.Passed or StoryOutcome.Flaky;

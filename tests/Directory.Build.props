@@ -2,11 +2,18 @@
 
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
 
+  <!-- Every supported framework: inner builds get TargetFramework as a global property, which this does not override. -->
+  <PropertyGroup>
+    <TargetFramework></TargetFramework>
+    <TargetFrameworks>$(BtpTargetFrameworks)</TargetFrameworks>
+  </PropertyGroup>
+
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <OutputType>Exe</OutputType>
-    <NoWarn>$(NoWarn);CA1707;CA1515;CA2007;CA1822;CA1861;xUnit1051</NoWarn>
+    <!-- BL0012/BL0016 (.NET 11): test components set parameters and call interop the way the cases need. -->
+    <NoWarn>$(NoWarn);CA1707;CA1515;CA2007;CA1822;CA1861;xUnit1051;BL0012;BL0016</NoWarn>
   </PropertyGroup>
 
   <!-- Test projects use xUnit unless they set BtpTestFramework (the NUnit, MSTest and TUnit integration tests). -->

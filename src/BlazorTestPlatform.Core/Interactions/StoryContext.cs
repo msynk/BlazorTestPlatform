@@ -407,6 +407,69 @@ public sealed class StoryContext
     /// <summary>Records a named step that groups the actions/assertions inside it on the timeline.</summary>
     public Task StepAsync(string name, Func<Task> body) => Recorder.RunAsync(name, StepKind.Step, body);
 
+    /// <summary>
+    /// Records a named step that must finish within <paramref name="timeout"/> (Playwright's <c>test.step</c> timeout): a
+    /// step that takes longer fails the story at that step, with its name, instead of using up the whole story's timeout.
+    /// </summary>
+    public Task StepAsync(string name, Func<Task> body, TimeSpan timeout)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        if (timeout <= TimeSpan.Zero && timeout != System.Threading.Timeout.InfiniteTimeSpan)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout), timeout, "Must be positive.");
+        }
+
+        return Recorder.RunAsync(name, StepKind.Step, async () =>
+        {
+            var running = body();
+            try
+            {
+                await running.WaitAsync(timeout, CancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException ex) when (!running.IsCompleted)
+            {
+                // The body cannot be cancelled (play code takes no token): it is abandoned, and its later failure observed.
+                _ = running.ContinueWith(static t => t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                throw new StoryAssertionException($"Step '{name}' did not finish within {timeout.TotalMilliseconds:0} ms.", ex);
+            }
+        });
+    }
+
+    private readonly List<PlayAttachment> _attachments = [];
+
+    /// <summary>Files the play script attached (<see cref="Attach(string, byte[], string?)"/>), in order.</summary>
+    public IReadOnlyList<PlayAttachment> Attachments
+    {
+        get
+        {
+            lock (_attachments)
+            {
+                return _attachments.ToArray();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Attaches a file to the run (Playwright's <c>testInfo.attach</c>): runners write it with the run's artifacts, reports
+    /// link it and the test framework packages attach it to the test result, whatever the outcome. The media type defaults
+    /// from the name's extension.
+    /// </summary>
+    public void Attach(string name, byte[] content, string? mediaType = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(content);
+        lock (_attachments)
+        {
+            _attachments.Add(new PlayAttachment(name, content.ToArray(), mediaType ?? StoryFile.ContentTypeOf(name)));
+        }
+
+        Recorder.Log($"attach {name} ({content.Length} bytes)");
+    }
+
+    /// <summary>Attaches text (UTF-8) to the run; see <see cref="Attach(string, byte[], string?)"/>.</summary>
+    public void Attach(string name, string text, string? mediaType = null) =>
+        Attach(name, System.Text.Encoding.UTF8.GetBytes(text ?? throw new ArgumentNullException(nameof(text))), mediaType ?? (Path.HasExtension(name) ? null : "text/plain"));
+
     /// <summary>Waits until renders and in-flight work settle.</summary>
     public Task WaitForIdleAsync() => Recorder.RunAsync("wait for idle", StepKind.Wait, () => Driver.WaitForIdleAsync(CancellationToken));
 
@@ -416,6 +479,124 @@ public sealed class StoryContext
         Require(DriverCapabilities.FakeTime, "advancing fake time");
         return Recorder.RunAsync($"advance time {delta}", StepKind.Wait, () => Driver.AdvanceTimeAsync(delta, CancellationToken));
     }
+
+    /// <summary>
+    /// The policy <see cref="ExpectAccessibleAsync"/> evaluates with: runners set the run's policy (<c>btp.json</c> and run
+    /// options); null uses <see cref="Configuration.BtpSettings.Current"/>.
+    /// </summary>
+    public Accessibility.AccessibilityPolicy? AccessibilityPolicy { get; set; }
+
+    /// <summary>
+    /// Scans the story now, in the middle of play, and fails when the accessibility policy fails (Compose's
+    /// <c>enableAccessibilityChecks</c>, at the states you choose): an open menu, a dialog, a validation error, which the scan
+    /// after play never sees. bUnit applies its markup rules and browsers run axe-core, with the story's disabled rules and
+    /// waivers; drivers that cannot scan (the in-app driver) record the check as skipped. Waits for renders to settle first.
+    /// </summary>
+    /// <param name="label">Names the state in the timeline and the failure (<c>"menu open"</c>).</param>
+    public Task ExpectAccessibleAsync(string? label = null) =>
+        Recorder.RunAsync(label is null ? "expect accessible" : $"expect accessible ({label})", StepKind.Check, async () =>
+        {
+            await Driver.WaitForIdleAsync(CancellationToken).ConfigureAwait(false);
+            var policy = AccessibilityPolicy ?? Configuration.BtpSettings.Current.Accessibility;
+            Accessibility.AccessibilityReport report;
+            try
+            {
+                report = await Driver.ScanAccessibilityAsync(policy, Story.Accessibility, CancellationToken).ConfigureAwait(false);
+            }
+            catch (NotSupportedException ex)
+            {
+                Recorder.Log($"accessibility check skipped: {ex.Message}");
+                return;
+            }
+
+            var evaluation = policy.Evaluate(report, Story.Id, Story.Accessibility);
+            if (!evaluation.Passed)
+            {
+                throw new Accessibility.AccessibilityViolationException(evaluation, label is null ? $"{Story.Id} during play" : $"{Story.Id} ({label})");
+            }
+        });
+
+    private readonly List<VisualResult> _screenshots = [];
+
+    /// <summary>The named screenshots compared so far (<see cref="ExpectScreenshotAsync"/>), in order.</summary>
+    public IReadOnlyList<VisualResult> Screenshots
+    {
+        get
+        {
+            lock (_screenshots)
+            {
+                return _screenshots.ToArray();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Compares a screenshot of the current state with a committed baseline, as Playwright's <c>toHaveScreenshot('name')</c>:
+    /// the open menu, the error state, the second step of a wizard, next to the story's own snapshot. The baseline is
+    /// <c>{story-id}/{viewport}.{theme}.{browser}-{platform}.{name}.png</c>, compared with the story's tolerances and masks
+    /// (and <c>data-btp-ignore</c>), written when missing locally and approved with <c>btp approve</c> like any other.
+    /// Captures the story root, or the element <paramref name="target"/> finds, or the page with <paramref name="fullPage"/>.
+    /// Drivers that cannot take screenshots (bUnit, the in-app driver) record the check as skipped and the script goes on.
+    /// </summary>
+    /// <param name="name">Unique within the story, such as <c>menu-open</c>; <c>initial</c> is reserved.</param>
+    /// <param name="target">An element to capture instead of the story root.</param>
+    /// <param name="fullPage">Capture the whole page (for overlays rendered outside the story root); null follows the story's <c>Visual(v =&gt; v.FullPage = ...)</c>.</param>
+    /// <remarks>An explicit call is compared even when the story takes no snapshot of its own (<c>NoVisual()</c>).</remarks>
+    public Task ExpectScreenshotAsync(string name, ElementLocator? target = null, bool? fullPage = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var slug = StoryId.Slugify(name);
+        if (slug.Length == 0 || string.Equals(slug, "initial", StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"'{name}' cannot name a screenshot: use letters or digits, and not 'initial' (the snapshot taken before play).", nameof(name));
+        }
+
+        lock (_screenshots)
+        {
+            if (!_screenshotNames.Add(slug))
+            {
+                throw new ArgumentException($"The story already took a screenshot named '{name}': each one needs its own name (its own baseline).", nameof(name));
+            }
+        }
+
+        return Recorder.RunAsync($"expect screenshot \"{name}\"{(target is null ? string.Empty : $" of {target}")}", StepKind.Check, async () =>
+        {
+            if (!Supports(DriverCapabilities.Screenshots))
+            {
+                Recorder.Log($"screenshot skipped: the {DriverName} driver cannot take screenshots");
+                return;
+            }
+
+            await Driver.WaitForIdleAsync(CancellationToken).ConfigureAwait(false);
+            VisualResult result;
+            try
+            {
+                result = await Driver.MatchScreenshotAsync(name, target?.Chain, fullPage, CancellationToken).ConfigureAwait(false);
+            }
+            catch (NotSupportedException ex)
+            {
+                Recorder.Log($"screenshot skipped: {ex.Message}");
+                return;
+            }
+
+            lock (_screenshots)
+            {
+                _screenshots.Add(result);
+            }
+
+            if (result.IsFailure)
+            {
+                throw new StoryAssertionException(result.Status switch
+                {
+                    VisualStatus.MissingBaseline => $"Missing visual baseline '{result.SnapshotName}'. Run locally (or set BTP_UPDATE_SNAPSHOTS=missing) to create it, then commit it. Actual: {result.ActualPath}",
+                    VisualStatus.SizeMismatch => $"Screenshot '{result.SnapshotName}' changed size ({result.Width}x{result.Height}). Diff: {result.DiffPath}. Approve with 'btp approve' if intended.",
+                    _ => $"Screenshot '{result.SnapshotName}' differs by {result.DiffPixels} px ({result.DiffRatio:P2}). Diff: {result.DiffPath}. Approve with 'btp approve' if intended.",
+                } + (result.Note is null ? string.Empty : " " + result.Note));
+            }
+        });
+    }
+
+    private readonly HashSet<string> _screenshotNames = new(StringComparer.Ordinal);
 
     /// <summary>The story's accessibility tree as text (roles, names and states; see <see cref="ExpectAriaSnapshotAsync"/>).</summary>
     public Task<string> GetAriaSnapshotAsync() => Driver.GetAriaSnapshotAsync(CancellationToken);

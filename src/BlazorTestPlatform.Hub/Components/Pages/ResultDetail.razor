@@ -126,10 +126,10 @@
             </section>
 
             <div class="stack">
-                @if (result.Visual is { } visual)
+                @foreach (var visual in result.VisualComparisons())
                 {
                     <section class="card">
-                        <header><div><h2>Visual snapshot <span class="badge @visual.Status.ToString().ToLowerInvariant()">@visual.Status</span></h2><p class="mono">@visual.SnapshotName</p></div>
+                        <header><div><h2>@(ReferenceEquals(visual, result.Visual) ? "Visual snapshot" : "Screenshot") <span class="badge @visual.Status.ToString().ToLowerInvariant()">@visual.Status</span></h2><p class="mono">@visual.SnapshotName</p></div>
                             @if (visual.IsFailure)
                             {
                                 <a class="btn btn-small" href="@HubUrls.Page("visual?snapshot=" + Uri.EscapeDataString(visual.SnapshotName))">Review</a>

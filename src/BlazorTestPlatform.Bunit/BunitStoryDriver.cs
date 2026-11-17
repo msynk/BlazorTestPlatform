@@ -320,6 +320,10 @@ public sealed class BunitStoryDriver : IStoryDriver
     public Task<string> GetAriaSnapshotAsync(CancellationToken cancellationToken) => Task.FromResult(AriaSnapshot.Of(Scope()));
 
     /// <inheritdoc />
+    public Task<AccessibilityReport> ScanAccessibilityAsync(AccessibilityPolicy policy, StoryAccessibilityOptions storyOptions, CancellationToken cancellationToken) =>
+        Task.FromResult(new MarkupAccessibilityAnalyzer().Analyze(Scope(), policy, storyOptions));
+
+    /// <inheritdoc />
     public Task<IReadOnlyList<HttpRequestRecord>> GetHttpRequestsAsync(CancellationToken cancellationToken) =>
         Task.FromResult(_context.Services.GetService<HttpMock>()?.Requests ?? (IReadOnlyList<HttpRequestRecord>)[]);
 

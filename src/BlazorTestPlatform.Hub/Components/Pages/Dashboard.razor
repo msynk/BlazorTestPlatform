@@ -9,7 +9,7 @@
     var latest = Data.History.Latest;
     var unstable = Data.Stability.Where(s => s.Status is Stability.Flaky or Stability.Broken or Stability.Failing).ToArray();
     var activeErrors = Data.Clusters.Where(c => c.Active).ToArray();
-    var visualChanges = Data.Results.Where(r => r.Visual is { IsFailure: true }).Select(r => r.Visual!.SnapshotName).Distinct().Count();
+    var visualChanges = Data.VisualResults.Where(r => r.Visual is { IsFailure: true }).Select(r => r.Visual!.SnapshotName).Distinct().Count();
     IReadOnlyList<ViolationDelta> a11yDelta = latest is null ? [] : RunHistory.AccessibilityDelta(Data.History.Previous, latest);
 
     <PageHeader Title="Dashboard" Description="Where the suite stands now and how it got here: the latest result of every story and cell, and the history of archived runs.">

@@ -135,9 +135,26 @@ stories.Add("German totals", s => s.Culture("de-DE").Play(async ctx =>
     await ctx.Expect(ctx.GetByTestId("total")).ToHaveTextAsync("1.234,50 €")));
 ```
 
+## Known failures, unfinished and slow stories
+
+* `ExpectFailure("#123: focus is lost after hydration")` marks a known bug, as Playwright's `test.fail()` or pytest's strict `xfail`: the story keeps running, a failure is reported as expected and passes, and a run that passes on its first attempt fails with "expected to fail", so the annotation goes once the bug is fixed. A failure on any attempt counts, so an intermittent known issue does not fail on a retry. `when:` limits it to some runs: `ExpectFailure("#7", run => run.HostingModel == HostingModel.InteractiveWebAssembly)` (the run's `Driver` is there too). Reports show "expected failure" or "unexpectedly passed"; the in-app driver applies it as well.
+* `Fixme("needs the new date picker")` skips the story with the reason, prefixed "Fix me", and adds the `fixme` tag, so `BTP_TAGS=fixme` lists them.
+* `Slow()` triples the story's timeout (its own `Timeout(...)`, else the runner's), as Playwright's `test.slow()`.
+
+Prefer `ExpectFailure` to `Skip` for bugs: a skipped story never tells you it started working.
+
 ## Tags and filtering
 
 `.Tags("smoke", "!visual")` adds `smoke` and removes `visual`. Filter catalogs in tests with `catalog.WithTag("smoke")`, `WithoutTag`, `WithPlay()`, `ForComponent<T>()` or `Matching("inputs-*")`. The [test framework packages](test-frameworks.md) turn tags into test categories, and `StoryImpact` selects the stories a change can affect ([CI](ci.md#test-impact-analysis)).
+
+Runs select stories by tag with a boolean expression, in code or from the environment:
+
+```csharp
+var forms = catalog.WithTags("forms && !slow");     // a TagExpression: !/not, &&/and, ||/or/, , (), * wildcards
+var thisRun = catalog.ForRun();                     // what BTP_TAGS, BTP_GREP, BTP_GREP_INVERT and BTP_LAST_FAILED select
+```
+
+`BTP_TAGS="smoke && !visual" dotnet test` runs only the matching stories: the xUnit, NUnit, MSTest and TUnit packages report the others as skipped with the reason, and the bUnit and browser runners skip them too, so plain `MemberData` tests honor the switch. See [configuration](configuration.md).
 
 ## Quality-gate options
 

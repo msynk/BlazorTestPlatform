@@ -24,18 +24,25 @@ public static class StoryAttachments
     public static IReadOnlyList<StoryAttachment> For(StoryResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
-        var visualChanged = result.Visual is { Status: not (VisualStatus.Matched or VisualStatus.Updated) };
-        if (result.Outcome is StoryOutcome.Passed or StoryOutcome.Skipped && !visualChanged)
+        var visualChanged = result.VisualComparisons().Any(v => v.Status is not (VisualStatus.Matched or VisualStatus.Updated));
+        var files = new List<(string Kind, string Path, string? Description)>();
+
+        // What the play script attached itself is wanted whatever the outcome.
+        foreach (var artifact in result.Artifacts.Where(a => a.Kind == PlayAttachment.ArtifactKind))
         {
-            return [];
+            Add(files, artifact.Kind, artifact.Path, artifact.Description);
         }
 
-        var files = new List<(string Kind, string Path, string? Description)>();
-        if (result.Visual is { } visual && visualChanged)
+        if (result.Outcome is StoryOutcome.Passed or StoryOutcome.Skipped && !visualChanged)
         {
-            Add(files, "baseline", visual.BaselinePath, "Visual baseline");
-            Add(files, "actual", visual.ActualPath, "Visual snapshot of this run");
-            Add(files, "diff", visual.DiffPath, "Visual difference");
+            return Attachments(files);
+        }
+
+        foreach (var visual in result.VisualComparisons().Where(v => v.Status is not (VisualStatus.Matched or VisualStatus.Updated)))
+        {
+            Add(files, "baseline", visual.BaselinePath, $"Visual baseline ({visual.SnapshotName})");
+            Add(files, "actual", visual.ActualPath, $"Visual snapshot of this run ({visual.SnapshotName})");
+            Add(files, "diff", visual.DiffPath, $"Visual difference ({visual.SnapshotName})");
         }
 
         foreach (var artifact in result.Artifacts)
@@ -43,6 +50,11 @@ public static class StoryAttachments
             Add(files, artifact.Kind, artifact.Path, artifact.Description);
         }
 
+        return Attachments(files);
+    }
+
+    private static List<StoryAttachment> Attachments(List<(string Kind, string Path, string? Description)> files)
+    {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var attachments = new List<StoryAttachment>();
         foreach (var (kind, path, description) in files)
@@ -53,7 +65,8 @@ public static class StoryAttachments
                 continue;
             }
 
-            var name = Unique(names, $"{kind}{info.Extension.ToLowerInvariant()}");
+            // Play attachments keep the name the script gave them.
+            var name = Unique(names, kind == PlayAttachment.ArtifactKind ? info.Name : $"{kind}{info.Extension.ToLowerInvariant()}");
             attachments.Add(new StoryAttachment(name, info.FullName, StoryFile.ContentTypeOf(info.Name), description));
         }
 

@@ -51,7 +51,7 @@
             yield return new Gate("Unreadable results", "bad", $"{Data.Unreadable.Count} result files could not be read; they may hide failures.", null);
         }
 
-        var visual = Data.Results.Where(r => r.Visual is { IsFailure: true }).Select(r => r.Visual!.SnapshotName).Distinct().Count();
+        var visual = Data.VisualResults.Where(r => r.Visual is { IsFailure: true }).Select(r => r.Visual!.SnapshotName).Distinct().Count();
         yield return visual == 0
             ? new Gate("Visual baselines", "ok", "Every snapshot matches its baseline.", HubUrls.Page("visual"))
             : new Gate("Visual changes to review", "bad", $"{visual} snapshots differ from their baselines or have none.", HubUrls.Page("visual"));

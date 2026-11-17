@@ -478,7 +478,9 @@ public static class WorkbenchServiceCollectionExtensions
             var scope = StoryScopeOf(provider);
             var real = scope?.Resolve(typeof(IJSRuntime)) as IJSRuntime ?? provider.GetRequiredKeyedService<IJSRuntime>(OriginalKey);
             return scope is { Story.JSInterop: { } mocks }
+#pragma warning disable BL0016 // Creates a runtime; no interop call happens here.
                 ? scope.GetOrAdd(typeof(IJSRuntime), () => StoryJSRuntime.Create(real, mocks, scope.JSCalls, mocks.InBrowsers ? JSMockMode.Answer : JSMockMode.RecordOnly))
+#pragma warning restore BL0016
                 : real;
         }, ServiceLifetime.Transient));
         return true;

@@ -155,12 +155,15 @@ public static class SarifReportWriter
             }
         }
 
-        if (result.Outcome == StoryOutcome.Failed && result.AccessibilityFailures.Count == 0 && result.Visual?.IsFailure != true)
+        // The story failure is reported unless it is the visual or accessibility failure reported below (a soft screenshot
+        // mismatch next to a hard assertion failure keeps both).
+        if (result.Outcome == StoryOutcome.Failed && result.AccessibilityFailures.Count == 0
+            && !result.VisualComparisons().Any(v => v.IsFailure && result.Error?.Contains(v.SnapshotName, StringComparison.Ordinal) == true))
         {
             WriteResult(writer, StoryFailedRule, "error", $"Story '{result.StoryId}' failed [{cell}]: {FirstLine(result.Error)}", result, root, $"{StoryFailedRule}|{result.Key}");
         }
 
-        if (result.Visual is { IsFailure: true } visual)
+        foreach (var visual in result.VisualComparisons().Where(v => v.IsFailure))
         {
             var detail = visual.Status switch
             {

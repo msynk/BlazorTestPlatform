@@ -14,13 +14,16 @@ names, categories and skip reasons, and a `Passed` call that reports a skipped r
 Every `From` overload takes a `StoryCatalog`, any `IEnumerable<Story>` (a filtered catalog, an impact analysis, a shard)
 or matrix cells (`IEnumerable<MatrixCase>`, keyed by `MatrixCase.Key`). Rows are named after the story path
 (`Forms/Button/Disabled`) or the cell (`Forms/Button/Disabled [desktop, light, server, chromium]`), carry the story's
-tags as categories (`Category` traits in xUnit), and stories marked `.Skip("why")` are skipped at discovery.
+tags as categories (`Category` traits in xUnit), and stories marked `.Skip("why")` are skipped at discovery. So are the
+stories the run's selection leaves out (`BTP_TAGS`, `BTP_GREP`, `BTP_GREP_INVERT`, `BTP_LAST_FAILED`; see
+[configuration](configuration.md)): they are reported as skipped with the reason, never dropped, so a selection that
+matches nothing still leaves every theory with rows.
 
 `Passed(result)` throws `StoryFailedException` (with the end of the step timeline) for a failed result, reports a
 skipped result as the framework's skip, and returns passed results. A run is skipped when its driver lacks a capability
 the story declares (`Requires(...)`, or browser emulation on bUnit) or when play calls `ctx.Require(...)`.
 
-**Evidence in the test result.** For failed, flaky and visually changed runs, `Passed(result)` also attaches the run's
+**Evidence in the test result.** Files the play script attached (`ctx.Attach`) are attached whatever the outcome. For failed, flaky and visually changed runs, `Passed(result)` also attaches the run's
 evidence to the framework's test result: the visual baseline, actual and diff images, the failure screenshot, the DOM
 snapshot and the Playwright trace (`StoryAttachments.For(result)` lists them; files over 25 MB stay in the results
 directory). They then appear in Test Explorer, TRX files and the test views of Azure DevOps and GitHub next to the

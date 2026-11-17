@@ -154,7 +154,17 @@
         // Record what the story navigates to, and keep it in its frame: a navigation to another page is stopped.
         navigationRegistration = Navigation.RegisterLocationChangingHandler(OnLocationChanging);
         selfReference = DotNetObjectReference.Create(this);
-        var imported = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/BlazorTestPlatform.Workbench/btp-frame.js");
+        IJSObjectReference imported;
+        try
+        {
+            imported = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/BlazorTestPlatform.Workbench/btp-frame.js");
+        }
+        catch (Exception ex) when (ex is JSDisconnectedException or OperationCanceledException)
+        {
+            // The frame closed (circuit gone, page left) before the bridge loaded: nobody can use it.
+            return;
+        }
+
         if (disposed)
         {
             // Disposed while the module loaded: nothing may be registered with a released reference.
@@ -163,7 +173,15 @@
         }
 
         module = imported;
-        await module.InvokeVoidAsync("register", selfReference, StoryId, RendererInfo.Name);
+        try
+        {
+            await module.InvokeVoidAsync("register", selfReference, StoryId, RendererInfo.Name);
+        }
+        catch (Exception ex) when (ex is JSDisconnectedException or OperationCanceledException)
+        {
+            return;
+        }
+
         bridgeReady = true;
         StateHasChanged();
 
@@ -236,19 +254,20 @@
             return ("skipped", unsupported, []);
         }
 
-        // Same whole-run limit as the browser runner; assertions keep the default 5 s auto-wait.
-        var limit = story.Timeout ?? TimeSpan.FromSeconds(60);
+        // Same whole-run limit as the browser runner (tripled for Slow() stories); assertions keep the default 5 s auto-wait.
+        var limit = story.TimeoutOr(TimeSpan.FromSeconds(60));
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         timeout.CancelAfter(limit);
         var context = new StoryContext(story, driver, TimeSpan.FromSeconds(5), recorder, timeout.Token);
+        (string Status, string? Error) outcome;
         try
         {
             await recorder.RunAsync("play", BlazorTestPlatform.Results.StepKind.Step, context.RunPlayAsync);
-            return ("passed", null, recorder.Steps);
+            outcome = ("passed", null);
         }
         catch (OperationCanceledException) when (timeout.IsCancellationRequested)
         {
-            return ("failed", $"Story timed out after {limit.TotalSeconds:0.#} s.", recorder.Steps);
+            outcome = ("failed", $"Story timed out after {limit.TotalSeconds:0.#} s.");
         }
         catch (StorySkippedException ex)
         {
@@ -256,8 +275,18 @@
         }
         catch (Exception ex) when (ex is not JSDisconnectedException)
         {
-            return ("failed", ex.Message, recorder.Steps);
+            outcome = ("failed", ex.Message);
         }
+
+        // ExpectFailure(...) holds here too: an expected failure passes, and a clean pass fails.
+        if (story.ExpectedFailure is { } expected && expected.AppliesTo(new BlazorTestPlatform.Results.StoryRunInfo(driver.Name, renderContext.HostingModel)))
+        {
+            outcome = outcome.Status == "failed"
+                ? ("passed", $"Expected failure ({expected.Reason}): {outcome.Error}")
+                : ("failed", $"Story '{story.Id}' was expected to fail ({expected.Reason}) but passed. If the issue is fixed, remove ExpectFailure(...) from the story.");
+        }
+
+        return (outcome.Status, outcome.Error, recorder.Steps);
     }
 
     /// <summary>Returns the action log as JSON (called by browser test runners).</summary>

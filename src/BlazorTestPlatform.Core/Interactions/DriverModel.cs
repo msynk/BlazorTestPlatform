@@ -1,4 +1,5 @@
 using System.Text;
+using BlazorTestPlatform.Results;
 
 namespace BlazorTestPlatform.Drivers;
 
@@ -190,6 +191,32 @@ public sealed record ElementInfo
 
     /// <inheritdoc />
     public override string ToString() => Html.Length > 0 ? Html : $"<{TagName}>";
+}
+
+/// <summary>
+/// Layout facts about one element that only a rendering engine knows: a computed style and how much of the element is in
+/// the viewport. Produced by <see cref="IStoryDriver.MeasureAsync"/> (drivers with <see cref="DriverCapabilities.Css"/>
+/// and <see cref="DriverCapabilities.Layout"/>).
+/// </summary>
+public sealed record ElementMeasurement
+{
+    /// <summary>The computed value of the requested CSS property (<c>getComputedStyle</c>), or null when none was asked for.</summary>
+    public string? ComputedStyle { get; init; }
+
+    /// <summary>The fraction (0..1) of the element's box inside the viewport, as an <c>IntersectionObserver</c> reports it.</summary>
+    public double ViewportRatio { get; init; }
+
+    /// <summary>Left of the border box, in CSS pixels from the viewport.</summary>
+    public double X { get; init; }
+
+    /// <summary>Top of the border box, in CSS pixels from the viewport.</summary>
+    public double Y { get; init; }
+
+    /// <summary>Width of the border box, in CSS pixels.</summary>
+    public double Width { get; init; }
+
+    /// <summary>Height of the border box, in CSS pixels.</summary>
+    public double Height { get; init; }
 }
 
 /// <summary>Keyboard modifier keys.</summary>
@@ -417,6 +444,37 @@ public interface IStoryDriver : IAsyncDisposable
     /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
     Task<string> GetAriaSnapshotAsync(CancellationToken cancellationToken) =>
         throw new NotSupportedException($"The {Name} driver cannot take accessibility snapshots.");
+
+    /// <summary>
+    /// Measures what <paramref name="locator"/> matches now (no waiting), one entry per match; only a single match is
+    /// measured (assertions are strict), other counts give empty entries. Measured: the computed value of
+    /// <paramref name="cssProperty"/> (kebab-case, such as <c>background-color</c>; on <paramref name="pseudoElement"/>
+    /// such as <c>::before</c> when given), the box and, with <paramref name="viewportRatio"/>, the share of the box in the
+    /// viewport. Requires <see cref="DriverCapabilities.Css"/> and <see cref="DriverCapabilities.Layout"/>.
+    /// </summary>
+    /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
+    Task<IReadOnlyList<ElementMeasurement>> MeasureAsync(LocatorChain locator, string? cssProperty, string? pseudoElement, bool viewportRatio, CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"The {Name} driver cannot measure layout or computed styles.");
+
+    /// <summary>
+    /// Scans the story's current state for accessibility violations with the driver's engine (the in-memory markup rules
+    /// in bUnit, axe-core in browsers), applying <paramref name="storyOptions"/> (disabled rules, include and exclude). The
+    /// default throws <see cref="NotSupportedException"/>; <c>ctx.ExpectAccessibleAsync</c> then records the check as skipped.
+    /// </summary>
+    /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
+    Task<Accessibility.AccessibilityReport> ScanAccessibilityAsync(Accessibility.AccessibilityPolicy policy, StoryAccessibilityOptions storyOptions, CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"The {Name} driver cannot scan for accessibility violations.");
+
+    /// <summary>
+    /// Takes a screenshot of the story (or of the element <paramref name="target"/> resolves to, or the full page; null
+    /// <paramref name="fullPage"/> follows the story's visual options) and
+    /// compares it with the baseline named after the story, the matrix cell and <paramref name="name"/>, as the story's own
+    /// snapshot is compared. Requires <see cref="DriverCapabilities.Screenshots"/>; the default throws
+    /// <see cref="NotSupportedException"/> and <c>ctx.ExpectScreenshotAsync</c> then records the check as skipped.
+    /// </summary>
+    /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
+    Task<VisualResult> MatchScreenshotAsync(string name, LocatorChain? target, bool? fullPage, CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"The {Name} driver cannot compare screenshots.");
 
     /// <summary>Takes the page offline or back online. Requires <see cref="DriverCapabilities.BrowserEmulation"/>.</summary>
     /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>

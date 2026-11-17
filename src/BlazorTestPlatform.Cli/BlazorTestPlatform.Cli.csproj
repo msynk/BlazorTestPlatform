@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <!-- One framework: RollForward runs the tool on newer runtimes, and dotnet run needs no framework option. -->
+    <TargetFrameworks></TargetFrameworks>
+    <TargetFramework>$(BtpTargetFramework)</TargetFramework>
     <OutputType>Exe</OutputType>
     <RootNamespace>BlazorTestPlatform.Cli</RootNamespace>
     <AssemblyName>btp</AssemblyName>

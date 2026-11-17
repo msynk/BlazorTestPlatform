@@ -250,7 +250,10 @@ public sealed class BunitStorySession : IAsyncDisposable
             }).ConfigureAwait(false);
 
             var driver = new BunitStoryDriver(context, root!, renderContext, StylesheetCache.Resolve(options.Stylesheets, settings.BunitStylesheets, MediaEnvironment.For(viewport, options.Theme)));
-            var storyContext = new StoryContext(story, driver, settings.DefaultTimeout, recorderToUse, cancellationToken);
+            var storyContext = new StoryContext(story, driver, settings.DefaultTimeout, recorderToUse, cancellationToken)
+            {
+                AccessibilityPolicy = options.AccessibilityPolicy ?? settings.Accessibility,
+            };
             return new BunitStorySession(story, context, root!, renderContext, driver, storyContext, settings);
         }
         catch

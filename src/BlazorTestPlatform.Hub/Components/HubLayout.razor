@@ -100,7 +100,7 @@
             var data = Data;
             var failing = data.Results.Count(r => r.IsBlockingFailure);
             var unstable = data.Stability.Count(s => s.Status is Stability.Flaky or Stability.Broken or Stability.Failing);
-            var visual = data.Results.Where(r => r.Visual is { IsFailure: true }).Select(r => r.Visual!.SnapshotName).Distinct().Count();
+            var visual = data.VisualResults.Where(r => r.Visual is { IsFailure: true }).Select(r => r.Visual!.SnapshotName).Distinct().Count();
             yield return new NavGroup("Overview", [new("Dashboard", string.Empty), new("Release readiness", "readiness")]);
             yield return new NavGroup("Runs", [new("Runs", "runs", data.History.Runs.Count), new("Compare runs", "compare"), new("Run stories", "live")]);
             yield return new NavGroup("Tests", [new("All tests", "tests", data.Results.Count), new("Failures", "failures", failing, failing > 0), new("Flaky & quarantine", "flaky", unstable, unstable > 0)]);

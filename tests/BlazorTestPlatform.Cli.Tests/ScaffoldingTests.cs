@@ -105,6 +105,40 @@ public sealed class ScaffoldingTests
         Assert.True(Scaffolding.UsesTestingPlatform(project));
     }
 
+    [Fact]
+    public void Pipelines_install_every_dotnet_the_project_and_global_json_need()
+    {
+        var repository = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "btp-scaffold", Guid.NewGuid().ToString("N"))).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(repository, "tests", "Ui.Tests")).FullName;
+        Assert.Equal(["10.0"], Scaffolding.DotNetChannels(project, repository));
+
+        File.WriteAllText(Path.Combine(project, "Ui.Tests.csproj"), "<Project><PropertyGroup><TargetFrameworks>net10.0;netstandard2.0</TargetFrameworks></PropertyGroup></Project>");
+        File.WriteAllText(Path.Combine(repository, "Directory.Build.props"), "<Project><PropertyGroup><LibraryFrameworks>net11.0-browser</LibraryFrameworks></PropertyGroup></Project>");
+        File.WriteAllText(Path.Combine(repository, "global.json"), """{ "sdk": { "version": "12.0.100-preview.1" } }""");
+        var channels = Scaffolding.DotNetChannels(project, repository);
+        Assert.Equal(["10.0", "11.0", "12.0"], channels);
+
+        static string Pipeline(CiSystem ci, IReadOnlyList<string> channels, string repository, string project) => Scaffolding.Plan(new ScaffoldOptions
+        {
+            ProjectDirectory = project,
+            Namespace = "Ui.Tests",
+            Ci = ci,
+            RepositoryRoot = repository,
+            DotNetChannels = channels,
+        })[^1].Content.ReplaceLineEndings("\n");
+
+        Assert.Contains("          dotnet-version: |\n            10.0.x\n            11.0.x\n            12.0.x\n      - name: Install btp", Pipeline(CiSystem.GitHub, channels, repository, project), StringComparison.Ordinal);
+        Assert.Contains("          dotnet-version: 10.0.x\n", Pipeline(CiSystem.GitHub, ["10.0"], repository, project), StringComparison.Ordinal);
+        Assert.Contains(
+            "  - task: UseDotNet@2\n    inputs:\n      packageType: sdk\n      version: 10.0.x\n  - task: UseDotNet@2\n    inputs:\n      packageType: sdk\n      version: 11.0.x\n",
+            Pipeline(CiSystem.Azure, ["10.0", "11.0"], repository, project),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "  before_script:\n    - curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --install-dir \"$HOME/.dotnet\"\n    - curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 11.0 --install-dir \"$HOME/.dotnet\"\n    - export",
+            Pipeline(CiSystem.GitLab, ["10.0", "11.0"], repository, project),
+            StringComparison.Ordinal);
+    }
+
     // The version Directory.Packages.props pins, which the browser tests and their baselines use.
     private static string PinnedPlaywrightVersion()
     {

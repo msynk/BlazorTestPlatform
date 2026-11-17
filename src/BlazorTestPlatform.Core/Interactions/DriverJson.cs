@@ -17,6 +17,35 @@ public static class DriverJson
         return Write(writer => WriteSteps(writer, chain));
     }
 
+    /// <summary>Parses the measurements the in-browser engine returns (<c>measureJson</c>).</summary>
+    public static IReadOnlyList<ElementMeasurement> Measurements(string? json)
+    {
+        if (string.IsNullOrEmpty(json))
+        {
+            return [];
+        }
+
+        using var document = JsonDocument.Parse(json);
+        var list = new List<ElementMeasurement>();
+        foreach (var item in document.RootElement.EnumerateArray())
+        {
+            list.Add(new ElementMeasurement
+            {
+                ComputedStyle = item.TryGetProperty("style", out var style) && style.ValueKind == JsonValueKind.String ? style.GetString() : null,
+                ViewportRatio = Number(item, "ratio"),
+                X = Number(item, "x"),
+                Y = Number(item, "y"),
+                Width = Number(item, "width"),
+                Height = Number(item, "height"),
+            });
+        }
+
+        return list;
+
+        static double Number(JsonElement item, string name) =>
+            item.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number ? value.GetDouble() : 0;
+    }
+
     /// <summary>Serializes an element action.</summary>
     public static string Action(ElementAction action)
     {

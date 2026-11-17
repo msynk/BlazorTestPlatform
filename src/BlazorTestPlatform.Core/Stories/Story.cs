@@ -54,7 +54,20 @@ public sealed class Story
         SourceFile = data.SourceFile;
         SourceLine = data.SourceLine;
         Order = data.Order;
+        ExpectedFailure = data.ExpectedFailure;
+        IsSlow = data.IsSlow;
     }
+
+    /// <summary>A known failure (<c>ExpectFailure(...)</c>): failures pass and a clean pass fails; null when none.</summary>
+    public Results.ExpectedFailure? ExpectedFailure { get; }
+
+    /// <summary>
+    /// Marked slow (<c>Slow()</c>, Playwright's <c>test.slow()</c>): runners triple its timeout (<see cref="TimeoutOr"/>).
+    /// </summary>
+    public bool IsSlow { get; }
+
+    /// <summary>The story's run timeout: <see cref="Timeout"/>, else <paramref name="runnerDefault"/>, tripled for <see cref="IsSlow"/> stories.</summary>
+    public TimeSpan TimeoutOr(TimeSpan runnerDefault) => (Timeout ?? runnerDefault) * (IsSlow ? 3 : 1);
 
     /// <summary>Stable identifier, e.g. <c>inputs-button--primary</c>.</summary>
     public string Id { get; }
@@ -403,6 +416,10 @@ internal sealed class StoryData
     public int SourceLine { get; init; }
 
     public int Order { get; init; }
+
+    public Results.ExpectedFailure? ExpectedFailure { get; init; }
+
+    public bool IsSlow { get; init; }
 }
 
 /// <summary>A driver capability a story needs, and why (see <see cref="StoryBuilder{TComponent}.Requires"/>).</summary>

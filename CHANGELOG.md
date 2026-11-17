@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### .NET 11, run control, and screenshots and checks in play
+
+Informed by a survey of .NET 11 and of Playwright Test 1.50 to 1.65, Vitest 4.1, Storybook 10, Swift Testing, pytest 9 and cargo-nextest (`reports/Gap analysis, fourth pass.md`), which also lists what stays deferred.
+
+* **.NET 11**: every library targets `net10.0` and `net11.0`, with the ASP.NET Core packages of each (10.0.15 and 11.0.0); bUnit 2.15.2. The repository builds with the .NET 11 SDK (global.json), and CI and `scripts/visual-tests.*` install it plus the .NET 10 runtime. The `btp` tool stays single-framework (`net10.0`) and rolls forward.
+* **Expected failures, fix-me and slow stories**: `ExpectFailure(reason, when)` turns a known bug into an expected failure: a failure passes (reported as "expected failure"), and a run that passes cleanly fails with "expected to fail", so the annotation goes when the bug is fixed. `when` limits it by driver or render mode. `Fixme(reason)` skips with the reason and the `fixme` tag; `Slow()` triples the timeout. bUnit, browser and in-app runs apply them.
+* **Run selection**: `BTP_TAGS` takes a boolean tag expression (`smoke && !visual`, `(forms or dialogs) and not slow`, `a11y-*`; `TagExpression`, `catalog.WithTags(...)`); `BTP_GREP` and `BTP_GREP_INVERT` match story ids and paths; `BTP_LAST_FAILED=1` reruns the stories that failed in the results directory. The test framework packages report stories left out as skipped, with the reason; runners skip them too, without writing a result, so a filtered run never hides an earlier failure from `BTP_LAST_FAILED`. `catalog.ForRun()` applies the same selection in code.
+* **Run control**: `BTP_FAIL_ON_FLAKY=1` fails runs that only passed on a retry; `BTP_MAX_FAILURES=N` reports stories that start after N blocking failures as skipped. Both also come from `btp.json` (`failOnFlaky`, `maxFailures`, and `tags`). `RunPolicy` applies these rules, expected failures and quarantine to every result.
+* **Named screenshots in play**: `ctx.ExpectScreenshotAsync("menu-open", target, fullPage)` compares the current state with its own baseline next to the story's, with the story's tolerances and masks. Missing baselines are written locally, and baselines of failed runs are reverted. `btp approve`, the hub's visual review, the HTML report, SARIF and test-framework attachments include them (`StoryResult.Screenshots`, `VisualComparisons()`). bUnit and the in-app driver record the check as skipped.
+* **Accessibility in the middle of play**: `ctx.ExpectAccessibleAsync("menu open")` scans the current state with the policy, the story's disabled rules and waivers (markup rules in bUnit, axe-core in browsers).
+* **Styles and layout**: `ToHaveCssAsync(property, value or Regex, pseudoElement)` and `ToBeInViewportAsync(ratio)`, through the new `IStoryDriver.MeasureAsync`, in Playwright and the in-app driver. bUnit records them as skipped.
+* **Attachments and step timeouts**: `ctx.Attach(name, text or bytes)` writes a file with the run's artifacts and attaches it to the test-framework result whatever the outcome; `ctx.StepAsync(name, body, timeout)` fails at the step that overran.
+* **Ignoring regions in markup**: elements with `data-btp-ignore` are masked in every visual snapshot.
+* **JUnit**: the earlier attempts of flaky runs are written as Surefire `<flakyFailure>` elements and those of failed runs as `<rerunFailure>`; expected failures are noted. CTRF reports `rawStatus` `expected-failure` and `unexpected-pass`.
+* **`btp init`**: generated pipelines install the .NET versions the test project's target frameworks, its `Directory.Build.props` files and global.json need, instead of always 10.0.
+* **Demo**: `Navigation/Tabs/States in play` uses named screenshots, computed styles, the viewport check, a mid-play accessibility scan and an attachment, in every driver.
+
+**Fixes:**
+
+* On .NET 10, every list a result file did not mention (files written by older versions) read as `null`: the source-generated JSON reader sets every init property. `btp approve` crashed on such a directory. Lists of results, accessibility reports, reviews and coverage reports are now null-safe.
+* The story frame's bridge import no longer throws into the renderer when the circuit closes during the first render (found by .NET 11's BL0016 analyzer).
+* A browser attempt that hung past its timeout was waited for twice (by the failure path and again on cleanup), so its failure was reported up to 20 s later than needed.
+
+**Behaviour changes to check when upgrading:**
+
+* Building the repository needs the .NET 11 SDK; consumers can stay on .NET 10.
+* `IStoryDriver` gained default-implemented `MeasureAsync`, `ScanAccessibilityAsync` and `MatchScreenshotAsync`; custom drivers compile unchanged and the new checks are recorded as skipped there.
+* `BTP_TAGS`, `BTP_GREP`, `BTP_GREP_INVERT` and `BTP_LAST_FAILED` now change what runs; make sure they are not set by accident in CI.
+
 ### Play API, drivers and CI from a survey of testing tools across stacks
 
 Informed by a survey of JavaScript, JVM, Apple, Flutter, Python, Go, Rust, Elixir and .NET testing tools (`reports/Testing solutions across stacks.md`), which also lists what was deliberately left for later.

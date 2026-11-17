@@ -4,7 +4,7 @@
 
 @if (Allowed)
 {
-    var changes = Data.Results
+    var changes = Data.VisualResults
         .Where(r => r.Visual is { IsFailure: true })
         .GroupBy(r => r.Visual!.SnapshotName, StringComparer.Ordinal)
         .Select(g => g.First())
@@ -20,7 +20,7 @@
 
     @if (Tab == "baselines")
     {
-        var snapshots = Data.Results.Where(r => r.Visual is { BaselinePath: not null } v && !v.IsFailure).GroupBy(r => r.StoryId).Take(60).ToArray();
+        var snapshots = Data.VisualResults.Where(r => r.Visual is { BaselinePath: not null } v && !v.IsFailure).GroupBy(r => r.StoryId).Take(60).ToArray();
         @if (snapshots.Length == 0)
         {
             <div class="card empty"><strong>No snapshots in the results</strong>Run the browser suites (<code>dotnet test</code>) to compare stories against their baselines.</div>

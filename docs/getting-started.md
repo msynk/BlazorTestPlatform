@@ -27,6 +27,8 @@ Why stories get their own project:
 | Tests | `BlazorTestPlatform.Bunit`, `BlazorTestPlatform.Playwright`, `Microsoft.AspNetCore.Mvc.Testing`, your test framework and its integration package (`BlazorTestPlatform.Xunit`, `.NUnit`, `.MSTest` or `.TUnit`; see [test frameworks](test-frameworks.md)) |
 | Tooling | `dotnet tool install -g BlazorTestPlatform.Cli --prerelease` |
 
+Every library package targets **.NET 10 and .NET 11** (`net10.0` and `net11.0`), with the ASP.NET Core packages of each; your projects can target either. The `btp` tool runs on .NET 10 and rolls forward to newer runtimes.
+
 The stories project must be browser-compatible:
 
 ```xml

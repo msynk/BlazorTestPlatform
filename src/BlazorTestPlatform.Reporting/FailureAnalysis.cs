@@ -115,7 +115,7 @@ public static partial class FailureAnalysis
         return Categorize(
             result.ErrorType,
             string.Join(Environment.NewLine, new[] { result.Error }.Concat(result.Console.Select(c => c.Text))),
-            visualFailed: result.Visual?.IsFailure == true,
+            visualFailed: result.VisualComparisons().Any(v => v.IsFailure),
             accessibilityFailed: result.AccessibilityFailures.Count > 0,
             budgetFailed: result.BudgetViolations.Count > 0 || result.PerformanceComparison?.HasFailures == true);
     }

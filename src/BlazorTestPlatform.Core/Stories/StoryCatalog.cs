@@ -127,6 +127,20 @@ public sealed class StoryCatalog
     /// <summary>Stories not carrying a tag.</summary>
     public StoryCatalog WithoutTag(string tag) => Where(s => !s.HasTag(tag));
 
+    /// <summary>Stories whose tags satisfy a <see cref="TagExpression"/> such as <c>smoke &amp;&amp; !visual</c>.</summary>
+    public StoryCatalog WithTags(string expression)
+    {
+        var parsed = TagExpression.Parse(expression);
+        return Where(parsed.Matches);
+    }
+
+    /// <summary>
+    /// The stories this run selects (<c>BTP_TAGS</c>, <c>BTP_GREP</c>, <c>BTP_GREP_INVERT</c>, <c>BTP_LAST_FAILED</c>; see
+    /// <see cref="Results.StoryRunFilter"/>). The test framework packages report the others as skipped instead; use this to
+    /// leave them out of hand-written data sources.
+    /// </summary>
+    public StoryCatalog ForRun(Configuration.BtpSettings? settings = null) => Where(s => Results.StoryRunFilter.ExcludeReason(s, settings) is null);
+
     /// <summary>Stories that have a play function.</summary>
     public StoryCatalog WithPlay() => Where(s => s.HasPlay);
 

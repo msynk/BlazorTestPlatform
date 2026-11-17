@@ -84,6 +84,42 @@ public sealed class BtpSettings
     /// </summary>
     public int RepeatEach { get; init; } = 1;
 
+    /// <summary>
+    /// Fail runs that only passed on a retry (<c>BTP_FAIL_ON_FLAKY=1</c>, <c>failOnFlaky</c>), as Playwright's
+    /// <c>--fail-on-flaky-tests</c>: retries still run and their diagnostics are kept, but a flaky result fails the test.
+    /// </summary>
+    public bool FailOnFlaky { get; init; }
+
+    /// <summary>
+    /// Stop after this many failures (<c>BTP_MAX_FAILURES</c>, <c>maxFailures</c>; 0, the default, never stops), as
+    /// Playwright's <c>--max-failures</c>: once the process has seen that many blocking failures, every story that starts
+    /// afterwards is reported as skipped, saying why. Quarantined and expected failures do not count.
+    /// </summary>
+    public int MaxFailures { get; init; }
+
+    /// <summary>
+    /// Run only the stories whose tags match this expression (<c>BTP_TAGS</c>, <c>tags</c>), such as
+    /// <c>smoke &amp;&amp; !visual</c> or <c>(forms || dialogs) and not slow</c>; see <see cref="TagExpression"/>. The
+    /// test framework packages report the others as skipped.
+    /// </summary>
+    public TagExpression? TagFilter { get; init; }
+
+    /// <summary>
+    /// Run only the stories whose id or <c>Title/Name</c> path matches this regular expression (<c>BTP_GREP</c>, case
+    /// insensitive), as Playwright's <c>--grep</c>.
+    /// </summary>
+    public System.Text.RegularExpressions.Regex? Grep { get; init; }
+
+    /// <summary>Leave out the stories whose id or path matches this regular expression (<c>BTP_GREP_INVERT</c>).</summary>
+    public System.Text.RegularExpressions.Regex? GrepInvert { get; init; }
+
+    /// <summary>
+    /// Rerun only the stories that failed in the results directory's previous run (<c>BTP_LAST_FAILED=1</c>), as
+    /// Playwright's <c>--last-failed</c> or pytest's <c>--lf</c>. A story is rerun when any of its results (any driver, cell
+    /// or configuration) failed; when no previous result failed, every story runs.
+    /// </summary>
+    public bool LastFailed { get; init; }
+
     /// <summary>Diagnostics mode (<c>BTP_DIAGNOSTICS</c>: off|on-failure|always).</summary>
     public DiagnosticsMode Diagnostics { get; init; } = DiagnosticsMode.RetainOnFailure;
 
@@ -188,6 +224,12 @@ public sealed class BtpSettings
             Retries = int.TryParse(Env("BTP_RETRIES"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var retries) ? retries : file?.Retries ?? (ci ? 2 : 0),
             RepeatEach = ParsePositive(Env("BTP_REPEAT_EACH"), "BTP_REPEAT_EACH", "number of runs") ?? ValidatePositive(file?.RepeatEach, "repeatEach", "number of runs") ?? 1,
             Diagnostics = ParseDiagnostics(Env("BTP_DIAGNOSTICS")) ?? file?.Diagnostics ?? DiagnosticsMode.RetainOnFailure,
+            FailOnFlaky = Env("BTP_FAIL_ON_FLAKY") is { } failOnFlaky ? IsTruthy(failOnFlaky) : file?.FailOnFlaky ?? false,
+            MaxFailures = ParseNonNegative(Env("BTP_MAX_FAILURES"), "BTP_MAX_FAILURES") ?? ValidateNonNegative(file?.MaxFailures, "maxFailures") ?? 0,
+            TagFilter = (Env("BTP_TAGS") ?? NonEmpty(file?.Tags)) is { } tagFilter ? TagExpression.Parse(tagFilter) : null,
+            Grep = ParsePattern(Env("BTP_GREP"), "BTP_GREP"),
+            GrepInvert = ParsePattern(Env("BTP_GREP_INVERT"), "BTP_GREP_INVERT"),
+            LastFailed = IsTruthy(Env("BTP_LAST_FAILED")),
             DefaultTimeout = TimeSpan.FromMilliseconds(ParsePositive(Env("BTP_TIMEOUT_MS"), "BTP_TIMEOUT_MS") ?? ValidatePositive(file?.TimeoutMilliseconds, "timeoutMilliseconds") ?? 5000),
             IsContinuousIntegration = ci,
             VisualThreshold = file?.Visual?.Threshold ?? 0.1,
@@ -279,6 +321,33 @@ public sealed class BtpSettings
             : throw new FormatException($"Invalid {name} value '{value}'. Use a positive {unit}.");
     }
 
+    private static int? ParseNonNegative(string? value, string name) =>
+        value is null
+            ? null
+            : int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) && parsed >= 0
+                ? parsed
+                : throw new FormatException($"Invalid {name} value '{value}'. Use 0 (no limit) or a positive number.");
+
+    private static int? ValidateNonNegative(int? value, string name) =>
+        value is null or >= 0 ? value : throw new FormatException($"Invalid btp.json {name} value '{value}'. Use 0 (no limit) or a positive number.");
+
+    private static System.Text.RegularExpressions.Regex? ParsePattern(string? value, string name)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return new System.Text.RegularExpressions.Regex(value, System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+        }
+        catch (ArgumentException ex)
+        {
+            throw new FormatException($"Invalid {name} value '{value}': {ex.Message}", ex);
+        }
+    }
+
     private static int? ValidatePositive(int? value, string name, string unit = "number of milliseconds") =>
         value is null or > 0 ? value : throw new FormatException($"Invalid btp.json {name} value '{value}'. Use a positive {unit}.");
 
@@ -326,6 +395,12 @@ public sealed class BtpSettings
         public int? RepeatEach { get; init; }
 
         public DiagnosticsMode? Diagnostics { get; init; }
+
+        public bool? FailOnFlaky { get; init; }
+
+        public int? MaxFailures { get; init; }
+
+        public string? Tags { get; init; }
 
         public int? TimeoutMilliseconds { get; init; }
 

@@ -1,5 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.JSInterop;
+
+// BL0016 (.NET 11) asks components to guard interop calls. This type is a JS runtime: it forwards calls, and a failure
+// must reach the component that made the call, exactly as the real runtime's would.
+#pragma warning disable BL0016
 using Microsoft.JSInterop.Infrastructure;
 
 namespace BlazorTestPlatform;

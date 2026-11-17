@@ -59,6 +59,12 @@ internal static class Scripts
     /// <summary>The story's accessibility tree as text (the port of <c>AriaSnapshot</c>).</summary>
     public const string AriaSnapshot = "async () => " + Engine + ".ariaSnapshot()";
 
+    /// <summary>The single element a locator chain matches, or a string saying why there is none.</summary>
+    public const string Single = "async (steps) => " + Engine + ".single(steps)";
+
+    /// <summary>Computed style, viewport share and box of every match (<see cref="BlazorTestPlatform.Drivers.IStoryDriver.MeasureAsync"/>).</summary>
+    public const string Measure = "async ([steps, property, pseudo, ratio]) => " + Engine + ".measureJson(steps, property, pseudo, ratio)";
+
     /// <summary>Describes the focused story element as JSON (null for the body or elements outside the story).</summary>
     public const string Focused = "async () => " + Engine + ".focusedJson()";
 

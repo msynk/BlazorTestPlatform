@@ -261,7 +261,7 @@ public static class HubServiceCollectionExtensions
         var snapshot = store.Current;
         var decision = form["decision"].ToString();
         var names = form["snapshot"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToHashSet(StringComparer.Ordinal);
-        var candidates = snapshot.Results
+        var candidates = snapshot.VisualResults
             .Where(r => r.Visual is { IsFailure: true } v && names.Contains(v.SnapshotName))
             .GroupBy(r => r.Visual!.SnapshotName, StringComparer.Ordinal)
             .Select(g => g.First().Visual!)

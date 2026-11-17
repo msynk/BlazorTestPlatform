@@ -21,9 +21,13 @@ Write-Output "Playwright $version, image $image, BTP_UPDATE_SNAPSHOTS=$snapshots
 
 $script = @'
 set -e
-# Install into the cached volume on first use, and again when global.json needs a newer SDK than the cached one.
-if ! /opt/dotnet10/dotnet --version > /dev/null 2>&1; then
-  curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --install-dir /opt/dotnet10
+# Install into the cached volume on first use, and again when global.json needs an SDK the cached one lacks:
+# the SDK global.json pins builds every target framework, and the demo runs on the .NET 10 runtime.
+if ! /opt/dotnet10/dotnet --list-sdks 2>/dev/null | grep -q '^11\.'; then
+  curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 11.0 --install-dir /opt/dotnet10
+fi
+if ! /opt/dotnet10/dotnet --list-runtimes 2>/dev/null | grep -q '^Microsoft.AspNetCore.App 10\.'; then
+  curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --runtime aspnetcore --install-dir /opt/dotnet10
 fi
 export PATH=/opt/dotnet10:$PATH DOTNET_ROOT=/opt/dotnet10
 dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests --artifacts-path /tmp/btp-artifacts -- --filter-class '*CrossHostingTests' --filter-class '*VisualTests' --filter-class '*CrossBrowserTests' --filter-class '*InAppPlayTests' --filter-class '*BaselineProvenanceTests'
@@ -36,5 +40,6 @@ docker run --rm --init --ipc=host `
   -e "BTP_UPDATE_SNAPSHOTS=$snapshots" `
   -e BTP_PROJECT_DIR=/repo/demo/BlazorTestPlatform.Demo.UI.Tests `
   -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 `
+  -e BTP_GREP -e BTP_GREP_INVERT -e BTP_TAGS -e BTP_SHARD `
   $image bash -lc $script
 exit $LASTEXITCODE

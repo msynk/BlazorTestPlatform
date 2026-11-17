@@ -167,11 +167,12 @@ approve.SetAction(parse =>
 {
     var settings = Settings(parse);
     var pattern = parse.GetValue(filter);
+    // The story snapshots and the named screenshots taken in play.
     var candidates = ResultDirectories(parse, settings)
-        .SelectMany(directory => new ResultsStore(directory).ReadAll().Select(result => (Result: result, Directory: directory)))
-        .Where(c => c.Result.Visual is { ActualPath: not null } v && v.Status is VisualStatus.Mismatched or VisualStatus.SizeMismatch or VisualStatus.MissingBaseline)
-        .Where(c => pattern is null || GlobMatch(c.Result.StoryId, pattern) || GlobMatch(c.Result.Visual!.SnapshotName, pattern))
-        .GroupBy(c => c.Result.Visual!.SnapshotName, StringComparer.Ordinal)
+        .SelectMany(directory => new ResultsStore(directory).ReadAll().SelectMany(result => result.VisualComparisons().Select(visual => (Result: result, Visual: visual, Directory: directory))))
+        .Where(c => c.Visual is { ActualPath: not null } v && v.Status is VisualStatus.Mismatched or VisualStatus.SizeMismatch or VisualStatus.MissingBaseline)
+        .Where(c => pattern is null || GlobMatch(c.Result.StoryId, pattern) || GlobMatch(c.Visual.SnapshotName, pattern))
+        .GroupBy(c => c.Visual.SnapshotName, StringComparer.Ordinal)
         .Select(g => g.First())
         .ToArray();
 
@@ -185,9 +186,8 @@ approve.SetAction(parse =>
     // result was read from: a results file (for example a downloaded CI artifact) cannot point the copy anywhere else.
     var approved = 0;
     var failed = 0;
-    foreach (var (result, directory) in candidates)
+    foreach (var (_, visual, directory) in candidates)
     {
-        var visual = result.Visual!;
         if (parse.GetValue(dryRun))
         {
             Console.WriteLine($"would approve  {visual.SnapshotName}  ({visual.Status}, {visual.DiffPixels:N0} px)");
@@ -419,6 +419,9 @@ init.SetAction(parse =>
 
         // Pipelines run dotnet test from the repository root: the global.json there decides the runner mode.
         TestingPlatform = Scaffolding.UsesTestingPlatform(repositoryRoot ?? directory),
+
+        // The SDK and runtimes the project's target frameworks and the repository's global.json need.
+        DotNetChannels = Scaffolding.DotNetChannels(directory, repositoryRoot),
     };
 
     foreach (var (path, content) in Scaffolding.Plan(options))

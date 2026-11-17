@@ -376,7 +376,7 @@ public sealed class BunitDriverTests
     public async Task All_well_formed_stories_pass()
     {
         var failures = new List<string>();
-        foreach (var story in Catalog.Stories.Where(s => s.Title != "Tests/Inaccessible" || s.Name is "Suppressed" or "Report only").Where(s => !s.Name.Contains("budget", StringComparison.OrdinalIgnoreCase) && !s.Name.Contains("Failing", StringComparison.Ordinal) && !s.Name.StartsWith("Strict", StringComparison.Ordinal)))
+        foreach (var story in Catalog.Stories.Where(s => s.Title != "Tests/Inaccessible" || s.Name is "Suppressed" or "Report only").Where(s => !s.Name.Contains("budget", StringComparison.OrdinalIgnoreCase) && !s.Name.Contains("Failing", StringComparison.Ordinal) && !s.Name.StartsWith("Strict", StringComparison.Ordinal) && !s.HasTag("fails-on-purpose")))
         {
             var result = await BunitStoryRunner.RunAsync(story, Options);
             if (result.Outcome == StoryOutcome.Failed)

@@ -25,13 +25,13 @@ public sealed record ParameterCoverage
     /// Every value the parameter can take, for parameters with a finite set of states (<c>bool</c>, enums and their
     /// nullable forms, where <c>null</c> is a state). Empty for open-ended types such as strings and numbers.
     /// </summary>
-    public IReadOnlyList<string> Domain { get; init; } = [];
+    public IReadOnlyList<string> Domain { get => field ?? []; init; } = [];
 
     /// <summary>The values the stories render, in domain order (open-ended types: in first-seen order).</summary>
-    public IReadOnlyList<StateCoverage> Values { get; init; } = [];
+    public IReadOnlyList<StateCoverage> Values { get => field ?? []; init; } = [];
 
     /// <summary>Stories whose value is computed per render, so it cannot be known without rendering.</summary>
-    public IReadOnlyList<string> ComputedIn { get; init; } = [];
+    public IReadOnlyList<string> ComputedIn { get => field ?? []; init; } = [];
 
     /// <summary>Domain values no story renders.</summary>
     [JsonIgnore]
@@ -55,7 +55,7 @@ public sealed record ComponentCoverage
     public int Stories { get; init; }
 
     /// <summary>Editable parameters (see <see cref="StoryArgs.ControlsFor"/>) and the values the stories render.</summary>
-    public IReadOnlyList<ParameterCoverage> Parameters { get; init; } = [];
+    public IReadOnlyList<ParameterCoverage> Parameters { get => field ?? []; init; } = [];
 
     /// <summary>Finite states rendered by at least one story.</summary>
     [JsonIgnore]
@@ -85,10 +85,10 @@ public sealed record StoryCoverageReport
     public const string FileName = "story-coverage.json";
 
     /// <summary>Coverage per component, ordered by title.</summary>
-    public IReadOnlyList<ComponentCoverage> Components { get; init; } = [];
+    public IReadOnlyList<ComponentCoverage> Components { get => field ?? []; init; } = [];
 
     /// <summary>Full names of components that no story renders (only when the analysis was given a component list).</summary>
-    public IReadOnlyList<string> ComponentsWithoutStories { get; init; } = [];
+    public IReadOnlyList<string> ComponentsWithoutStories { get => field ?? []; init; } = [];
 
     /// <summary>Finite states rendered by at least one story, over every component.</summary>
     [JsonIgnore]

@@ -10,6 +10,11 @@ Settings are resolved in this order: environment variables, then `btp.json` in t
 | `BTP_UPDATE_PERF` | `1`, `true` or `yes` to record performance baselines | off |
 | `BTP_RETRIES` | integer | 2 on CI, 0 locally |
 | `BTP_REPEAT_EACH` | positive integer (burn-in: every story runs this many times and fails unless every run passes on its first attempt) | 1 |
+| `BTP_TAGS` | a tag expression: `smoke && !visual`, `(forms or dialogs) and not slow`, `a11y-*` (operators `!`/`not`, `&&`/`and`, `||`/`or`/`,`, parentheses; `*` wildcards; case-insensitive). Only stories whose tags match run; the others are reported as skipped, with the reason | every story |
+| `BTP_GREP` / `BTP_GREP_INVERT` | a regular expression (case-insensitive) matched against story ids and `Title/Name` paths: run only the stories that match / leave out the stories that match | every story |
+| `BTP_LAST_FAILED` | `1`, `true` or `yes`: run only the stories with a failed result in the results directory (any driver or cell), read once when the run starts; when none failed, everything runs | off |
+| `BTP_FAIL_ON_FLAKY` | `1`, `true` or `yes`: a run that passes only on a retry fails (its attempts and diagnostics are kept) | off |
+| `BTP_MAX_FAILURES` | a number: after this many blocking failures in the test process, stories that start afterwards are reported as skipped (`0` never stops). Quarantined and expected failures do not count | 0 |
 | `BTP_DIAGNOSTICS` | `off`, `on-failure`, `always` (also `0`/`false`, `retain-on-failure`/`failure`, `on`/`1`) | `on-failure` |
 | `BTP_TIMEOUT_MS` | auto-wait timeout of assertions and actions in bUnit and Playwright runs (a positive number of milliseconds; anything else is an error) | 5000 |
 | `BTP_SNAPSHOT_DIR` / `BTP_RESULTS_DIR` / `BTP_PERF_BASELINE` / `BTP_REVIEWS_DIR` | paths (an empty value counts as unset) | `__snapshots__`, `TestResults/btp`, `__baselines__/performance.json`, `a11y-reviews` |
@@ -65,6 +70,8 @@ Settings are resolved in this order: environment variables, then `btp.json` in t
   }
 }
 ```
+
+Run selection and control have keys too: `"tags": "smoke && !visual"` (as `BTP_TAGS`), `"failOnFlaky": true` and `"maxFailures": 10`. `BTP_GREP` and `BTP_LAST_FAILED` exist only as environment variables: they describe one run, not the project.
 
 Every key is optional. Two more exist, `updateSnapshots` (`none`, `missing`, `changed`, `all`) and `retries`, but leave them out unless you mean it: a value in `btp.json` replaces the CI-dependent default, so `"updateSnapshots": "missing"` would let CI write missing baselines and `"retries": 0` would turn off retries on CI. Use the environment variables for one-off changes instead. `repeatEach` (burn-in, default 1) is safe to set in either place.
 
