@@ -131,9 +131,14 @@ public sealed class WorkbenchOptions
         return this;
     }
 
-    /// <summary>Finds a theme by name (falls back to the first theme).</summary>
+    /// <summary>
+    /// Finds a theme by name: a registered one, else a built-in preset (<c>rtl</c>, <c>high-contrast</c>, so test matrices
+    /// can use them without registering), else the first theme.
+    /// </summary>
     public ThemeDefinition ResolveTheme(string? name) =>
-        Themes.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase)) ?? Themes.FirstOrDefault() ?? ThemeDefinition.Light;
+        Themes.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))
+        ?? new[] { ThemeDefinition.Light, ThemeDefinition.Dark, ThemeDefinition.RightToLeft, ThemeDefinition.HighContrast }.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))
+        ?? Themes.FirstOrDefault() ?? ThemeDefinition.Light;
 
     /// <summary>Finds a viewport by name (falls back to desktop).</summary>
     public Viewport ResolveViewport(string? name) =>

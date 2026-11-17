@@ -16,6 +16,29 @@ Prefer queries that match how people and assistive technology find elements:
 
 Locators are lazy and can be chained: `.Locate(...)`, `.GetByRole(...)`, `.GetByText(...)`, `.GetByLabel(...)`, `.GetByPlaceholder(...)`, `.GetByAltText(...)`, `.GetByTitle(...)`, `.GetByTestId(...)`, `.Nth(i)`, `.First`, `.Last`, `.Filter("has text")` and `.FilterNot(...)`.
 
+**Role states, patterns and filters.** As Playwright's `getByRole` options, role queries filter by state, and every text
+query takes a regular expression (tested against the normalized text; browsers run it as a JavaScript `RegExp`, so keep
+to syntax both share, with the `IgnoreCase`, `Multiline` and `Singleline` options only):
+
+```csharp
+ctx.GetByRole("button", "Bold", pressed: true);
+ctx.GetByRole("heading", level: 2);
+ctx.GetByRole("tab", selected: true);            // also isChecked, expanded, disabled, includeHidden
+ctx.GetByRole("row", namePattern: new Regex(@"^Order \d+"));
+ctx.GetByText(new Regex("^Saved", RegexOptions.IgnoreCase));    // GetByLabel/Placeholder/AltText/Title too
+rows.Filter(new Regex("1[24]$"));                 // FilterNot(Regex) too
+
+// Rows that contain a Delete button (Playwright's filter({ has })), and rows that contain none:
+var rows = ctx.GetByRole("listitem");
+await rows.Filter(ctx.GetByRole("button", "Delete")).First.GetByRole("button").ClickAsync();
+await ctx.Expect(rows.FilterNot(ctx.GetByRole("button"))).ToHaveCountAsync(2);
+```
+
+`isChecked` matches checkboxes, radios, switches, checkable menu items, options and tree items (not `mixed`); `pressed`
+reads `aria-pressed`; `selected` reads `aria-selected` (and, for options, HTML's selectedness: the select's value, the
+last option marked `selected`, else the first enabled one); `level` reads heading levels and `aria-level`. A filter's
+inner locator runs inside each match, among its descendants, as in Playwright.
+
 Only role queries skip hidden elements. The other queries also match hidden ones, as in Playwright; actions then wait for the element to become visible, and `ToBeVisibleAsync` tells the two apart.
 
 **Strictness.** An action or a single-element assertion fails if its locator matches more than one element once the timeout expires. The error lists the matches, in the same format in every driver. Negated assertions are just as strict: `Not.ToBeDisabledAsync()`, `Not.ToBeCheckedAsync()`, `Not.ToContainTextAsync(...)` and the other single-element assertions fail when the element is missing or ambiguous, instead of passing vacuously (a typo in a locator never makes a negative check pass). Visibility assertions accept a missing element as hidden (`ToBeHiddenAsync`, `Not.ToBeVisibleAsync`) but fail on more than one match, in both polarities.
@@ -36,7 +59,16 @@ await locator.CheckAsync(); await locator.UncheckAsync();
 await locator.SelectOptionAsync("value-or-label");
 await locator.PointerDownAsync(); await locator.PointerUpAsync();
 await locator.DragToAsync(target);
+await locator.SetInputFilesAsync(StoryFile.FromText("notes.txt", "Hello"), StoryFile.FromPath("avatar.png"));
+await locator.SetInputFilesAsync();              // clears the selection
 ```
+
+**File uploads.** `SetInputFilesAsync` chooses files in an `<input type="file">` as the browser's file picker would: the
+input's `change` event fires and Blazor's `InputFile` reads them (name, content type, size, content). The input may be
+visually hidden behind a styled drop zone, but must be enabled, and more than one file needs `multiple`. Files are
+held in memory (`StoryFile.FromText`, `FromBytes`, `FromPath`), so the same files reach every driver. bUnit hands them
+to the `InputFile` component that rendered the input (a plain file input fails with an explanation); Playwright uses
+`setInputFiles`, and the in-app driver a `DataTransfer`.
 
 Keyboard actions that act on the focused element:
 
@@ -64,6 +96,42 @@ await ctx.Expect(locator).ToBeEnabledAsync();      // ToBeDisabledAsync, ToBeChe
 await ctx.Expect(locator).ToHaveCountAsync(3);
 await ctx.Expect(locator).ToHaveAccessibleNameAsync("Close dialog");
 await ctx.Expect(locator).ToHaveRoleAsync("dialog");
+await ctx.Expect(locator).ToHaveAccessibleDescriptionAsync("We only use it for receipts.");
+await ctx.Expect(locator).ToHaveAccessibleErrorMessageAsync("Enter a complete address."); // aria-errormessage, while aria-invalid
+await ctx.Expect(locator).ToBeRequiredAsync();     // required or aria-required="true"
+await ctx.Expect(locator).ToBeInvalidAsync();      // aria-invalid (Blazor's inputs set it on validation errors)
+await ctx.Expect(locator).ToBePartiallyCheckedAsync(); // aria-checked="mixed"
+await ctx.Expect(locator).ToBeEmptyAsync();        // no value (controls) or no text
+await ctx.Expect(locator).ToHaveIdAsync("email");
+await ctx.Expect(locator).ToContainClassesAsync("field", "field--error");
+await ctx.Expect(listItems).ToHaveTextAsync(["Alpha", "Beta", "Gamma"]); // every match, in order
+// Regex overloads: ToHaveValueAsync, ToHaveAttributeAsync(name, regex), ToHaveClassAsync, ToHaveAccessibleNameAsync,
+// ToHaveAccessibleDescriptionAsync.
+```
+
+The accessible description and error message are computed by both engines (C# for bUnit, its JavaScript port for the
+browser drivers) and compared in `DriverParityTests`.
+
+**Soft assertions.** `ctx.ExpectSoft(locator)` records a failure and lets the play script continue, as Playwright's
+`expect.soft`; any assertion can be made soft with `await ctx.SoftAsync(() => ...)`. The story still fails when play
+ends, with every soft failure listed (`ctx.SoftFailures` holds them). If a hard failure stops the script first, it is
+reported as it is, and the soft failures stay visible as failed steps in the timeline.
+
+**Retrying blocks, polling and conditions that must hold.**
+
+```csharp
+// Playwright's toPass: retry the whole block until it passes (inner assertions check once per attempt).
+await ctx.ExpectEventuallyAsync(async () =>
+{
+    await ctx.GetByRole("button", "Refresh").ClickAsync();
+    await ctx.Expect(ctx.GetByText("Ready")).ToBeVisibleAsync();
+}, TimeSpan.FromSeconds(10));
+
+// Playwright's expect.poll: wait for state the DOM does not show.
+await ctx.ExpectPollAsync(() => Task.FromResult(cart.Count), n => n == 3, "the cart to hold 3 items");
+
+// Kotest's continually: the tooltip stays closed for 500 ms (advanced on the fake clock when the story uses one).
+await ctx.ExpectToRemainAsync(() => ctx.Expect(tooltip).ToBeHiddenAsync(), TimeSpan.FromMilliseconds(500));
 ```
 
 Failure messages show the expected value, the last observed value, the driver and render mode, the matched elements and, for focus assertions, the element that actually had focus. A failed story's message ends with the last steps of its timeline.
@@ -75,6 +143,38 @@ await ctx.ExpectAction("OnSave").ToHaveBeenCalledAsync(times: 1);               
 await ctx.ExpectRequest("POST", "api/people").ToHaveBeenMadeAsync();             // MockHttp requests
 await ctx.ExpectJSCall("localStorage.setItem").ToHaveBeenLastCalledWithAsync("consent", "accepted"); // JS interop (stories with MockJS)
 ```
+
+Navigations have them too. A component's `NavigationManager.NavigateTo` (and, in browsers, intercepted link clicks) is
+recorded in every driver; in browsers the workbench stops navigations that would leave the story frame, so the story
+stays on screen. Patterns follow the request rules (relative paths with `*`, the query compared only when the pattern
+has one, absolute URLs) or are regular expressions over `/path?query#fragment`:
+
+```csharp
+await ctx.GetByRole("button", "Open order 42").ClickAsync();
+await ctx.ExpectNavigation("/orders/42").ToHaveNavigatedAsync(times: 1);
+await ctx.ExpectNavigation("/orders/*").ToBeTheLastNavigationAsync();
+await ctx.ExpectNavigation(new Regex("^/checkout")).NotToHaveNavigatedAsync();
+var all = await ctx.GetNavigationsAsync();     // NavigationRecord: Uri, RelativeUri, ReplaceHistoryEntry, ForceLoad (bUnit)
+```
+
+**JavaScript calling .NET.** Components that wrap a JavaScript widget or observer pass a `DotNetObjectReference` to
+JavaScript and expect `[JSInvokable]` callbacks. `ctx.InvokeDotNetAsync` plays the JavaScript side: it finds the latest
+recorded call to the identifier that passed a reference and calls the method (its `[JSInvokable]` identifier or name)
+on the story's renderer, then waits for the story to settle. Mock the call with `MockJS(...)` so it is recorded (and
+`.ApplyInBrowsers()` when there is no real JavaScript behind it):
+
+```csharp
+stories.Add("Resized", s => s
+    .MockJS(js => js.SetupVoid("resizeObserver.observe").ApplyInBrowsers())
+    .Play(async ctx =>
+    {
+        await ctx.InvokeDotNetAsync("resizeObserver.observe", "OnResize", 320, 200);
+        await ctx.Expect(ctx.GetByRole("status")).ToHaveTextAsync("320 × 200");
+    }));
+```
+
+It works in bUnit, Playwright (through the story frame bridge) and the in-app driver. Arguments and results travel as
+JSON: primitives, enums, GUIDs and dates always, other types where reflection-based JSON is enabled.
 
 JS-call arguments are compared after `JSCallLog.Format`, the same under every driver: strings as they are, numbers and dates in the invariant culture, booleans as `true`/`false`, collections as `[1, 2, 3]`, dictionaries as `{"key": value}` (strings inside collections are quoted), and other objects as their camelCase JSON, which is what JS interop sends. In trimmed WebAssembly apps, where reflection-based JSON is unavailable, other objects fall back to `ToString()`.
 ## Grouping and timelines
@@ -192,12 +292,28 @@ await ctx.ExpectAriaSnapshotAsync("""
     """);
 ```
 
-States are `checked`/`checked=false` (native and ARIA), `disabled`, `expanded`/`expanded=false` and `level=N` for
+States are `checked`/`checked=false`/`checked=mixed` (native and ARIA), `pressed`/`pressed=false`/`pressed=mixed` for
+toggle buttons, `selected` (`aria-selected="true"`), `disabled`, `expanded`/`expanded=false` and `level=N` for
 headings. Hidden and `aria-hidden` content is left out. bUnit computes the tree with the C# engine and the browser
 drivers with its JavaScript port, so the same snapshot passes or fails under every driver (`DriverParityTests` and
 the demo's "Accessibility tree" story hold them to it). The failure message shows the actual tree, ready to paste;
 `ctx.GetAriaSnapshotAsync()` returns it, and `AriaSnapshot.Of(markup)` computes it for any markup. The workbench
 inspector shows the live tree of the selected story.
+
+**Patterns and partial trees.** A name can be a pattern, `- link /Order \d+/` (with `i`, `m` or `s` flags), matched
+against the whole name. With `AriaSnapshotMatch.Contains`, as Playwright's `toMatchAriaSnapshot`, the expected tree only
+has to be part of the actual one: it may start at any depth, leave out nodes (the rest keep their order), names and
+states; add `- /children: equal` under a node whose children must all be listed:
+
+```csharp
+await ctx.ExpectAriaSnapshotAsync("""
+    - list "Orders":
+      - listitem:
+        - button /^Del/
+    """, match: AriaSnapshotMatch.Contains);
+```
+
+`AriaSnapshotTemplate.Matches(actual, expected, match)` applies the same rules outside a play script.
 
 ## Three drivers, one script
 

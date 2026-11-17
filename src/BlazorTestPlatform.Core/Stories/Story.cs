@@ -42,6 +42,7 @@ public sealed class Story
         Performance?.Freeze();
         Matrix = data.Matrix;
         Timeout = data.Timeout;
+        Culture = data.Culture;
         SkipReason = data.SkipReason;
         Metadata = data.Metadata;
         Requirements = data.Requirements;
@@ -118,6 +119,12 @@ public sealed class Story
 
     /// <summary>Overall timeout for render + play.</summary>
     public TimeSpan? Timeout { get; }
+
+    /// <summary>
+    /// Culture the story renders in (<c>de-DE</c>), or null for the runner's. bUnit runs the story under it
+    /// (<c>CultureInfo.CurrentCulture</c> and <c>CurrentUICulture</c>); browser runs use it as the browser locale.
+    /// </summary>
+    public string? Culture { get; }
 
     /// <summary>When set, the story is skipped by test runners.</summary>
     public string? SkipReason { get; }
@@ -205,6 +212,18 @@ public sealed class Story
         if (context.Theme?.Decorator is { } themeDecorator)
         {
             fragment = themeDecorator(fragment, context);
+        }
+
+        if (context.Theme?.Direction == TextDirection.RightToLeft)
+        {
+            var inner = fragment;
+            fragment = builder =>
+            {
+                builder.OpenElement(0, "div");
+                builder.AddAttribute(1, "dir", "rtl");
+                builder.AddContent(2, inner);
+                builder.CloseElement();
+            };
         }
 
         return fragment;
@@ -364,6 +383,8 @@ internal sealed class StoryData
     public MatrixFilter Matrix { get; init; } = new();
 
     public TimeSpan? Timeout { get; init; }
+
+    public string? Culture { get; init; }
 
     public string? SkipReason { get; init; }
 

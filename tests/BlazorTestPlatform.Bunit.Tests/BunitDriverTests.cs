@@ -362,10 +362,21 @@ public sealed class BunitDriverTests
     }
 
     [Fact]
+    public async Task Report_only_accessibility_lists_violations_as_warnings_without_failing()
+    {
+        var result = await BunitStoryRunner.RunAsync(Catalog.Get("tests-inaccessible--report-only"), Options, TestContext.Current.CancellationToken);
+
+        Assert.Equal(StoryOutcome.Passed, result.Outcome);
+        Assert.Empty(result.AccessibilityFailures);
+        Assert.Contains(result.Accessibility!.Violations, v => v.RuleId == "image-alt");
+        Assert.True(Settings.Accessibility.Evaluate(result.Accessibility, "tests-inaccessible--report-only", Catalog.Get("tests-inaccessible--report-only").Accessibility).Warnings.Count >= 5);
+    }
+
+    [Fact]
     public async Task All_well_formed_stories_pass()
     {
         var failures = new List<string>();
-        foreach (var story in Catalog.Stories.Where(s => s.Title != "Tests/Inaccessible" || s.Name == "Suppressed").Where(s => !s.Name.Contains("budget", StringComparison.OrdinalIgnoreCase) && !s.Name.Contains("Failing", StringComparison.Ordinal) && !s.Name.StartsWith("Strict", StringComparison.Ordinal)))
+        foreach (var story in Catalog.Stories.Where(s => s.Title != "Tests/Inaccessible" || s.Name is "Suppressed" or "Report only").Where(s => !s.Name.Contains("budget", StringComparison.OrdinalIgnoreCase) && !s.Name.Contains("Failing", StringComparison.Ordinal) && !s.Name.StartsWith("Strict", StringComparison.Ordinal)))
         {
             var result = await BunitStoryRunner.RunAsync(story, Options);
             if (result.Outcome == StoryOutcome.Failed)

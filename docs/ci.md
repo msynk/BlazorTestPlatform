@@ -16,6 +16,18 @@ Tests can add run-wide files next to the results: the manual accessibility revie
 
 * `BTP_RETRIES` (default 2 on CI, 0 locally) retries failed browser runs in a fresh context. A run that passes after a failure is reported as **flaky**, not as passed, and keeps the errors and artifacts of its failed attempts.
 * `btp report --history .btp/history.json` keeps a rolling window of 50 runs. Persist the file between CI runs, for example with `actions/cache`, and save it even when tests fail (failed runs are what the history needs). The report ranks result keys (story × browser × viewport × theme × render mode) that have at least two recorded runs by flake rate; keys that fail every run are treated as broken, not flaky.
+* **Burn-in** catches a flaky story before it merges instead of after: `BTP_REPEAT_EACH=10` (or `repeatEach` in
+  `btp.json`) runs every story ten times, and a story fails unless every run passes on its first attempt (a retry that
+  passes counts as a failure here). Its error names the run that broke and how many passed before it. Burn-in the
+  stories a pull request touches by combining it with [test impact analysis](#test-impact-analysis):
+
+  ```yaml
+  - run: dotnet test --project tests/MyDesignSystem.Tests
+    env:
+      BTP_CHANGED_SINCE: origin/main   # only the affected stories
+      BTP_REPEAT_EACH: "10"
+      BTP_RETRIES: "0"
+  ```
 * `btp flaky --history .btp/history.json` prints the ranking in the terminal, with each key's number of flips (a
   failing run followed by a passing one, or the reverse): a key that keeps flipping is flaky; one that failed once and
   then kept passing was a fixed regression. Keys with the same rate are ranked by flips.
@@ -28,7 +40,7 @@ Install it with `dotnet tool install -g BlazorTestPlatform.Cli --prerelease` whi
 btp report   [-r <results>...] [-o <dir>] [--junit <file>] [--markdown <file>] [--github-summary]
              [--history <file>] [--run-id <id>] [--fail-on-failures]
              [--pr-comment] [--pr <number>] [--repository <owner/name>] [--report-url <url>]
-             [--sarif <file>] [--source-root <dir>]
+             [--sarif <file>] [--source-root <dir>] [--ctrf <file>] [--archive <dir>] [--trigger <name>]
 btp init     [-f xunit|nunit|mstest|tunit] [--ci github|azure|gitlab|none] [--component <Type>] [--namespace <ns>] [--force]
 btp approve  [-r <results>...] [-f|--filter <glob>] [--dry-run]
 btp perf approve [-r <results>...] [-f|--filter <glob>] [--baseline <file>]
@@ -40,6 +52,12 @@ btp clean
 Exit codes: `report` returns 2 when there are no results, and with `--fail-on-failures` 1 when a story failed or a result file could not be read (a crashed run's file must not hide a failure; unreadable files are listed as warnings either way). `approve` returns 1 when some snapshot could not be approved. `clean` returns 1 when it refuses to delete the results directory (see [configuration](configuration.md#environment-variables)).
 
 `btp approve` writes baselines only into the project's snapshot directory, named after the snapshot, and copies only PNG images found inside the results directory it read, so it is safe to run on results downloaded from CI (`btp approve -r path/to/downloaded/btp`). A corrupt flake history (for example a truncated cache entry) is reset with a warning instead of failing the report, and history and baseline files are written atomically.
+
+`--ctrf <file>` writes a [CTRF](https://ctrf.io) report (Common Test Report Format), the JSON that CTRF tools read
+whatever framework produced it (for example `ctrf-io/github-test-reporter` for GitHub summaries, flaky-test tables and
+pull-request comments). Unlike JUnit XML it keeps retries: a flaky run is `passed` with `flaky: true` and its `retries`;
+quarantined failures are `skipped` with `rawStatus: "quarantined"`, as in the JUnit report; each test carries its story
+file and line, browser, tags (render mode, viewport, theme), attachments and steps.
 
 Every command takes `-p <project>`, the test project directory with `btp.json`. It defaults to `BTP_PROJECT_DIR`, else the current directory, so run `btp` from the test project or pass `-p`. To build one report for several test projects, repeat `-r`.
 

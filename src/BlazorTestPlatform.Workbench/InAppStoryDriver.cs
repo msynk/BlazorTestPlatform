@@ -19,13 +19,22 @@ public sealed class InAppStoryDriver : IStoryDriver
 
     /// <summary>Creates the driver.</summary>
     public InAppStoryDriver(IJSObjectReference module, StoryRenderContext renderContext, StoryServiceScope services, string renderer)
+        : this(module, renderContext, services, renderer, dispatch: null)
     {
+    }
+
+    /// <summary>Creates the driver; <paramref name="dispatch"/> runs work on the story's renderer (the host component's <c>InvokeAsync</c>).</summary>
+    public InAppStoryDriver(IJSObjectReference module, StoryRenderContext renderContext, StoryServiceScope services, string renderer, Func<Func<Task>, Task>? dispatch)
+    {
+        _dispatch = dispatch;
         _module = module ?? throw new ArgumentNullException(nameof(module));
         _renderContext = renderContext ?? throw new ArgumentNullException(nameof(renderContext));
         _services = services ?? throw new ArgumentNullException(nameof(services));
         Name = $"in-app ({renderer})";
         Capabilities = Common | (services.Overrides?.GetService<FakeTimeProvider>() is not null ? DriverCapabilities.FakeTime : DriverCapabilities.None);
     }
+
+    private readonly Func<Func<Task>, Task>? _dispatch;
 
     private const DriverCapabilities Common =
         DriverCapabilities.RealBrowser | DriverCapabilities.Layout | DriverCapabilities.Css | DriverCapabilities.JavaScript | DriverCapabilities.NativeFocus;
@@ -113,6 +122,9 @@ public sealed class InAppStoryDriver : IStoryDriver
     public Task<IReadOnlyList<ActionRecord>> GetActionsAsync(CancellationToken cancellationToken) => Task.FromResult(_renderContext.Actions.Records);
 
     /// <inheritdoc />
+    public Task<IReadOnlyList<NavigationRecord>> GetNavigationsAsync(CancellationToken cancellationToken) => Task.FromResult(_renderContext.Navigations.Records);
+
+    /// <inheritdoc />
     public async Task WaitForIdleAsync(CancellationToken cancellationToken)
     {
         await SettleAsync(cancellationToken);
@@ -141,6 +153,15 @@ public sealed class InAppStoryDriver : IStoryDriver
 
     /// <inheritdoc />
     public Task<IReadOnlyList<JSCallRecord>> GetJSCallsAsync(CancellationToken cancellationToken) => Task.FromResult(_services.JSCalls.Calls);
+
+    /// <inheritdoc />
+    public async Task<string?> InvokeDotNetAsync(int sequence, int index, string method, string argumentsJson, CancellationToken cancellationToken)
+    {
+        string? result = null;
+        Func<Task> call = async () => result = await _services.JSCalls.InvokeDotNetAsync(sequence, index, method, argumentsJson).ConfigureAwait(false);
+        await (_dispatch is null ? call() : _dispatch(call)).ConfigureAwait(false);
+        return result;
+    }
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

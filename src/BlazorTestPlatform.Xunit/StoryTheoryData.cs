@@ -47,10 +47,11 @@ public static class StoryTheoryData
         return data;
     }
 
-    /// <summary>Fails the test for a failed result and skips it for a skipped one; returns passed results.</summary>
+    /// <summary>Attaches the evidence of failed, flaky and visually changed runs to the test result (<see cref="StoryAttachments"/>); fails the test for a failed result and skips it for a skipped one; returns passed results.</summary>
     public static StoryResult Passed(StoryResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
+        Attach(result);
         if (result.IsBlockingFailure)
         {
             throw new StoryFailedException(result);
@@ -66,4 +67,20 @@ public static class StoryTheoryData
 
     /// <summary>Awaits a run and applies <see cref="Passed(StoryResult)"/>.</summary>
     public static async Task<StoryResult> PassedAsync(Task<StoryResult> run) => Passed(await (run ?? throw new ArgumentNullException(nameof(run))).ConfigureAwait(false));
+
+    // Screenshots, visual diffs, DOM snapshots and traces become xUnit attachments (shown by Test Explorer and in TRX).
+    private static void Attach(StoryResult result)
+    {
+        foreach (var attachment in StoryAttachments.For(result))
+        {
+            try
+            {
+                TestContext.Current.AddAttachment(attachment.Name, File.ReadAllBytes(attachment.Path), replaceExistingValue: true, attachment.MediaType);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                // Outside a running test, or the file went away: the evidence stays in the results directory.
+            }
+        }
+    }
 }

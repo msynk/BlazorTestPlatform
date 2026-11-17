@@ -39,7 +39,7 @@ On first start (`dotnet run` uses the `http` launch profile, which sets `BTP_DEM
 | Project | Role |
 |---|---|
 | [`BlazorTestPlatform.Demo.UI`](BlazorTestPlatform.Demo.UI) | The design system under test: 14 components, from a button to an HTTP-backed sign-up form, plus `demo.css` with light and dark themes. Nothing in it knows about testing. |
-| [`BlazorTestPlatform.Demo.UI.Stories`](BlazorTestPlatform.Demo.UI.Stories) | One collection of stories per component (`*Stories.cs`), Razor fragments the stories use (`Fragments.razor`), and two test fixtures for driver parity and browser emulation. Shared by the workbench and the tests. |
+| [`BlazorTestPlatform.Demo.UI.Stories`](BlazorTestPlatform.Demo.UI.Stories) | One collection of stories per component (`*Stories.cs`), Razor fragments the stories use (`Fragments.razor`), and test fixtures for driver parity, browser emulation and the play API. Shared by the workbench and the tests. |
 | [`BlazorTestPlatform.Demo.Workbench`](BlazorTestPlatform.Demo.Workbench) + [`.Client`](BlazorTestPlatform.Demo.Workbench.Client) | A Blazor Web App with Server and WebAssembly interactivity that hosts the guided tour (`/`), the test hub (`/_btp`) and the workbench (`/_workbench`), plus the chaos stories and the history seeder. Browser tests run against it. |
 | [`BlazorTestPlatform.Demo.UI.Tests`](BlazorTestPlatform.Demo.UI.Tests) | xUnit v3 tests: every story in bUnit and in real browsers, plus the quality gates. Committed baselines and reviews live here too. |
 
@@ -74,6 +74,13 @@ Story ids open in the workbench at `/_workbench?story=<id>`; add `&play=1` to ru
 | Accessibility tree snapshots | `overlays-dialog--destructive`, `testing-driver-parity--accessibility-tree` | [DialogStories.cs](BlazorTestPlatform.Demo.UI.Stories/DialogStories.cs) | every driver |
 | Forms: fill, implicit submission with Enter, validation | `patterns-sign-up-form--validation-errors`, `data-todo-list--add-a-task` | [SignUpFormStories.cs](BlazorTestPlatform.Demo.UI.Stories/SignUpFormStories.cs) | every driver, `CombinatoricsTests` |
 | One script, three drivers held to the same results | `testing-driver-parity--*` | [DriverParityStories.cs](BlazorTestPlatform.Demo.UI.Stories/DriverParityStories.cs) | `DriverParityTests`, `InAppPlayTests` |
+| File uploads (`SetInputFilesAsync`) | `testing-play-api--file-upload` | [PlayApiStories.cs](BlazorTestPlatform.Demo.UI.Stories/PlayApiStories.cs) | every driver |
+| Locator filters (`Filter(has)`, role states, regex) and partial accessibility trees | `testing-play-api--locator-filters` | [PlayApiStories.cs](BlazorTestPlatform.Demo.UI.Stories/PlayApiStories.cs) | every driver, `DriverParityTests` |
+| Navigation assertions (`ExpectNavigation`) | `testing-play-api--navigation` | [PlayApiStories.cs](BlazorTestPlatform.Demo.UI.Stories/PlayApiStories.cs) | every driver |
+| JavaScript calling `[JSInvokable]` methods (`InvokeDotNetAsync`) | `testing-play-api--javascript-callbacks` | [PlayApiStories.cs](BlazorTestPlatform.Demo.UI.Stories/PlayApiStories.cs) | every driver, the trimmed publish |
+| Accessibility-state matchers, soft assertions, `ExpectEventuallyAsync`, `ExpectToRemainAsync` | `testing-play-api--field-states` | [PlayApiStories.cs](BlazorTestPlatform.Demo.UI.Stories/PlayApiStories.cs) | every driver |
+| Right-to-left and high-contrast themes | `inputs-button--primary` | [BrowserMatrixTests.cs](BlazorTestPlatform.Demo.UI.Tests/BrowserMatrixTests.cs) | `ThemeEmulationTests` |
+| Orphaned visual baselines | — | [BaselineProvenanceTests.cs](BlazorTestPlatform.Demo.UI.Tests/BaselineProvenanceTests.cs) | `BaselineProvenanceTests` |
 | Driver capabilities: skipped with a reason, never faked | `testing-browser-emulation--offline` | [BrowserEmulationStories.cs](BlazorTestPlatform.Demo.UI.Stories/BrowserEmulationStories.cs) | `ComponentStoryTests` (skipped), `CrossHostingTests` |
 | Optional checks per hosting model (`ctx.HostingModel`) | `display-runtime-badge--masked-value` | [RuntimeBadgeStories.cs](BlazorTestPlatform.Demo.UI.Stories/RuntimeBadgeStories.cs) | `CrossHostingTests` |
 | Hand-written tests on top of a story | — | [CombinatoricsTests.cs](BlazorTestPlatform.Demo.UI.Tests/CombinatoricsTests.cs), [ComponentStoryTests.cs](BlazorTestPlatform.Demo.UI.Tests/ComponentStoryTests.cs) | `CombinatoricsTests`, `ResponsiveInMemoryTests` |

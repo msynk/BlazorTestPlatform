@@ -38,6 +38,40 @@ public sealed class ReportingTests
     ]);
 
     [Fact]
+    public void Ctrf_keeps_retries_flaky_runs_and_quarantine()
+    {
+        var summary = RunSummary.From(
+        [
+            Result("passes", StoryOutcome.Passed),
+            Result("fails", StoryOutcome.Failed) with { Artifacts = [new ArtifactReference("screenshot", "/tmp/fail.png", "Page at failure")], SourceFile = "ButtonStories.cs", SourceLine = 12 },
+            Result("flaky", StoryOutcome.Flaky, "playwright") with { Key = "flaky|chromium|desktop|light|server" },
+            Result("known", StoryOutcome.Failed) with { Quarantine = new QuarantineEntry { Pattern = "known", Reason = "#12" } },
+            Result("later", StoryOutcome.Skipped) with { SkipReason = "needs layout" },
+        ]);
+
+        using var json = System.Text.Json.JsonDocument.Parse(CtrfReportWriter.Create(summary));
+        var root = json.RootElement;
+        Assert.Equal("CTRF", root.GetProperty("reportFormat").GetString());
+        var counts = root.GetProperty("results").GetProperty("summary");
+        Assert.Equal(5, counts.GetProperty("tests").GetInt32());
+        Assert.Equal(2, counts.GetProperty("passed").GetInt32());
+        Assert.Equal(1, counts.GetProperty("failed").GetInt32());
+        Assert.Equal(2, counts.GetProperty("skipped").GetInt32());
+        Assert.Equal(1, counts.GetProperty("flaky").GetInt32());
+
+        var tests = root.GetProperty("results").GetProperty("tests").EnumerateArray().ToDictionary(t => t.GetProperty("extra").GetProperty("storyId").GetString()!);
+        Assert.True(tests["flaky"].GetProperty("flaky").GetBoolean());
+        Assert.Equal(1, tests["flaky"].GetProperty("retries").GetInt32());
+        Assert.Equal("chromium", tests["flaky"].GetProperty("browser").GetString());
+        Assert.Equal("failed", tests["fails"].GetProperty("status").GetString());
+        Assert.Equal(12, tests["fails"].GetProperty("line").GetInt32());
+        Assert.Equal("/tmp/fail.png", tests["fails"].GetProperty("attachments")[0].GetProperty("path").GetString());
+        Assert.Equal("skipped", tests["known"].GetProperty("status").GetString());
+        Assert.Equal("quarantined", tests["known"].GetProperty("rawStatus").GetString());
+        Assert.Equal("needs layout", tests["later"].GetProperty("message").GetString());
+    }
+
+    [Fact]
     public void Summary_counts_outcomes_and_quality_gates()
     {
         var summary = Summary();

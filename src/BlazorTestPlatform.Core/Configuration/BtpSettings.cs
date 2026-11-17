@@ -76,6 +76,14 @@ public sealed class BtpSettings
     /// <summary>Retries for browser runs (<c>BTP_RETRIES</c>). Default 2 on CI, 0 locally.</summary>
     public int Retries { get; init; }
 
+    /// <summary>
+    /// Burn-in: how many times every story runs (<c>BTP_REPEAT_EACH</c>, <c>repeatEach</c>; default 1). A story fails
+    /// unless every run passes on its first attempt, so a flaky new or changed story is caught before it merges (as
+    /// Playwright's <c>--repeat-each</c> or JUnit's <c>@RepeatedTest</c>). Combine it with <see cref="StoryImpact"/>
+    /// to repeat only the stories a change affects.
+    /// </summary>
+    public int RepeatEach { get; init; } = 1;
+
     /// <summary>Diagnostics mode (<c>BTP_DIAGNOSTICS</c>: off|on-failure|always).</summary>
     public DiagnosticsMode Diagnostics { get; init; } = DiagnosticsMode.RetainOnFailure;
 
@@ -178,6 +186,7 @@ public sealed class BtpSettings
             UpdateSnapshots = ParseUpdateMode(Env("BTP_UPDATE_SNAPSHOTS")) ?? file?.UpdateSnapshots ?? (ci ? SnapshotUpdateMode.None : SnapshotUpdateMode.Missing),
             UpdatePerformanceBaselines = IsTruthy(Env("BTP_UPDATE_PERF")),
             Retries = int.TryParse(Env("BTP_RETRIES"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var retries) ? retries : file?.Retries ?? (ci ? 2 : 0),
+            RepeatEach = ParsePositive(Env("BTP_REPEAT_EACH"), "BTP_REPEAT_EACH", "number of runs") ?? ValidatePositive(file?.RepeatEach, "repeatEach", "number of runs") ?? 1,
             Diagnostics = ParseDiagnostics(Env("BTP_DIAGNOSTICS")) ?? file?.Diagnostics ?? DiagnosticsMode.RetainOnFailure,
             DefaultTimeout = TimeSpan.FromMilliseconds(ParsePositive(Env("BTP_TIMEOUT_MS"), "BTP_TIMEOUT_MS") ?? ValidatePositive(file?.TimeoutMilliseconds, "timeoutMilliseconds") ?? 5000),
             IsContinuousIntegration = ci,
@@ -258,7 +267,7 @@ public sealed class BtpSettings
     private static bool IsFalsy(string value) =>
         value.Trim() is "0" || value.Trim().Equals("false", StringComparison.OrdinalIgnoreCase) || value.Trim().Equals("no", StringComparison.OrdinalIgnoreCase);
 
-    private static int? ParsePositive(string? value, string name)
+    private static int? ParsePositive(string? value, string name, string unit = "number of milliseconds")
     {
         if (value is null)
         {
@@ -267,11 +276,11 @@ public sealed class BtpSettings
 
         return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) && number > 0
             ? number
-            : throw new FormatException($"Invalid {name} value '{value}'. Use a positive number of milliseconds.");
+            : throw new FormatException($"Invalid {name} value '{value}'. Use a positive {unit}.");
     }
 
-    private static int? ValidatePositive(int? value, string name) =>
-        value is null or > 0 ? value : throw new FormatException($"Invalid btp.json {name} value '{value}'. Use a positive number of milliseconds.");
+    private static int? ValidatePositive(int? value, string name, string unit = "number of milliseconds") =>
+        value is null or > 0 ? value : throw new FormatException($"Invalid btp.json {name} value '{value}'. Use a positive {unit}.");
 
     /// <summary>True for the values that switch a <c>BTP_*</c> flag on: <c>1</c>, <c>true</c> or <c>yes</c> (case-insensitive).</summary>
     public static bool IsTruthy(string? value) => value is not null && (value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase) || value.Equals("yes", StringComparison.OrdinalIgnoreCase));
@@ -313,6 +322,8 @@ public sealed class BtpSettings
         public SnapshotUpdateMode? UpdateSnapshots { get; init; }
 
         public int? Retries { get; init; }
+
+        public int? RepeatEach { get; init; }
 
         public DiagnosticsMode? Diagnostics { get; init; }
 

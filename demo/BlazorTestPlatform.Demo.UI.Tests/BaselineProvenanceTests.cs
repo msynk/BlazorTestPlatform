@@ -31,6 +31,18 @@ public sealed class BaselineProvenanceTests
     }
 
     [Fact]
+    public void Every_baseline_belongs_to_a_story_that_takes_snapshots()
+    {
+        // Renamed, removed and NoVisual() stories leave baselines nobody compares against (Jest's "obsolete snapshots").
+        var store = SnapshotStore.FromSettings(BtpSettings.Current);
+        var orphans = store.FindOrphanedBaselines(ComponentStoryTests.Catalog.Stories)
+            .Select(p => Path.GetRelativePath(store.BaselineDirectory, p))
+            .ToArray();
+
+        Assert.True(orphans.Length == 0, $"Baselines without a story: {string.Join(", ", orphans)}. Delete them, or call SnapshotStore.PruneOrphanedBaselines(catalog.Stories).");
+    }
+
+    [Fact]
     public void Recorded_version_is_the_pinned_package_version()
     {
         var props = FindUp(BtpSettings.Current.ProjectDirectory, "Directory.Packages.props");

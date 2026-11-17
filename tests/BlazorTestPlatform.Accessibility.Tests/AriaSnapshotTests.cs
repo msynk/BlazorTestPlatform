@@ -29,6 +29,30 @@ public sealed class AriaSnapshotTests
     }
 
     [Fact]
+    public void Toggle_buttons_are_pressed_and_selection_is_its_own_state()
+    {
+        var snapshot = AriaSnapshot.Of("""
+            <button aria-pressed="true">Bold</button><button aria-pressed="false">Italic</button><button aria-pressed="mixed">Mixed</button>
+            <div role="tablist"><div role="tab" aria-selected="true">One</div><div role="tab" aria-selected="false">Two</div></div>
+            <div role="listbox" aria-label="Pick"><div role="option" aria-selected="true">A</div><div role="option" aria-checked="true">B</div></div>
+            <div role="checkbox" aria-checked="mixed">All</div>
+            """);
+
+        Assert.Equal("""
+            - button "Bold" [pressed]
+            - button "Italic" [pressed=false]
+            - button "Mixed" [pressed=mixed]
+            - tablist:
+              - tab "One" [selected]
+              - tab "Two"
+            - listbox "Pick":
+              - option "A" [selected]
+              - option "B" [checked]
+            - checkbox "All" [checked=mixed]
+            """.Replace("\r\n", "\n", StringComparison.Ordinal), snapshot);
+    }
+
+    [Fact]
     public void Hidden_content_and_non_rendered_elements_are_left_out()
     {
         var snapshot = AriaSnapshot.Of("""

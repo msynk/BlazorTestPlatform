@@ -20,6 +20,8 @@ const matches = (actual, expected, exact) => {
     return exact ? a === e : a.toLowerCase().includes(e.toLowerCase());
 };
 const blank = s => !s || !s.trim();
+// TextMatch.Matches with a pattern: a .NET Regex sent as source and flags (DriverJson.WritePattern).
+const matchesQuery = (actual, expected, exact, q) => q.pattern != null ? new RegExp(q.pattern, q.flags || '').test(normalize(actual)) : matches(actual, expected, exact);
 
 // DomFacts.TextOf: text content without non-rendered elements, with a space after line-breaking elements, so
 // <div>A</div><div>B</div> reads "A B".
@@ -394,15 +396,50 @@ function accessibleName(e, root) {
     return normalize(computeName(e, root, new Set(), false, false));
 }
 
+/** AccessibleName.ComputeDescription: aria-describedby, aria-description, then a title that is not the name. */
+function accessibleDescription(e, root, name) {
+    const describedBy = idRefs(root, e.getAttribute('aria-describedby'));
+    if (describedBy.length) return normalize(describedBy.map(t => referencedName(t, root, new Set(), e)).join(' '));
+    const description = e.getAttribute('aria-description');
+    if (description !== null) return normalize(description);
+    const title = normalize(e.getAttribute('title') ?? '');
+    return name && name !== title ? title : '';
+}
+
+/** AccessibleName.ComputeErrorMessage: the aria-errormessage targets' text while the element is invalid. */
+function accessibleErrorMessage(e, root) {
+    const invalid = (e.getAttribute('aria-invalid') ?? '').trim().toLowerCase();
+    if (invalid === '' || invalid === 'false') return '';
+    return normalize(idRefs(root, e.getAttribute('aria-errormessage')).map(t => referencedName(t, root, new Set(), e)).join(' '));
+}
+
 // ---- queries (DomQueries) ------------------------------------------------------------------------------------------
 
-function labelMatches(e, root, text, exact) {
+function labelMatches(e, root, q) {
+    const match = text => matchesQuery(text, q.value, q.exact, q);
     const ariaLabel = e.getAttribute('aria-label');
-    if (ariaLabel !== null && matches(ariaLabel, text, exact)) return true;
+    if (ariaLabel !== null && match(ariaLabel)) return true;
     const labelledBy = idRefs(root, e.getAttribute('aria-labelledby'));
-    if (labelledBy.length && matches(labelledBy.map(textOf).join(' '), text, exact)) return true;
+    if (labelledBy.length && match(labelledBy.map(textOf).join(' '))) return true;
     return ['input', 'textarea', 'select', 'button', 'meter', 'output', 'progress'].includes(e.localName)
-        && labelsOf(e, root).some(label => matches(textOf(label), text, exact));
+        && labelsOf(e, root).some(label => match(textOf(label)));
+}
+
+// DomQueries.MatchesRoleState: getByRole's checked, pressed, expanded, selected, disabled and level options.
+function roleStateMatches(e, role, q) {
+    const tristate = (value, wanted) => wanted == null || (value ?? '').trim().toLowerCase() === (wanted ? 'true' : 'false');
+    if (q.checked != null) {
+        const state = role === 'button' ? null : checkedState(e, role);
+        if (state === null || state !== q.checked || (e.getAttribute('aria-checked') ?? '').trim().toLowerCase() === 'mixed') return false;
+    }
+    const selected = e.getAttribute('aria-selected') ?? (e.localName === 'option' ? (e.selected ? 'true' : 'false') : null);
+    if (!tristate(e.getAttribute('aria-pressed'), q.pressed) || !tristate(e.getAttribute('aria-expanded'), q.expanded) || !tristate(selected, q.selected)) return false;
+    if (q.disabled != null && isDisabled(e) !== q.disabled) return false;
+    if (q.level != null) {
+        const ariaLevel = /^\s*[+-]?\d+\s*$/.test(e.getAttribute('aria-level') ?? '') ? parseInt(e.getAttribute('aria-level'), 10) : null;
+        if ((role === 'heading' ? headingLevel(e) : ariaLevel) !== q.level) return false;
+    }
+    return true;
 }
 
 const isTextCandidate = e => !['script', 'style', 'template', 'head', 'html', 'body'].includes(e.localName);
@@ -421,20 +458,21 @@ function query(root, candidates, q, within) {
             return Array.from(within.querySelectorAll(q.selector)).filter(e => inStory(e, root));
         case 'role': {
             const wanted = q.role.toLowerCase();
-            return candidates.filter(e => roleOf(e) === wanted && !isExcluded(e) && (q.name == null || matches(accessibleName(e, root), q.name, q.exact)));
+            return candidates.filter(e => roleOf(e) === wanted && (q.includeHidden || !isExcluded(e)) && roleStateMatches(e, wanted, q)
+                && (q.name == null || matchesQuery(accessibleName(e, root), q.name, q.exact, q)));
         }
         case 'text':
-            return innermost(candidates.filter(e => isTextCandidate(e) && matches(textFor(e), q.value, q.exact)));
+            return innermost(candidates.filter(e => isTextCandidate(e) && matchesQuery(textFor(e), q.value, q.exact, q)));
         case 'label':
-            return candidates.filter(e => labelMatches(e, root, q.value, q.exact));
+            return candidates.filter(e => labelMatches(e, root, q));
         case 'placeholder':
-            return candidates.filter(e => e.hasAttribute('placeholder') && matches(e.getAttribute('placeholder'), q.value, q.exact));
+            return candidates.filter(e => e.hasAttribute('placeholder') && matchesQuery(e.getAttribute('placeholder'), q.value, q.exact, q));
         case 'testid':
             return candidates.filter(e => e.getAttribute(q.attribute) === q.value);
         case 'alt':
-            return candidates.filter(e => ['img', 'area', 'input'].includes(e.localName) && e.hasAttribute('alt') && matches(e.getAttribute('alt'), q.value, q.exact));
+            return candidates.filter(e => ['img', 'area', 'input'].includes(e.localName) && e.hasAttribute('alt') && matchesQuery(e.getAttribute('alt'), q.value, q.exact, q));
         case 'title':
-            return candidates.filter(e => e.hasAttribute('title') && matches(e.getAttribute('title'), q.value, q.exact));
+            return candidates.filter(e => e.hasAttribute('title') && matchesQuery(e.getAttribute('title'), q.value, q.exact, q));
         default:
             throw new Error('Unsupported query ' + q.type);
     }
@@ -443,7 +481,11 @@ function query(root, candidates, q, within) {
 /** Resolves a locator chain to story elements (DomQueries.Resolve). */
 function resolve(steps) {
     const root = storyRoot();
-    let current = null;
+    return resolveFrom(root, null, steps);
+}
+
+// `current` null means the whole story; a filter's inner chain starts from the element it tests (DomQueries.ResolveWithin).
+function resolveFrom(root, current, steps) {
     for (const step of steps) {
         if (step.kind === 'find') {
             if (current === null) current = query(root, storyElements(root), step.query, root);
@@ -456,8 +498,11 @@ function resolve(steps) {
             current = current ?? storyElements(root);
             const i = step.index < 0 ? current.length + step.index : step.index;
             current = i >= 0 && i < current.length ? [current[i]] : [];
-        } else if (step.kind === 'hasText') current = (current ?? storyElements(root)).filter(e => matches(textOf(e), step.text, false));
-        else if (step.kind === 'hasNotText') current = (current ?? storyElements(root)).filter(e => !matches(textOf(e), step.text, false));
+        } else if (step.kind === 'hasText') current = (current ?? storyElements(root)).filter(e => matchesQuery(textOf(e), step.text, false, step));
+        else if (step.kind === 'hasNotText') current = (current ?? storyElements(root)).filter(e => !matchesQuery(textOf(e), step.text, false, step));
+        else if (step.kind === 'has') current = (current ?? storyElements(root)).filter(e => resolveFrom(root, [e], step.inner).length > 0);
+        else if (step.kind === 'hasNot') current = (current ?? storyElements(root)).filter(e => resolveFrom(root, [e], step.inner).length === 0);
+        else throw new Error('Unsupported locator step ' + step.kind);
     }
     return current ?? [];
 }
@@ -477,8 +522,10 @@ function describe(e, root) {
     let value = null;
     if (['input', 'textarea', 'select'].includes(e.localName)) value = e.value;
     else if (isContentEditable(e)) value = e.textContent;
+    const name = accessibleName(e, root);
     return {
-        tagName: e.localName, role, accessibleName: accessibleName(e, root), text: textOf(e), value, attributes: attrs,
+        tagName: e.localName, role, accessibleName: name, accessibleDescription: accessibleDescription(e, root, name),
+        accessibleErrorMessage: accessibleErrorMessage(e, root), text: textOf(e), value, attributes: attrs,
         isVisible: isVisible(e), isEnabled: !isDisabled(e), isChecked: checkedState(e, role), isFocused: document.activeElement === e,
         isEditable: isEditable(e), html: snippet(e)
     };
@@ -708,20 +755,31 @@ export function checkPlan(e, want) {
     return 'click';
 }
 
-const NEEDS_ENABLED = ['click', 'dblclick', 'fill', 'clear', 'type', 'check', 'uncheck', 'select'];
+const NEEDS_ENABLED = ['click', 'dblclick', 'fill', 'clear', 'type', 'check', 'uncheck', 'select', 'files'];
+// Choosing files needs no box: file inputs are often visually hidden behind a styled drop zone.
+const NO_BOX = ['files'];
 const FOCUS_ONLY = ['focus', 'blur', 'scroll'];
 const POINTER_ACTIONS = ['click', 'dblclick', 'hover', 'pointerdown', 'pointerup'];
 let lastTarget = null;
 
 /** Resolves the single element an action targets, or returns a problem to retry on (strictness, visibility, state). */
+/** Why files cannot be chosen in this element (the same messages as the bUnit driver), or null. */
+export function fileInputProblem(e, files) {
+    if (e.localName !== 'input' || (e.getAttribute('type') ?? '').toLowerCase() !== 'file') return 'element is not a file input';
+    if (files.length > 1 && !e.multiple) return 'the file input does not accept multiple files';
+    return null;
+}
+
 export function actionTarget(steps, action) {
     const found = resolve(steps);
     if (found.length !== 1) return found.length === 0 ? 'no element matches' : `strict mode violation: ${found.length} elements match`;
     const e = found[0];
     if (!action.force) {
         // Pointer and typing actions need what a user sees (a box); focus, blur and scrolling only need a rendered element.
-        if (FOCUS_ONLY.includes(action.kind) ? isHidden(e) : !isVisible(e)) return 'element is not visible';
-        if (!FOCUS_ONLY.includes(action.kind) && e.closest('[inert]')) return 'element is inert';
+        if (!NO_BOX.includes(action.kind)) {
+            if (FOCUS_ONLY.includes(action.kind) ? isHidden(e) : !isVisible(e)) return 'element is not visible';
+            if (!FOCUS_ONLY.includes(action.kind) && e.closest('[inert]')) return 'element is inert';
+        }
         if (NEEDS_ENABLED.includes(action.kind) && isDisabled(e)) return 'element is disabled';
     }
     if ((action.kind === 'fill' || action.kind === 'clear') && !isEditable(e) && !(e.localName === 'input' && ['color', 'range'].includes(e.type))) return 'element is not editable';
@@ -812,6 +870,19 @@ export function perform(steps, action) {
             return null;
         }
         case 'scroll': e.scrollIntoView({ block: 'center' }); return null;
+        case 'files': {
+            const problem = fileInputProblem(e, action.files);
+            if (problem) return problem;
+            const data = new DataTransfer();
+            for (const f of action.files) {
+                const bytes = Uint8Array.from(atob(f.content), c => c.charCodeAt(0));
+                data.items.add(new File([bytes], f.name, { type: f.type, lastModified: f.lastModified }));
+            }
+            e.files = data.files;
+            e.dispatchEvent(new Event('input', { bubbles: true }));
+            e.dispatchEvent(new Event('change', { bubbles: true }));
+            return null;
+        }
         default: return 'unsupported action ' + action.kind;
     }
 }
@@ -853,13 +924,26 @@ function snapshotLines(elements, root, depth, out) {
         let line = '  '.repeat(depth) + '- ' + role;
         const name = accessibleName(e, root);
         if (name) line += ' "' + name.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+        // Same states as AriaSnapshot.States: toggle buttons are pressed; options and tree items are checked only
+        // through aria-checked and selected through aria-selected.
         const states = [];
-        const checked = checkedState(e, role);
-        if (checked !== null) states.push(checked ? 'checked' : 'checked=false');
+        const ariaChecked = (e.getAttribute('aria-checked') ?? '').trim().toLowerCase();
+        if (role === 'button') {
+            const pressed = (e.getAttribute('aria-pressed') ?? '').trim().toLowerCase();
+            if (pressed === 'true') states.push('pressed');
+            else if (pressed === 'false') states.push('pressed=false');
+            else if (pressed === 'mixed') states.push('pressed=mixed');
+        } else if (ariaChecked === 'mixed' && ['checkbox', 'menuitemcheckbox', 'option', 'treeitem'].includes(role)) {
+            states.push('checked=mixed');
+        } else if (!['option', 'treeitem'].includes(role) || e.hasAttribute('aria-checked')) {
+            const checked = checkedState(e, role);
+            if (checked !== null) states.push(checked ? 'checked' : 'checked=false');
+        }
         if (isDisabled(e)) states.push('disabled');
         const expanded = (e.getAttribute('aria-expanded') ?? '').trim().toLowerCase();
         if (expanded === 'true') states.push('expanded');
         else if (expanded === 'false') states.push('expanded=false');
+        if ((e.getAttribute('aria-selected') ?? '').trim().toLowerCase() === 'true') states.push('selected');
         if (role === 'heading') states.push('level=' + headingLevel(e));
         if (states.length) line += ' [' + states.join('] [') + ']';
 

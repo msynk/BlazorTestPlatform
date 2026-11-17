@@ -28,6 +28,38 @@ public sealed class DriverJsonTests
         Assert.True(steps[6].GetProperty("query").GetProperty("exact").GetBoolean());
     }
 
+    [Fact]
+    public void Patterns_role_states_and_filters_serialize_for_the_browser_engine()
+    {
+        var chain = LocatorChain.Start(By.Role("button", namePattern: new System.Text.RegularExpressions.Regex("^Save", System.Text.RegularExpressions.RegexOptions.IgnoreCase), pressed: true, level: 2, includeHidden: true))
+            .Append(new LocatorStep(LocatorStepKind.HasText, Text: "x") { Pattern = new System.Text.RegularExpressions.Regex("x$", System.Text.RegularExpressions.RegexOptions.Multiline) })
+            .Append(new LocatorStep(LocatorStepKind.HasNot) { Inner = LocatorChain.Start(By.Text(new System.Text.RegularExpressions.Regex("a.b", System.Text.RegularExpressions.RegexOptions.Singleline))) });
+
+        using var json = JsonDocument.Parse(DriverJson.Steps(chain));
+        var steps = json.RootElement;
+        var role = steps[0].GetProperty("query");
+
+        Assert.Equal("^Save", role.GetProperty("pattern").GetString());
+        Assert.Equal("i", role.GetProperty("flags").GetString());
+        Assert.True(role.GetProperty("pressed").GetBoolean());
+        Assert.False(role.TryGetProperty("checked", out _));
+        Assert.Equal(2, role.GetProperty("level").GetInt32());
+        Assert.True(role.GetProperty("includeHidden").GetBoolean());
+        Assert.Equal("m", steps[1].GetProperty("flags").GetString());
+        Assert.Equal("hasNot", steps[2].GetProperty("kind").GetString());
+        Assert.Equal("s", steps[2].GetProperty("inner")[0].GetProperty("query").GetProperty("flags").GetString());
+        Assert.Equal("role=button[name=/^Save/i][pressed=true][level=2][include-hidden] >> has-text=/x$/m >> has-not=(text=/a.b/s)", chain.ToString());
+    }
+
+    [Fact]
+    public void Patterns_browsers_cannot_run_are_rejected()
+    {
+        var chain = LocatorChain.Start(By.Text(new System.Text.RegularExpressions.Regex("a # comment", System.Text.RegularExpressions.RegexOptions.IgnorePatternWhitespace)));
+
+        var error = Assert.Throws<NotSupportedException>(() => DriverJson.Steps(chain));
+        Assert.Contains("IgnorePatternWhitespace", error.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(ElementActionKind.DoubleClick, "dblclick")]
     [InlineData(ElementActionKind.SelectOption, "select")]

@@ -284,6 +284,13 @@ public sealed class AccessibilityPolicy
             }
         }
 
+        if (storyOptions?.ReportOnly == true)
+        {
+            // Report-only stories surface every violation as a warning and never fail the gate.
+            warnings.InsertRange(0, failures);
+            failures.Clear();
+        }
+
         return new AccessibilityEvaluation { Failures = failures, Warnings = warnings, Suppressed = suppressed, ExpiredSuppressions = expired.Distinct().ToArray() };
     }
 }

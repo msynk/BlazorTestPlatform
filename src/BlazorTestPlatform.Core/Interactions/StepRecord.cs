@@ -133,6 +133,18 @@ public sealed class StepRecorder
             return true;
         });
 
+    /// <summary>Drops the nested steps of the current step (retrying blocks keep only their last attempt).</summary>
+    internal void ClearCurrentChildren()
+    {
+        if (_current.Value is { } step)
+        {
+            lock (_gate)
+            {
+                step.Children.Clear();
+            }
+        }
+    }
+
     private void Add(StepRecord step)
     {
         if (_current.Value is { } parent)

@@ -1,0 +1,4 @@
+@inject NavigationManager Navigation
+<button @onclick='() => Navigation.NavigateTo("orders/7")'>Open</button>
+<button @onclick='() => Navigation.NavigateTo("orders?page=2", replace: true)'>Page two</button>
+<button @onclick='() => Navigation.NavigateTo("https://example.org/help", forceLoad: true)'>Help</button>

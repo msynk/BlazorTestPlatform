@@ -100,7 +100,42 @@ public static class AriaAttributes
                 return null;
             }
 
-            return ids.Any(id => scope.GetElementById(id) is not null) ? null : $"{name} references id(s) that do not exist: {string.Join(", ", ids)}.";
+            if (!ids.Any(id => scope.GetElementById(id) is not null))
+            {
+                return $"{name} references id(s) that do not exist: {string.Join(", ", ids)}.";
+            }
+
+            return name == "aria-errormessage" ? ErrorMessageProblem(element, ids, scope) : null;
+        }
+
+        return null;
+    }
+
+    // axe-core's aria-errormessage check: while the element is invalid, its error message must be announced, through a
+    // live region (role alert, log or status, or aria-live polite/assertive) or by also being in aria-describedby. A hidden
+    // message is shown only once the field is invalid, so it is not reported.
+    private static string? ErrorMessageProblem(IElement element, string[] ids, DomScope scope)
+    {
+        var invalid = element.GetAttribute("aria-invalid")?.Trim();
+        if (string.IsNullOrEmpty(invalid) || string.Equals(invalid, "false", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var describedBy = (element.GetAttribute("aria-describedby") ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var id in ids)
+        {
+            if (scope.GetElementById(id) is not { } target || DomFacts.IsExcludedFromAccessibilityTree(target, scope))
+            {
+                continue;
+            }
+
+            var role = target.GetAttribute("role")?.Trim().ToLowerInvariant();
+            var live = target.GetAttribute("aria-live")?.Trim().ToLowerInvariant();
+            if (role is not ("alert" or "log" or "status") && live is not ("polite" or "assertive") && !describedBy.Contains(id, StringComparer.Ordinal))
+            {
+                return $"aria-errormessage value `{id}` must use a technique to announce the message (e.g., aria-live, aria-describedby, role=alert, etc.).";
+            }
         }
 
         return null;

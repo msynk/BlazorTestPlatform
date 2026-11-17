@@ -90,6 +90,15 @@ public sealed class BrowserStoryRunner
     public async Task<StoryResult> RunAsync(MatrixCase cell, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(cell);
+
+        // Burn-in (BtpSettings.RepeatEach): every run must pass on its first attempt.
+        var runs = Math.Max(1, _settings.RepeatEach);
+        var result = await BurnIn.RunAsync(runs, _ => RunWithRetriesAsync(cell, cancellationToken)).ConfigureAwait(false);
+        return runs > 1 && result.Outcome == StoryOutcome.Failed ? Write(result) : result;
+    }
+
+    private async Task<StoryResult> RunWithRetriesAsync(MatrixCase cell, CancellationToken cancellationToken)
+    {
         var key = StoryResult.CreateKey(cell.Story.Id, cell.Browser, cell.Viewport.Name, cell.Theme.Name, cell.HostingModel.ToToken());
         using var activity = BtpTelemetry.StartStory(cell.Story, cell.Browser, cell.HostingModel.ToToken(), cell.Viewport.Name, cell.Theme.Name);
         var started = DateTimeOffset.UtcNow;
@@ -207,11 +216,11 @@ public sealed class BrowserStoryRunner
                 visual = await CaptureAsync(page, recorder, story.Play is null ? null : "initial", attempt, timeout.Token).ConfigureAwait(false);
             }
 
-            if (_options.RunPlay && story.Play is { } play)
+            if (_options.RunPlay && story.Play is not null)
             {
                 if (playRuns)
                 {
-                    await recorder.RunAsync("play", StepKind.Step, () => play(context)).ConfigureAwait(false);
+                    await recorder.RunAsync("play", StepKind.Step, context.RunPlayAsync).ConfigureAwait(false);
                     await page.Driver.WaitForIdleAsync(timeout.Token).ConfigureAwait(false);
                 }
                 else

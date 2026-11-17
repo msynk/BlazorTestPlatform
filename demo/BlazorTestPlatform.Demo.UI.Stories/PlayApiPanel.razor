@@ -1,0 +1,115 @@
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Forms
+@namespace BlazorTestPlatform.Demo.UI.Stories
+@inject NavigationManager Navigation
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@implements IDisposable
+
+@* Markup for the play API stories: file inputs, rows with actions, toggles and field states that every driver handles alike. *@
+@* 24px targets: axe's target-size rule runs in every browser. *@
+<style>.play-target { min-height: 24px; min-width: 24px; margin: 2px; }</style>
+@switch (Section)
+{
+    case PlayApiSection.Upload:
+        <label for="play-attachments" class="play-target">Attach files</label>
+        <InputFile id="play-attachments" multiple OnChange="OnFilesChosenAsync" style="position: absolute; width: 1px; height: 1px; opacity: 0;" />
+        <p role="status">@(files.Count == 0 ? "No files" : $"{files.Count} file(s)")</p>
+        <ul aria-label="Chosen files">
+            @foreach (var file in files)
+            {
+                <li>@file</li>
+            }
+        </ul>
+        break;
+
+    case PlayApiSection.Locators:
+        <h2>Orders</h2>
+        <h3>Archived orders</h3>
+        <div role="toolbar" aria-label="Format">
+            <button type="button" class="play-target" aria-pressed="@(bold ? "true" : "false")" @onclick="() => bold = !bold">Bold</button>
+            <button type="button" class="play-target" aria-pressed="false">Italic</button>
+        </div>
+        <ul aria-label="Orders">
+            @foreach (var order in orders)
+            {
+                <li>
+                    <span>Order @order</span>
+                    @if (order % 2 == 0)
+                    {
+                        <button type="button" class="play-target" @onclick="() => orders.Remove(order)">Delete</button>
+                    }
+                </li>
+            }
+        </ul>
+        break;
+
+    case PlayApiSection.Navigation:
+        <button type="button" class="play-target" @onclick='() => Navigation.NavigateTo("orders/42")'>Open order 42</button>
+        <button type="button" class="play-target" @onclick='() => Navigation.NavigateTo("orders?status=open", replace: true)'>Show open orders</button>
+        break;
+
+    case PlayApiSection.Interop:
+        @* A component that wraps a JavaScript observer: JavaScript reports sizes back through [JSInvokable] methods. *@
+        <p role="status">@(size is null ? "Waiting for a size" : $"{size.Value.Width} × {size.Value.Height}")</p>
+        break;
+
+    case PlayApiSection.FieldStates:
+        <label for="play-email">Email</label>
+        <input id="play-email" type="email" required aria-describedby="play-email-hint" aria-invalid="@(Invalid ? "true" : "false")"
+               aria-errormessage="play-email-error" @bind="email" @bind:event="oninput" />
+        <p id="play-email-hint">We only use it for receipts.</p>
+        <p id="play-email-error" role="alert" hidden="@(!Invalid)">Enter a complete address.</p>
+        <span role="checkbox" tabindex="0" aria-checked="mixed" aria-label="Select all orders" class="play-target"></span>
+        break;
+}
+
+@code {
+    private readonly List<string> files = [];
+    private readonly List<int> orders = [11, 12, 13, 14];
+    private bool bold = true;
+    private string email = "ada@";
+
+    /// <summary>The part of the panel to render.</summary>
+    [Parameter] public PlayApiSection Section { get; set; }
+
+    private (int Width, int Height)? size;
+    private Microsoft.JSInterop.DotNetObjectReference<PlayApiPanel>? self;
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && Section == PlayApiSection.Interop && RendererInfo.IsInteractive)
+        {
+            self = Microsoft.JSInterop.DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("playApi.observeSize", self);
+        }
+    }
+
+    /// <summary>Called by JavaScript when the observed size changes.</summary>
+    [Microsoft.JSInterop.JSInvokable]
+    public void OnResize(int width, int height)
+    {
+        size = (width, height);
+        StateHasChanged();
+    }
+
+    /// <summary>Called by JavaScript to read the last size.</summary>
+    [Microsoft.JSInterop.JSInvokable("describe")]
+    public Task<string> DescribeAsync() => Task.FromResult(size is null ? "none" : $"{size.Value.Width}x{size.Value.Height}");
+
+    /// <inheritdoc />
+    public void Dispose() => self?.Dispose();
+
+    private bool Invalid => !email.Contains('@') || email.EndsWith('@');
+
+    private async Task OnFilesChosenAsync(InputFileChangeEventArgs e)
+    {
+        files.Clear();
+        foreach (var file in e.GetMultipleFiles(10))
+        {
+            using var reader = new StreamReader(file.OpenReadStream());
+            files.Add($"{file.Name} ({file.ContentType}, {file.Size} bytes): {await reader.ReadToEndAsync()}");
+        }
+    }
+}

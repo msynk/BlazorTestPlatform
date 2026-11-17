@@ -197,6 +197,53 @@ public sealed class SnapshotStore
         }
     }
 
+    /// <summary>
+    /// Baselines no story uses any more (as Jest's obsolete snapshots and insta's unreferenced ones): the files of a story
+    /// directory whose story was renamed or removed, or that no longer takes snapshots (<c>NoVisual()</c>). Pass every
+    /// story of the catalogs that write into this directory; paths are absolute and sorted.
+    /// </summary>
+    public IReadOnlyList<string> FindOrphanedBaselines(IEnumerable<Story> stories)
+    {
+        ArgumentNullException.ThrowIfNull(stories);
+        if (!Directory.Exists(BaselineDirectory))
+        {
+            return [];
+        }
+
+        var live = stories.Where(s => !s.Visual.Skip).Select(s => s.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return Directory.EnumerateDirectories(BaselineDirectory)
+            .Where(directory => !live.Contains(Path.GetFileName(directory)))
+            .SelectMany(directory => Directory.EnumerateFiles(directory, "*.png", SearchOption.AllDirectories))
+            .Select(Path.GetFullPath)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Deletes <see cref="FindOrphanedBaselines"/> (and story directories left empty) and returns what was deleted. Call it
+    /// only with every story that writes into this directory, or live baselines of the stories left out are deleted.
+    /// </summary>
+    public IReadOnlyList<string> PruneOrphanedBaselines(IEnumerable<Story> stories)
+    {
+        var orphans = FindOrphanedBaselines(stories);
+        lock (_gate)
+        {
+            foreach (var file in orphans)
+            {
+                File.Delete(file);
+                var directory = Path.GetDirectoryName(file)!;
+                while (!string.Equals(Path.TrimEndingDirectorySeparator(directory), Path.TrimEndingDirectorySeparator(Path.GetFullPath(BaselineDirectory)), StringComparison.OrdinalIgnoreCase)
+                    && Directory.Exists(directory) && !Directory.EnumerateFileSystemEntries(directory).Any())
+                {
+                    Directory.Delete(directory);
+                    directory = Path.GetDirectoryName(directory)!;
+                }
+            }
+        }
+
+        return orphans;
+    }
+
     /// <summary>The renderer recorded for <paramref name="key"/> (<c>{browser}-{platform}</c>), or null.</summary>
     public RenderEnvironment? RecordedRenderer(string key)
     {

@@ -20,6 +20,8 @@ internal static class Scripts
     public const string CheckPlan = "async (element, want) => " + Engine + ".checkPlan(element, want)";
 
     /// <summary>Checked state, as JSON, of the last action's target (the locator chain re-resolves it after a re-render).</summary>
+    public const string FileInputProblem = "async (element, count) => " + Engine + ".fileInputProblem(element, new Array(count))";
+
     public const string TargetChecked = "async (steps) => " + Engine + ".targetCheckedJson(steps)";
 
     /// <summary>

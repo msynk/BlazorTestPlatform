@@ -20,6 +20,13 @@ tags as categories (`Category` traits in xUnit), and stories marked `.Skip("why"
 skipped result as the framework's skip, and returns passed results. A run is skipped when its driver lacks a capability
 the story declares (`Requires(...)`, or browser emulation on bUnit) or when play calls `ctx.Require(...)`.
 
+**Evidence in the test result.** For failed, flaky and visually changed runs, `Passed(result)` also attaches the run's
+evidence to the framework's test result: the visual baseline, actual and diff images, the failure screenshot, the DOM
+snapshot and the Playwright trace (`StoryAttachments.For(result)` lists them; files over 25 MB stay in the results
+directory). They then appear in Test Explorer, TRX files and the test views of Azure DevOps and GitHub next to the
+failure: xUnit attachments (`TestContext.Current.AddAttachment`), NUnit test attachments, TUnit artifacts, and MSTest
+result files when you pass the test class's `TestContext`: `StoryDataRows.Passed(result, TestContext)`.
+
 ## xUnit v3
 
 ```csharp

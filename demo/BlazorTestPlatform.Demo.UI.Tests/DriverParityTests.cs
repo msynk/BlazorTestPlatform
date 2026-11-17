@@ -71,6 +71,26 @@ public sealed class DriverParityTests(WorkbenchFixture workbench)
             <div role="option" aria-selected="true">Selected</div><div role="treeitem">Tree</div><div role="menuitemcheckbox">Item</div>
             <button aria-pressed="true">Bold</button><button aria-pressed="mixed">Italic</button>
             """,
+        ["descriptions"] = """
+            <p id="hint">Use <b>8</b> characters</p><p id="rule" hidden>Hidden rule</p><span id="err">Too short</span>
+            <input aria-label="Password" aria-describedby="hint rule missing" aria-invalid="true" aria-errormessage="err">
+            <input aria-label="Valid" aria-invalid="false" aria-errormessage="err"><input aria-label="Grammar" aria-invalid="grammar" aria-errormessage="err hint">
+            <button title="Same">Same</button><button title="Other">Named</button><button title="Only"></button>
+            <button aria-description="  Extra   words ">Described</button><button aria-description="" title="Ignored">Empty</button>
+            <div role="dialog" aria-labelledby="dlg" aria-describedby="dlg-body"><h2 id="dlg">Confirm</h2><p id="dlg-body">Delete <em>all</em> items?</p></div>
+            """,
+        ["role states"] = """
+            <h1>One</h1><h2 aria-level="4">Four</h2><div role="heading" aria-level="3">Three</div><div role="heading">Default two</div>
+            <ul><li aria-level="2">Level item</li><li>Plain item</li></ul>
+            <button aria-pressed="true">Bold</button><button aria-pressed="false">Italic</button><button aria-pressed="mixed">Under</button><button>Plain</button>
+            <button aria-expanded="true">Open menu</button><button aria-expanded="false">Closed menu</button>
+            <div role="tablist"><div role="tab" aria-selected="true">First tab</div><div role="tab" aria-selected="false">Second tab</div><div role="tab">Third tab</div></div>
+            <select aria-label="Pick"><option>A</option><option selected>B</option></select>
+            <input type="checkbox" checked aria-label="On"><input type="checkbox" aria-label="Off"><div role="checkbox" aria-checked="mixed">Mixed</div>
+            <div role="switch" aria-checked="true">Wifi</div><input type="radio" aria-label="Radio">
+            <button disabled>Disabled</button><button hidden>Hidden</button><div aria-hidden="true"><button>Aria hidden</button></div>
+            <ul><li>Row 12 <button>Delete</button></li><li>Row 13</li><li>Row 14 <button>Delete</button> <button>Edit</button></li></ul>
+            """,
         ["state"] = """
             <fieldset disabled>
               <legend>Legend <button>In legend</button><input aria-label="Legend input"></legend>
@@ -136,6 +156,9 @@ public sealed class DriverParityTests(WorkbenchFixture workbench)
         var inBrowser = (await page.Driver.QueryAsync(all, cancellationToken)).Select(Summary).ToArray();
         Assert.Equal(inMemory, inBrowser);
 
+        // The accessibility tree snapshot (ExpectAriaSnapshotAsync) is computed by the same two engines.
+        Assert.Equal(BlazorTestPlatform.Accessibility.AriaSnapshot.Of(scope), await page.Driver.GetAriaSnapshotAsync(cancellationToken));
+
         var mismatches = new List<string>();
         foreach (var chain in Queries(scope))
         {
@@ -187,7 +210,7 @@ public sealed class DriverParityTests(WorkbenchFixture workbench)
     }
 
     private static string Summary(ElementInfo e) =>
-        $"{e.GetAttribute("data-n")} <{e.TagName}> role={e.Role ?? "-"} name=\"{e.AccessibleName}\" text=\"{e.Text}\" enabled={e.IsEnabled} checked={e.IsChecked?.ToString() ?? "-"} editable={e.IsEditable}";
+        $"{e.GetAttribute("data-n")} <{e.TagName}> role={e.Role ?? "-"} name=\"{e.AccessibleName}\" description=\"{e.AccessibleDescription}\" error=\"{e.AccessibleErrorMessage}\" text=\"{e.Text}\" enabled={e.IsEnabled} checked={e.IsChecked?.ToString() ?? "-"} editable={e.IsEditable}";
 
     /// <summary>Role, name, text, label and attribute queries for everything in the fixture, plus chained and filtered ones.</summary>
     private static IEnumerable<LocatorChain> Queries(DomScope scope)
@@ -224,6 +247,44 @@ public sealed class DriverParityTests(WorkbenchFixture workbench)
         queries.Add(LocatorChain.Start(By.Css("div, label")).Append(new LocatorStep(LocatorStepKind.Find, By.Text("a"))));
         queries.Add(LocatorChain.Start(By.Role("button")).Append(new LocatorStep(LocatorStepKind.Nth, Index: -1)));
         queries.Add(LocatorChain.Start(By.Css("*")).Append(new LocatorStep(LocatorStepKind.Nth, Index: 3)));
+
+        // Patterns, role states and has/has-not filters.
+        foreach (var role in described.Select(d => d.Role).OfType<string>().Distinct())
+        {
+            foreach (var state in new bool[] { true, false })
+            {
+                queries.Add(LocatorChain.Start(By.Role(role, isChecked: state)));
+                queries.Add(LocatorChain.Start(By.Role(role, pressed: state)));
+                queries.Add(LocatorChain.Start(By.Role(role, expanded: state)));
+                queries.Add(LocatorChain.Start(By.Role(role, selected: state)));
+                queries.Add(LocatorChain.Start(By.Role(role, disabled: state)));
+            }
+
+            queries.Add(LocatorChain.Start(By.Role(role, includeHidden: true)));
+            queries.Add(LocatorChain.Start(By.Role(role, namePattern: new System.Text.RegularExpressions.Regex("^[A-M]"))));
+            queries.Add(LocatorChain.Start(By.Css("*")).Append(new LocatorStep(LocatorStepKind.Has) { Inner = LocatorChain.Start(By.Role(role)) }));
+            queries.Add(LocatorChain.Start(By.Css("div, p, li, section, fieldset")).Append(new LocatorStep(LocatorStepKind.HasNot) { Inner = LocatorChain.Start(By.Role(role)) }));
+        }
+
+        for (var level = 1; level <= 6; level++)
+        {
+            queries.Add(LocatorChain.Start(By.Role("heading", level: level)));
+            queries.Add(LocatorChain.Start(By.Role("listitem", level: level)));
+        }
+
+        var ignoreCase = System.Text.RegularExpressions.RegexOptions.IgnoreCase;
+        queries.Add(LocatorChain.Start(By.Text(new System.Text.RegularExpressions.Regex("^s", ignoreCase))));
+        queries.Add(LocatorChain.Start(By.Text(new System.Text.RegularExpressions.Regex(@"\d"))));
+        queries.Add(LocatorChain.Start(By.Label(new System.Text.RegularExpressions.Regex("name$", ignoreCase))));
+        queries.Add(LocatorChain.Start(By.Placeholder(new System.Text.RegularExpressions.Regex("^[A-Z]"))));
+        queries.Add(LocatorChain.Start(By.Title(new System.Text.RegularExpressions.Regex("t", ignoreCase))));
+        queries.Add(LocatorChain.Start(By.AltText(new System.Text.RegularExpressions.Regex("."))));
+        queries.Add(LocatorChain.Start(By.Css("*")).Append(new LocatorStep(LocatorStepKind.HasText, Text: "e") { Pattern = new System.Text.RegularExpressions.Regex("e$") }));
+        queries.Add(LocatorChain.Start(By.Css("*")).Append(new LocatorStep(LocatorStepKind.HasNotText, Text: "a") { Pattern = new System.Text.RegularExpressions.Regex("a", ignoreCase) }));
+        queries.Add(LocatorChain.Start(By.Css("*")).Append(new LocatorStep(LocatorStepKind.Has)
+        {
+            Inner = LocatorChain.Start(By.Role("button")).Append(new LocatorStep(LocatorStepKind.Nth, Index: 1)),
+        }));
         return queries.Distinct();
     }
 }

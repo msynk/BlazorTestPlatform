@@ -37,6 +37,8 @@ export function register(dotNetRef, storyId, renderer) {
         getActions: () => dotNetRef.invokeMethodAsync('GetActions'),
         getRequests: () => dotNetRef.invokeMethodAsync('GetHttpRequests'),
         getJSCalls: () => dotNetRef.invokeMethodAsync('GetJSCalls'),
+        getNavigations: () => dotNetRef.invokeMethodAsync('GetNavigations'),
+        invokeDotNet: (sequence, index, method, args) => dotNetRef.invokeMethodAsync('InvokeDotNet', sequence, index, method, args),
         setArgs: (token) => dotNetRef.invokeMethodAsync('SetArgs', token),
         hasFakeTime: () => dotNetRef.invokeMethodAsync('HasFakeTime'),
         advanceTime: (ms) => dotNetRef.invokeMethodAsync('AdvanceTime', ms),

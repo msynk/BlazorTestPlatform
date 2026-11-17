@@ -121,6 +121,20 @@ public sealed class Defaults : IStoryConfiguration
 }
 ```
 
+## Culture and direction
+
+`Culture("de-DE")` renders a story in a culture: dates, numbers and resources format as there. bUnit runs the story under
+it (`CultureInfo.CurrentCulture` and `CurrentUICulture`, for render and play, restored afterwards); browser runs use it as
+the browser locale (`navigator.language`, `Accept-Language`), which WebAssembly follows and Server or static SSR follow
+when the app uses request localization (`app.UseRequestLocalization(...)`). An unknown culture fails when the catalog is
+built. For right-to-left languages pair it with the `rtl` theme (`ThemeDefinition.RightToLeft`, see
+[quality gates](quality-gates.md#visual-regression)).
+
+```csharp
+stories.Add("German totals", s => s.Culture("de-DE").Play(async ctx =>
+    await ctx.Expect(ctx.GetByTestId("total")).ToHaveTextAsync("1.234,50 €")));
+```
+
 ## Tags and filtering
 
 `.Tags("smoke", "!visual")` adds `smoke` and removes `visual`. Filter catalogs in tests with `catalog.WithTag("smoke")`, `WithoutTag`, `WithPlay()`, `ForComponent<T>()` or `Matching("inputs-*")`. The [test framework packages](test-frameworks.md) turn tags into test categories, and `StoryImpact` selects the stories a change can affect ([CI](ci.md#test-impact-analysis)).

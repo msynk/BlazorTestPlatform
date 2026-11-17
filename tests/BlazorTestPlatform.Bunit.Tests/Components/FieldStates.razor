@@ -1,0 +1,15 @@
+@* Static markup exercising the accessibility-state matchers. *@
+<label for="email">Email</label>
+<input id="email" type="email" required aria-describedby="email-hint" aria-invalid="true" aria-errormessage="email-error" class="field field--error wide" value="ada@@" />
+<p id="email-hint">We never share it.</p>
+<p id="email-error">Enter a complete address.</p>
+<button title="Save">Save</button>
+<button title="Saves the draft">Save draft</button>
+<span role="checkbox" aria-checked="mixed" aria-label="All items" aria-required="true"></span>
+<input aria-label="Notes" value="" />
+<div data-testid="empty"> </div>
+<ul>
+    <li>Alpha</li>
+    <li>Beta</li>
+    <li>Gamma</li>
+</ul>

@@ -238,6 +238,19 @@ public sealed class PlaywrightStoryDriver : IStoryDriver
         }
     }
 
+    /// <inheritdoc />
+    public async Task<string?> InvokeDotNetAsync(int sequence, int index, string method, string argumentsJson, CancellationToken cancellationToken) =>
+        await Page.EvaluateAsync<string?>(
+            "async ([sequence, index, method, args]) => { if (!window.__btp || !window.__btp.invokeDotNet) throw new Error('Story bridge not ready'); return await window.__btp.invokeDotNet(sequence, index, method, args); }",
+            new object[] { sequence, index, method, argumentsJson }).ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<NavigationRecord>> GetNavigationsAsync(CancellationToken cancellationToken)
+    {
+        var json = await Page.EvaluateAsync<string?>("async () => window.__btp && window.__btp.getNavigations ? await window.__btp.getNavigations() : '[]'").ConfigureAwait(false);
+        return NavigationLog.ParseJson(json);
+    }
+
     /// <summary>One attempt: resolve the single target and act on it. Returns null when done, or the problem to retry on.</summary>
     private async Task<string?> TryPerformAsync(LocatorChain locator, string steps, string actionJson, ElementAction action, TimeSpan remaining)
     {
@@ -371,6 +384,20 @@ public sealed class PlaywrightStoryDriver : IStoryDriver
             case ElementActionKind.ScrollIntoView:
                 await element.ScrollIntoViewIfNeededAsync(new ElementHandleScrollIntoViewIfNeededOptions { Timeout = ms }).ConfigureAwait(false);
                 break;
+            case ElementActionKind.SetInputFiles:
+            {
+                var files = action.Files ?? [];
+                var problem = await element.EvaluateAsync<string?>(Scripts.FileInputProblem, files.Count).ConfigureAwait(false);
+                if (problem is not null)
+                {
+                    return problem;
+                }
+
+                await element.SetInputFilesAsync(
+                    files.Select(f => new FilePayload { Name = f.Name, MimeType = f.ContentType, Buffer = f.Content.ToArray() }),
+                    new ElementHandleSetInputFilesOptions { Timeout = ms }).ConfigureAwait(false);
+                break;
+            }
             default:
                 throw new NotSupportedException($"Action {action.Kind} is not supported by the Playwright driver.");
         }

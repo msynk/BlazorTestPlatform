@@ -39,6 +39,30 @@ public sealed class StoryTheoryDataTests
     }
 
     [Fact]
+    public async Task Evidence_of_failed_runs_is_attached_to_the_test_result()
+    {
+        var result = await BunitStoryRunner.RunAsync(FrameworkCatalog.Catalog.Get("frameworks-greeting--fails"), FrameworkCatalog.Options);
+        var screenshot = Path.Combine(Path.GetTempPath(), $"btp-attachment-{Guid.NewGuid():N}.png");
+        await File.WriteAllBytesAsync(screenshot, [1, 2, 3], TestContext.Current.CancellationToken);
+        try
+        {
+            var withEvidence = result with { Artifacts = [new ArtifactReference("screenshot", screenshot, "Page at failure"), new ArtifactReference("trace", screenshot + ".missing.zip")] };
+
+            Assert.Throws<StoryFailedException>(() => StoryTheoryData.Passed(withEvidence));
+
+            var attachment = Assert.Single(TestContext.Current.Attachments!);
+            Assert.Equal("screenshot.png", attachment.Key);
+            var (bytes, mediaType) = attachment.Value.AsByteArray();
+            Assert.Equal([1, 2, 3], bytes);
+            Assert.Equal("image/png", mediaType);
+        }
+        finally
+        {
+            File.Delete(screenshot);
+        }
+    }
+
+    [Fact]
     public async Task Skipped_results_are_reported_as_skipped_not_passed()
     {
         var result = await BunitStoryRunner.RunAsync(FrameworkCatalog.Catalog.Get("frameworks-greeting--needs-a-browser"), FrameworkCatalog.Options);

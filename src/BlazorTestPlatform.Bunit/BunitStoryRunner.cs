@@ -20,12 +20,28 @@ namespace BlazorTestPlatform.Bunit;
 /// </example>
 public static class BunitStoryRunner
 {
-    /// <summary>Runs the story and returns its result without throwing on failure.</summary>
+    /// <summary>
+    /// Runs the story and returns its result without throwing on failure. With burn-in (<see cref="BtpSettings.RepeatEach"/>)
+    /// the story runs that many times and fails unless every run passes.
+    /// </summary>
     public static async Task<StoryResult> RunAsync(Story story, BunitStoryOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(story);
         options ??= new BunitStoryOptions();
         var settings = options.Settings ?? BtpSettings.Current;
+        var runs = Math.Max(1, settings.RepeatEach);
+        var result = await BurnIn.RunAsync(runs, _ => RunOnceAsync(story, options, settings, cancellationToken)).ConfigureAwait(false);
+        return runs > 1 && result.Outcome == StoryOutcome.Failed ? Write(options, settings, result) : result;
+    }
+
+    private static async Task<StoryResult> RunOnceAsync(Story story, BunitStoryOptions options, BtpSettings settings, CancellationToken cancellationToken)
+    {
+        // The story's culture flows into rendering and play (both run in this async flow) and ends with it.
+        if (story.Culture is { } culture)
+        {
+            System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.CurrentUICulture = System.Globalization.CultureInfo.GetCultureInfo(culture);
+        }
+
         var started = DateTimeOffset.UtcNow;
         var clock = Stopwatch.StartNew();
         // Runs of one story with a different viewport, theme or args are different results; they must not overwrite each other.

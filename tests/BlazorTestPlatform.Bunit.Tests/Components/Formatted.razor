@@ -1,0 +1,9 @@
+@* Formats with the current culture, as most components do. *@
+<p data-testid="number">@(1234.5m.ToString("N1"))</p>
+<p data-testid="date">@(new DateTime(2030, 1, 31).ToString("d"))</p>
+<p class="contrast-only">High contrast hint</p>
+<button @onclick="() => clicks++">Count @clicks.ToString("N0")</button>
+
+@code {
+    private int clicks = 1000;
+}

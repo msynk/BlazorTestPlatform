@@ -21,6 +21,12 @@ public sealed record MediaEnvironment
     /// <summary><c>prefers-reduced-motion: reduce</c> (browser runs also emulate reduced motion). Default true.</summary>
     public bool ReducedMotion { get; init; } = true;
 
+    /// <summary><c>forced-colors: active</c> (Windows High Contrast).</summary>
+    public bool ForcedColors { get; init; }
+
+    /// <summary><c>prefers-contrast: more</c>.</summary>
+    public bool MoreContrast { get; init; }
+
     /// <summary>Primary input can hover (desktop).</summary>
     public bool Hover { get; init; } = true;
 
@@ -43,6 +49,8 @@ public sealed record MediaEnvironment
             Width = viewport.Width,
             Height = viewport.Height,
             ColorScheme = theme?.ColorScheme == BlazorTestPlatform.ColorScheme.Dark ? "dark" : "light",
+            ForcedColors = theme?.ForcedColors ?? false,
+            MoreContrast = theme?.MoreContrast ?? false,
             Hover = !touch,
             FinePointer = !touch,
         };
@@ -130,7 +138,9 @@ public sealed record MediaEnvironment
                 "pointer" or "any-pointer" => true,
                 "color" or "width" or "height" or "orientation" or "prefers-color-scheme" or "aspect-ratio" or "resolution" => true,
                 "prefers-reduced-motion" => ReducedMotion,
-                "monochrome" or "grid" or "prefers-contrast" or "forced-colors" or "inverted-colors" or "prefers-reduced-transparency" => false,
+                "forced-colors" => ForcedColors,
+                "prefers-contrast" => MoreContrast,
+                "monochrome" or "grid" or "inverted-colors" or "prefers-reduced-transparency" => false,
                 _ => false,
             };
         }
@@ -156,9 +166,9 @@ public sealed record MediaEnvironment
             case "pointer" or "any-pointer":
                 return value == (FinePointer ? "fine" : "coarse");
             case "prefers-contrast":
-                return value == "no-preference";
+                return value == (MoreContrast ? "more" : "no-preference");
             case "forced-colors":
-                return value == "none";
+                return value == (ForcedColors ? "active" : "none");
             case "min-resolution":
                 return value is "1dppx" or "1x" or "96dpi";
             case "max-resolution":

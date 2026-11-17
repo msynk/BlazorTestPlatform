@@ -22,6 +22,17 @@
 | `changed` | Overwrite baselines that differ. |
 | `all` | Rewrite every baseline. |
 
+**Orphaned baselines.** Renaming or removing a story, or turning its snapshots off with `NoVisual()`, leaves baselines
+nobody compares against (Jest's "obsolete snapshots"). `SnapshotStore.FindOrphanedBaselines(catalog.Stories)` lists
+them and `PruneOrphanedBaselines(...)` deletes them; pass every story that writes into the directory. The demo gates on
+it (`BaselineProvenanceTests.Every_baseline_belongs_to_a_story_that_takes_snapshots`).
+
+**Themes for direction and contrast.** `ThemeDefinition.RightToLeft` (`rtl`) renders stories inside `<div dir="rtl">` in
+every driver and sets `dir="rtl"` on the story frame, and `ThemeDefinition.HighContrast` (`high-contrast`) emulates
+`forced-colors: active` and `prefers-contrast: more` in browsers and in bUnit's media queries. Add them to a matrix
+(`WithThemes(ThemeDefinition.Light, ThemeDefinition.RightToLeft)`); the workbench resolves them by name even when they
+are not in its toolbar. Your own themes can set `Direction`, `ForcedColors` and `MoreContrast`.
+
 **Review.** A mismatch writes `expected`, `actual` and `diff` images under `TestResults/btp/visual/`. `btp report` shows them side by side, with a slider overlay. `btp approve [--filter 'inputs-*'] [--dry-run]` promotes the actual images to baselines.
 
 ## Accessibility
@@ -33,7 +44,7 @@ There are two engines, both reporting axe rule ids:
 | Markup rules (`btp-markup`) | bUnit, in milliseconds | 37 rules: names (buttons, links, inputs, images, frames, dialogs...), ARIA validity (roles, attributes, values, required attributes, required children and parents), `aria-hidden` focusability, nested interactive elements, tabindex, duplicate ids, list and definition-list structure, heading order, multiple labels |
 | axe-core (bundled) | Every browser cell, scoped to the story root (`[data-btp-root]`) | Every axe rule with the policy's tags, including color contrast, target size and scrollable regions. Page-level rules (such as `landmark-one-main`) find no page around a story, so they effectively don't apply. |
 
-The markup rules follow axe-core where it does not fail markup: empty id references, `aria-controls` on collapsed disclosures and unselected tabs (whose panels are not rendered), `aria-owns` on collapsed comboboxes, missing `aria-labelledby`/`aria-describedby` targets (axe reports them for review), empty lists, listboxes, menus, tablists, trees and grids, and hidden elements are not violations; `nested-interactive` only checks roles whose children are presentational (buttons, checkboxes, tabs, options...), so links and APG tree items may contain focusable content. The markup engine checks structure only; color contrast, target size and anything else that needs layout run in browsers through axe-core.
+The markup rules follow axe-core where it does not fail markup: empty id references, `aria-controls` on collapsed disclosures and unselected tabs (whose panels are not rendered), `aria-owns` on collapsed comboboxes, missing `aria-labelledby`/`aria-describedby` targets (axe reports them for review), empty lists, listboxes, menus, tablists, trees and grids, and hidden elements are not violations; `nested-interactive` only checks roles whose children are presentational (buttons, checkboxes, tabs, options...), so links and APG tree items may contain focusable content. An invalid field's `aria-errormessage` must be announced (a live region such as `role="alert"`, or also listed in `aria-describedby`), as axe-core requires; a hidden message is not reported. The markup engine checks structure only; color contrast, target size and anything else that needs layout run in browsers through axe-core.
 
 **Policy** (`btp.json` → `accessibility`, or `AccessibilityPolicy` in code):
 
@@ -43,7 +54,7 @@ The markup rules follow axe-core where it does not fail markup: empty id referen
 * `disabledRules`: rules turned off globally.
 * `suppressions`: entries of the form `{ ruleId, storyPattern, targetContains, justification, expires }`. `targetContains` limits a suppression to violations whose elements' selectors all contain the text. A suppression stops applying after its expiry date, so accepted debt resurfaces automatically.
 
-A story can disable a rule only with a written justification: `DisableAccessibilityRule("color-contrast", "Approved by design, #123")`. A rule added through `Accessibility(a => a.DisabledRules.Add(...))` without a justification fails when the catalog is built. Justifications appear in the workbench, and the HTML report lists each run's **waived rules**: the story's disabled rules with their justifications, rules disabled for every story, and the active suppressions that match the story. `AccessibilityPolicy.WaiversFor(storyId, options)` returns the same list. `Accessibility(a => a.Skip = true)` skips every automated check for a story.
+A story can disable a rule only with a written justification: `DisableAccessibilityRule("color-contrast", "Approved by design, #123")`. A rule added through `Accessibility(a => a.DisabledRules.Add(...))` without a justification fails when the catalog is built. Justifications appear in the workbench, and the HTML report lists each run's **waived rules**: the story's disabled rules with their justifications, rules disabled for every story, and the active suppressions that match the story. `AccessibilityPolicy.WaiversFor(storyId, options)` returns the same list. `Accessibility(a => a.Skip = true)` skips every automated check for a story. `Accessibility(a => a.ReportOnly = true)` keeps scanning but turns every violation into a warning (Storybook's a11y `todo`): use it to adopt the gate on components with existing debt, then remove it story by story.
 
 ### Manual review workflow
 

@@ -24,6 +24,12 @@ public sealed record JSCallRecord
     /// <summary>True when a story setup answered the call (always false for calls that reached real JavaScript).</summary>
     public bool Mocked { get; init; }
 
+    /// <summary>
+    /// How many <c>DotNetObjectReference</c> arguments the call passed: JavaScript could call back into .NET through them
+    /// (<see cref="StoryContext.InvokeDotNetAsync"/>).
+    /// </summary>
+    public int DotNetReferences { get; init; }
+
     /// <inheritdoc />
     public override string ToString() =>
         (Module is null ? string.Empty : Module + ":") + Identifier + "(" + string.Join(", ", Arguments.Select(a => a ?? "null")) + ")" + (Mocked ? " [mocked]" : string.Empty);
@@ -33,6 +39,7 @@ public sealed record JSCallRecord
 public sealed class JSCallLog
 {
     private readonly List<JSCallRecord> _calls = [];
+    private readonly Dictionary<int, object[]> _references = [];
     private readonly Lock _gate = new();
 
     /// <summary>Calls in order.</summary>
@@ -60,11 +67,36 @@ public sealed class JSCallLog
                 Module = module,
                 Arguments = (arguments ?? []).Select(Format).ToArray(),
                 Mocked = mocked,
+                DotNetReferences = (arguments ?? []).Count(DotNetCallbacks.IsReference),
             };
             _calls.Add(record);
+            if (record.DotNetReferences > 0)
+            {
+                _references[record.Sequence] = (arguments ?? []).Where(DotNetCallbacks.IsReference).ToArray()!;
+            }
+
             return record;
         }
     }
+
+    /// <summary>The <paramref name="index"/>-th <c>DotNetObjectReference</c> argument of call <paramref name="sequence"/>, or null.</summary>
+    public object? DotNetReference(int sequence, int index = 0)
+    {
+        lock (_gate)
+        {
+            return _references.TryGetValue(sequence, out var references) && index >= 0 && index < references.Length ? references[index] : null;
+        }
+    }
+
+    /// <summary>
+    /// Calls <paramref name="method"/> on the <paramref name="index"/>-th <c>DotNetObjectReference</c> argument of call
+    /// <paramref name="sequence"/> (see <see cref="DotNetCallbacks.InvokeAsync"/>). Run it on the story's renderer.
+    /// </summary>
+    public Task<string?> InvokeDotNetAsync(int sequence, int index, string method, string argumentsJson) =>
+        DotNetCallbacks.InvokeAsync(
+            DotNetReference(sequence, index) ?? throw new ArgumentException($"JavaScript call {sequence} passed no DotNetObjectReference at index {index}.", nameof(index)),
+            method,
+            argumentsJson);
 
     /// <summary>
     /// Formats an argument the same way under every driver: strings as-is, numbers and dates invariant, booleans in
@@ -179,6 +211,11 @@ public sealed class JSCallLog
 
                 writer.WriteEndArray();
                 writer.WriteBoolean("mocked", call.Mocked);
+                if (call.DotNetReferences > 0)
+                {
+                    writer.WriteNumber("dotNetReferences", call.DotNetReferences);
+                }
+
                 writer.WriteEndObject();
             }
 
@@ -213,6 +250,7 @@ public sealed class JSCallLog
                 Module = item.TryGetProperty("module", out var module) ? module.GetString() : null,
                 Arguments = arguments,
                 Mocked = item.TryGetProperty("mocked", out var mocked) && mocked.GetBoolean(),
+                DotNetReferences = item.TryGetProperty("dotNetReferences", out var references) ? references.GetInt32() : 0,
             });
         }
 
@@ -284,7 +322,7 @@ public sealed class JSCallAssertions
                     var matching = all.Where(c => string.Equals(c.Identifier, _identifier, StringComparison.Ordinal) && string.Equals(c.Module, _module, StringComparison.Ordinal)).ToArray();
                     return (evaluate(matching), (Matching: matching, All: all));
                 },
-                timeout ?? _context.DefaultTimeout,
+                _context.AssertionTimeout(timeout),
                 _context.CancellationToken).ConfigureAwait(false);
 
             if (!success)

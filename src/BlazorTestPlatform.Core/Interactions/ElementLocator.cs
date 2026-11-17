@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using BlazorTestPlatform.Drivers;
 
 namespace BlazorTestPlatform;
@@ -26,7 +27,14 @@ public sealed class ElementLocator
     public ElementLocator Locate(string cssSelector) => Locate(By.Css(cssSelector));
 
     /// <summary>Finds descendants by role.</summary>
-    public ElementLocator GetByRole(string role, string? name = null, bool exact = false) => Locate(By.Role(role, name, exact));
+    public ElementLocator GetByRole(string role, string? name = null, bool exact = false, System.Text.RegularExpressions.Regex? namePattern = null, bool? isChecked = null, bool? pressed = null, bool? expanded = null, bool? selected = null, bool? disabled = null, int? level = null, bool includeHidden = false) =>
+        Locate(By.Role(role, name, exact, namePattern, isChecked, pressed, expanded, selected, disabled, level, includeHidden));
+
+    /// <summary>Finds descendants whose text matches <paramref name="pattern"/>.</summary>
+    public ElementLocator GetByText(Regex pattern) => Locate(By.Text(pattern));
+
+    /// <summary>Finds descendants whose label matches <paramref name="pattern"/>.</summary>
+    public ElementLocator GetByLabel(Regex pattern) => Locate(By.Label(pattern));
 
     /// <summary>Finds descendants by text.</summary>
     public ElementLocator GetByText(string text, bool exact = false) => Locate(By.Text(text, exact));
@@ -54,6 +62,34 @@ public sealed class ElementLocator
 
     /// <summary>The last match.</summary>
     public ElementLocator Last => Nth(-1);
+
+    /// <summary>Keeps matches whose text matches <paramref name="hasText"/>.</summary>
+    public ElementLocator Filter(Regex hasText) =>
+        new(_context, Chain.Append(new LocatorStep(LocatorStepKind.HasText, Text: (hasText ?? throw new ArgumentNullException(nameof(hasText))).ToString()) { Pattern = hasText }));
+
+    /// <summary>Keeps matches whose text does not match <paramref name="hasNotText"/>.</summary>
+    public ElementLocator FilterNot(Regex hasNotText) =>
+        new(_context, Chain.Append(new LocatorStep(LocatorStepKind.HasNotText, Text: (hasNotText ?? throw new ArgumentNullException(nameof(hasNotText))).ToString()) { Pattern = hasNotText }));
+
+    /// <summary>
+    /// Keeps matches that contain a descendant <paramref name="has"/> finds, resolved inside each match (Playwright's
+    /// <c>filter({ has })</c>): <c>ctx.GetByRole("listitem").Filter(ctx.GetByRole("button", "Delete"))</c>.
+    /// </summary>
+    public ElementLocator Filter(ElementLocator has) =>
+        new(_context, Chain.Append(new LocatorStep(LocatorStepKind.Has) { Inner = (has ?? throw new ArgumentNullException(nameof(has))).Chain }));
+
+    /// <summary>Keeps matches that contain no descendant <paramref name="hasNot"/> finds (Playwright's <c>filter({ hasNot })</c>).</summary>
+    public ElementLocator FilterNot(ElementLocator hasNot) =>
+        new(_context, Chain.Append(new LocatorStep(LocatorStepKind.HasNot) { Inner = (hasNot ?? throw new ArgumentNullException(nameof(hasNot))).Chain }));
+
+    /// <summary>
+    /// Chooses <paramref name="files"/> in the single matching <c>&lt;input type="file"&gt;</c> (Blazor's <c>InputFile</c>), as
+    /// a person would in the file picker: the input's <c>change</c> event fires and the component reads the files. The
+    /// input may be visually hidden (styled drop zones), but must be enabled; more than one file needs <c>multiple</c>.
+    /// No files clears the selection. bUnit supports <c>InputFile</c> components; browsers support any file input.
+    /// </summary>
+    public Task SetInputFilesAsync(params StoryFile[] files) =>
+        _context.PerformAsync(this, new ElementAction(ElementActionKind.SetInputFiles) { Files = files ?? throw new ArgumentNullException(nameof(files)) }, null);
 
     /// <summary>Keeps matches containing the text.</summary>
     public ElementLocator Filter(string hasText) => new(_context, Chain.Append(new LocatorStep(LocatorStepKind.HasText, Text: hasText)));

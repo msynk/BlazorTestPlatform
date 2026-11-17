@@ -1,0 +1,21 @@
+@* Rows with per-row actions, toggles and headings for locator filters. *@
+<h2>Orders</h2>
+<h3>Archived</h3>
+<button aria-pressed="true">Bold</button>
+<button aria-pressed="false">Italic</button>
+<ul>
+    @foreach (var row in rows)
+    {
+        <li>
+            Order @row
+            @if (row % 2 == 0)
+            {
+                <button @onclick="() => rows.Remove(row)">Delete</button>
+            }
+        </li>
+    }
+</ul>
+
+@code {
+    private readonly List<int> rows = [11, 12, 13, 14];
+}

@@ -109,6 +109,34 @@ public sealed class BunitStoryDriver : IStoryDriver
     }
 
     /// <inheritdoc />
+    public Task<IReadOnlyList<NavigationRecord>> GetNavigationsAsync(CancellationToken cancellationToken)
+    {
+        var records = _renderContext.Navigations.Records;
+        if (_context.Services.GetService(typeof(Microsoft.AspNetCore.Components.NavigationManager)) is not global::Bunit.TestDoubles.BunitNavigationManager navigation)
+        {
+            return Task.FromResult(records);
+        }
+
+        // bUnit's history keeps the options of the entries it did not replace: add them where the target matches.
+        // (History keeps targets as given; an external navigation changes the base URI, so compare as recorded.)
+        var history = navigation.History.Reverse().ToList();
+        var enriched = records.Select(record =>
+        {
+            var index = history.FindIndex(h => string.Equals(h.Uri, record.Uri, StringComparison.Ordinal)
+                || string.Equals(h.Uri.TrimStart('/'), record.RelativeUri, StringComparison.Ordinal));
+            if (index < 0)
+            {
+                return record;
+            }
+
+            var options = history[index].Options;
+            history.RemoveAt(index);
+            return record with { ReplaceHistoryEntry = options.ReplaceHistoryEntry, ForceLoad = options.ForceLoad };
+        }).ToArray();
+        return Task.FromResult<IReadOnlyList<NavigationRecord>>(enriched);
+    }
+
+    /// <inheritdoc />
     public async Task PerformAsync(LocatorChain locator, ElementAction action, TimeSpan timeout, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(locator);
@@ -192,6 +220,9 @@ public sealed class BunitStoryDriver : IStoryDriver
                 await DragAsync(path, action.Target ?? throw new ArgumentException("DragTo requires a target."), timeout, cancellationToken).ConfigureAwait(false);
                 break;
             case ElementActionKind.ScrollIntoView:
+                break;
+            case ElementActionKind.SetInputFiles:
+                await SetInputFilesAsync(locator, path, action.Files ?? []).ConfigureAwait(false);
                 break;
             default:
                 throw new NotSupportedException($"Action {action.Kind} is not supported by the bUnit driver.");
@@ -297,6 +328,16 @@ public sealed class BunitStoryDriver : IStoryDriver
         Task.FromResult(_context.Services.GetService<JSCallLog>()?.Calls ?? (IReadOnlyList<JSCallRecord>)[]);
 
     /// <inheritdoc />
+    public async Task<string?> InvokeDotNetAsync(int sequence, int index, string method, string argumentsJson, CancellationToken cancellationToken)
+    {
+        var log = _context.Services.GetService<JSCallLog>() ?? throw new InvalidOperationException("JavaScript calls are recorded only for stories that mock JavaScript (MockJS).");
+        string? result = null;
+        await _root.InvokeAsync(async () => result = await log.InvokeDotNetAsync(sequence, index, method, argumentsJson).ConfigureAwait(false)).ConfigureAwait(false);
+        await SettleAsync().ConfigureAwait(false);
+        return result;
+    }
+
+    /// <inheritdoc />
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     internal DomScope Scope() => new(_root.Nodes) { Styles = _styles };
@@ -307,8 +348,11 @@ public sealed class BunitStoryDriver : IStoryDriver
     private async Task<string> WaitForActionableAsync(LocatorChain locator, ElementAction action, TimeSpan timeout, CancellationToken cancellationToken)
     {
         var requiresEnabled = action.Kind is ElementActionKind.Click or ElementActionKind.DoubleClick or ElementActionKind.Fill or ElementActionKind.Clear
-            or ElementActionKind.Type or ElementActionKind.Check or ElementActionKind.Uncheck or ElementActionKind.SelectOption;
+            or ElementActionKind.Type or ElementActionKind.Check or ElementActionKind.Uncheck or ElementActionKind.SelectOption or ElementActionKind.SetInputFiles;
         var requiresEditable = action.Kind is ElementActionKind.Fill or ElementActionKind.Clear;
+
+        // Choosing files needs no box: file inputs are often visually hidden behind a styled drop zone.
+        var requiresBox = action.Kind is not ElementActionKind.SetInputFiles;
 
         // Inert content takes neither the pointer nor focus; only focus/blur/scroll make sense on it (as no-ops).
         var requiresInteractive = action.Kind is not (ElementActionKind.Focus or ElementActionKind.Blur or ElementActionKind.ScrollIntoView);
@@ -325,11 +369,11 @@ public sealed class BunitStoryDriver : IStoryDriver
 
                 var element = matches[0];
                 string? problem = null;
-                if (!action.Force && DomFacts.IsHidden(element, scope))
+                if (!action.Force && requiresBox && DomFacts.IsHidden(element, scope))
                 {
                     problem = "element is not visible";
                 }
-                else if (!action.Force && requiresInteractive && DomFacts.IsInert(element))
+                else if (!action.Force && requiresBox && requiresInteractive && DomFacts.IsInert(element))
                 {
                     problem = "element is inert";
                 }
@@ -355,6 +399,44 @@ public sealed class BunitStoryDriver : IStoryDriver
         }
 
         return state.Path!;
+    }
+
+    // bUnit renders no real file input: the InputFile component that rendered the element receives the files, through
+    // the element reference it captured (rendered as blazor:elementReference).
+    private async Task SetInputFilesAsync(LocatorChain locator, string path, IReadOnlyList<StoryFile> files)
+    {
+        var element = ResolvePath(Scope(), path) ?? throw new ElementNotActionableException($"Cannot set input files on {locator}: element was detached.");
+        if (element.LocalName != "input" || !string.Equals(element.GetAttribute("type"), "file", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ElementNotActionableException($"Cannot set input files on {locator}: element is not a file input.{Environment.NewLine}  {DomFacts.Snippet(element)}");
+        }
+
+        if (files.Count > 1 && !element.HasAttribute("multiple"))
+        {
+            throw new ElementNotActionableException($"Cannot set input files on {locator}: the file input does not accept multiple files.");
+        }
+
+        var reference = element.GetAttribute("blazor:elementReference");
+        var inputFile = reference is null
+            ? null
+            : _root.FindComponents<Microsoft.AspNetCore.Components.Forms.InputFile>()
+                .FirstOrDefault(c => c.Instance.Element is { } captured && string.Equals(captured.Id, reference, StringComparison.Ordinal));
+        if (inputFile is null)
+        {
+            throw new ElementNotActionableException(
+                $"Cannot set input files on {locator}: bUnit can only choose files for Blazor's InputFile component; this is a plain file input. " +
+                "Run the story in a browser, or render it with InputFile.");
+        }
+
+        if (files.Count == 0)
+        {
+            // Clearing the selection: browsers fire change with an empty file list (bUnit's UploadFiles needs a file).
+            await _root.InvokeAsync(() => inputFile.Instance.OnChange.InvokeAsync(new Microsoft.AspNetCore.Components.Forms.InputFileChangeEventArgs([]))).ConfigureAwait(false);
+            return;
+        }
+
+        var contents = files.Select(f => InputFileContent.CreateFromBinary(f.Content.ToArray(), f.Name, f.LastModified, f.ContentType)).ToArray();
+        await _root.InvokeAsync(() => inputFile.UploadFiles(contents)).ConfigureAwait(false);
     }
 
     private async Task ClickAsync(string path, KeyModifiers modifiers, MouseButton button, int clickCount)

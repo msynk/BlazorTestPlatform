@@ -91,8 +91,30 @@ public static class AriaSnapshot
     private static List<string> States(IElement element, string role)
     {
         var states = new List<string>();
-        if (DomQueries.CheckedState(element) is { } isChecked)
+        var ariaChecked = element.GetAttribute("aria-checked")?.Trim().ToLowerInvariant();
+        if (role == "button")
         {
+            // Toggle buttons are pressed, not checked.
+            switch (element.GetAttribute("aria-pressed")?.Trim().ToLowerInvariant())
+            {
+                case "true":
+                    states.Add("pressed");
+                    break;
+                case "false":
+                    states.Add("pressed=false");
+                    break;
+                case "mixed":
+                    states.Add("pressed=mixed");
+                    break;
+            }
+        }
+        else if (ariaChecked == "mixed" && role is "checkbox" or "menuitemcheckbox" or "option" or "treeitem")
+        {
+            states.Add("checked=mixed");
+        }
+        else if ((role is not ("option" or "treeitem") || ariaChecked is not null) && DomQueries.CheckedState(element) is { } isChecked)
+        {
+            // Options and tree items are checked only through aria-checked; aria-selected makes them selected.
             states.Add(isChecked ? "checked" : "checked=false");
         }
 
@@ -111,6 +133,11 @@ public static class AriaSnapshot
                 break;
         }
 
+        if (string.Equals(element.GetAttribute("aria-selected")?.Trim(), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            states.Add("selected");
+        }
+
         if (role == "heading")
         {
             states.Add("level=" + HeadingLevel(element).ToString(CultureInfo.InvariantCulture));
@@ -119,7 +146,7 @@ public static class AriaSnapshot
         return states;
     }
 
-    private static int HeadingLevel(IElement element)
+    internal static int HeadingLevel(IElement element)
     {
         if (int.TryParse(element.GetAttribute("aria-level"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var level) && level >= 1)
         {

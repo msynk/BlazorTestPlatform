@@ -38,6 +38,9 @@ public sealed class StoryRenderContext
     /// <summary>Recorded callback invocations.</summary>
     public ActionLog Actions { get; } = new();
 
+    /// <summary>Navigations the story asked for (recorded by the workbench's story host in browsers).</summary>
+    public NavigationLog Navigations { get; } = new();
+
     /// <summary>Seeded random source (from <see cref="Story.Seed"/>).</summary>
     public DeterministicRandom Random { get; }
 

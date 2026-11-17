@@ -16,16 +16,18 @@ public sealed class LocatorAssertions
     private readonly StoryContext _context;
     private readonly ElementLocator _locator;
     private readonly bool _negate;
+    private readonly bool _soft;
 
-    internal LocatorAssertions(StoryContext context, ElementLocator locator, bool negate)
+    internal LocatorAssertions(StoryContext context, ElementLocator locator, bool negate, bool soft = false)
     {
         _context = context;
         _locator = locator;
         _negate = negate;
+        _soft = soft;
     }
 
     /// <summary>Negates the next assertion.</summary>
-    public LocatorAssertions Not => new(_context, _locator, !_negate);
+    public LocatorAssertions Not => new(_context, _locator, !_negate, _soft);
 
     /// <summary>At least one element matches.</summary>
     public Task ToBeAttachedAsync(TimeSpan? timeout = null) =>
@@ -105,6 +107,86 @@ public sealed class LocatorAssertions
     public Task ToHaveAccessibleNameAsync(string expected, TimeSpan? timeout = null) =>
         Single($"to have accessible name \"{expected}\"", e => (TextMatch.Matches(e.AccessibleName, expected, exact: true), Quote(e.AccessibleName)), timeout);
 
+    /// <summary>The locator matches exactly these elements, in order, with these (normalized, exact) texts, as Playwright's <c>toHaveText([...])</c> on a list.</summary>
+    public Task ToHaveTextAsync(IReadOnlyList<string> expected, TimeSpan? timeout = null)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        var wanted = expected.Select(TextMatch.Normalize).ToArray();
+        return CheckAsync(
+            $"to have texts [{string.Join(", ", wanted.Select(Quote))}]",
+            all => (all.Count == wanted.Length && all.Select(e => TextMatch.Normalize(e.Text)).SequenceEqual(wanted, StringComparer.Ordinal),
+                $"[{string.Join(", ", all.Select(e => Quote(TextMatch.Normalize(e.Text))))}]"),
+            timeout);
+    }
+
+    /// <summary>The single matching control's value matches <paramref name="pattern"/>.</summary>
+    public Task ToHaveValueAsync(Regex pattern, TimeSpan? timeout = null) =>
+        Single($"to have value matching /{pattern}/", e => (pattern.IsMatch(e.Value ?? string.Empty), Quote(e.Value)), timeout);
+
+    /// <summary>The single matching element has attribute <paramref name="name"/> with a value matching <paramref name="pattern"/>.</summary>
+    public Task ToHaveAttributeAsync(string name, Regex pattern, TimeSpan? timeout = null) =>
+        Single($"to have attribute {name} matching /{pattern}/", e =>
+        {
+            var actual = e.GetAttribute(name);
+            return (actual is not null && pattern.IsMatch(actual), actual is null ? "(absent)" : Quote(actual));
+        }, timeout);
+
+    /// <summary>The single matching element's whole <c>class</c> attribute matches <paramref name="pattern"/>.</summary>
+    public Task ToHaveClassAsync(Regex pattern, TimeSpan? timeout = null) =>
+        Single($"to have class matching /{pattern}/", e => (pattern.IsMatch(e.GetAttribute("class") ?? string.Empty), Quote(e.GetAttribute("class"))), timeout);
+
+    /// <summary>The single matching element has every one of these classes (space-separated lists are split), in any order, among others.</summary>
+    public Task ToContainClassesAsync(params string[] classNames)
+    {
+        ArgumentNullException.ThrowIfNull(classNames);
+        var wanted = classNames.SelectMany(c => c.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).ToArray();
+        return Single($"to contain classes \"{string.Join(' ', wanted)}\"", e => (wanted.All(e.HasClass), Quote(e.GetAttribute("class"))), null);
+    }
+
+    /// <summary>The single matching element has this <c>id</c>.</summary>
+    public Task ToHaveIdAsync(string id, TimeSpan? timeout = null) =>
+        Single($"to have id \"{id}\"", e => (string.Equals(e.GetAttribute("id"), id, StringComparison.Ordinal), e.GetAttribute("id") is { } actual ? Quote(actual) : "(no id)"), timeout);
+
+    /// <summary>The single matching element is empty: a control or editable element with no value, else an element with no text.</summary>
+    public Task ToBeEmptyAsync(TimeSpan? timeout = null) =>
+        Single("to be empty", e =>
+        {
+            var content = e.TagName is "input" or "textarea" or "select" || e.IsEditable ? e.Value ?? string.Empty : TextMatch.Normalize(e.Text);
+            return (content.Length == 0, content.Length == 0 ? "empty" : Quote(content));
+        }, timeout);
+
+    /// <summary>The single matching element's accessible name matches <paramref name="pattern"/>.</summary>
+    public Task ToHaveAccessibleNameAsync(Regex pattern, TimeSpan? timeout = null) =>
+        Single($"to have accessible name matching /{pattern}/", e => (pattern.IsMatch(e.AccessibleName), Quote(e.AccessibleName)), timeout);
+
+    /// <summary>The single matching element's accessible description (<c>aria-describedby</c>, <c>aria-description</c>, <c>title</c>) is <paramref name="expected"/> (normalized, exact).</summary>
+    public Task ToHaveAccessibleDescriptionAsync(string expected, TimeSpan? timeout = null) =>
+        Single($"to have accessible description \"{expected}\"", e => (TextMatch.Matches(e.AccessibleDescription, expected, exact: true), Quote(e.AccessibleDescription)), timeout);
+
+    /// <summary>The single matching element's accessible description matches <paramref name="pattern"/>.</summary>
+    public Task ToHaveAccessibleDescriptionAsync(Regex pattern, TimeSpan? timeout = null) =>
+        Single($"to have accessible description matching /{pattern}/", e => (pattern.IsMatch(e.AccessibleDescription), Quote(e.AccessibleDescription)), timeout);
+
+    /// <summary>The single matching element is <c>aria-invalid</c> and its <c>aria-errormessage</c> targets read <paramref name="expected"/> (normalized, exact).</summary>
+    public Task ToHaveAccessibleErrorMessageAsync(string expected, TimeSpan? timeout = null) =>
+        Single($"to have accessible error message \"{expected}\"", e => (TextMatch.Matches(e.AccessibleErrorMessage, expected, exact: true), Quote(e.AccessibleErrorMessage)), timeout);
+
+    /// <summary>The single matching element is required: a form control with <c>required</c>, or <c>aria-required="true"</c>.</summary>
+    public Task ToBeRequiredAsync(TimeSpan? timeout = null) =>
+        Single("to be required", e => (IsRequired(e), IsRequired(e) ? "required" : "optional"), timeout);
+
+    /// <summary>The single matching element is marked invalid with <c>aria-invalid</c> (Blazor's input components set it on validation errors).</summary>
+    public Task ToBeInvalidAsync(TimeSpan? timeout = null) =>
+        Single("to be invalid", e => (IsInvalid(e), IsInvalid(e) ? "invalid" : "valid"), timeout);
+
+    /// <summary>The single matching element is partially checked (<c>aria-checked="mixed"</c>; the native <c>indeterminate</c> property is not visible in markup).</summary>
+    public Task ToBePartiallyCheckedAsync(TimeSpan? timeout = null) =>
+        Single("to be partially checked", e =>
+        {
+            var mixed = string.Equals(e.GetAttribute("aria-checked")?.Trim(), "mixed", StringComparison.OrdinalIgnoreCase);
+            return (mixed, mixed ? "mixed" : e.IsChecked switch { true => "checked", false => "unchecked", null => "not checkable" });
+        }, timeout);
+
     /// <summary>The computed ARIA role equals the expected role.</summary>
     public Task ToHaveRoleAsync(string role, TimeSpan? timeout = null) =>
         Single($"to have role \"{role}\"", e => (string.Equals(e.Role, role, StringComparison.OrdinalIgnoreCase), Quote(e.Role)), timeout);
@@ -116,6 +198,15 @@ public sealed class LocatorAssertions
             1 => evaluate(all[0]),
             _ => (false, StrictViolation(all.Count)),
         }, timeout, describeFocus, Strictness.Single);
+
+    // Native required on form controls, or aria-required="true" (as jest-dom's toBeRequired).
+    private static bool IsRequired(ElementInfo e) =>
+        (e.TagName is "input" or "select" or "textarea" && e.GetAttribute("required") is not null)
+        || string.Equals(e.GetAttribute("aria-required")?.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+
+    // aria-invalid set to anything but "false" (Blazor's input components set aria-invalid="true" on validation errors).
+    private static bool IsInvalid(ElementInfo e) =>
+        e.GetAttribute("aria-invalid")?.Trim() is { Length: > 0 } value && !string.Equals(value, "false", StringComparison.OrdinalIgnoreCase);
 
     private static string StrictViolation(int count) => $"strict mode violation: {count} elements match";
 
@@ -134,9 +225,9 @@ public sealed class LocatorAssertions
 
     private Task CheckAsync(string description, Func<IReadOnlyList<ElementInfo>, (bool Pass, string Actual)> evaluate, TimeSpan? timeout, bool describeFocus = false, Strictness strictness = Strictness.None)
     {
-        var effectiveTimeout = timeout ?? _context.DefaultTimeout;
-        var title = $"expect {_locator} {(_negate ? "not " : string.Empty)}{description}";
-        return _context.Recorder.RunAsync(title, StepKind.Assertion, async () =>
+        var effectiveTimeout = _context.AssertionTimeout(timeout);
+        var title = $"expect {(_soft ? "(soft) " : string.Empty)}{_locator} {(_negate ? "not " : string.Empty)}{description}";
+        var check = () => _context.Recorder.RunAsync(title, StepKind.Assertion, async () =>
         {
             var (success, result) = await Poll.UntilAsync(
                 async ct =>
@@ -182,6 +273,7 @@ public sealed class LocatorAssertions
 
             throw new StoryAssertionException(message.ToString());
         });
+        return _soft ? _context.SoftAsync(check) : check();
     }
 
     private static string Quote(string? value) => value is null ? "(null)" : $"\"{value}\"";
@@ -236,7 +328,7 @@ public sealed class ActionAssertions
 
     private Task CheckAsync(string description, Func<IReadOnlyList<ActionRecord>, bool> evaluate, TimeSpan? timeout)
     {
-        var effectiveTimeout = timeout ?? _context.DefaultTimeout;
+        var effectiveTimeout = _context.AssertionTimeout(timeout);
         return _context.Recorder.RunAsync($"expect action {_name} {description}", StepKind.Assertion, async () =>
         {
             var (success, calls) = await Poll.UntilAsync(
@@ -318,7 +410,7 @@ public sealed class HttpRequestAssertions
                     var matching = all.Where(r => HttpMock.Matches(r, _method, _pattern)).ToArray();
                     return (evaluate(matching), (Matching: matching, All: all));
                 },
-                timeout ?? _context.DefaultTimeout,
+                _context.AssertionTimeout(timeout),
                 _context.CancellationToken).ConfigureAwait(false);
 
             if (!success)

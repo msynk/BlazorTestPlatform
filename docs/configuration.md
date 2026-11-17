@@ -9,6 +9,7 @@ Settings are resolved in this order: environment variables, then `btp.json` in t
 | `BTP_UPDATE_SNAPSHOTS` | `none`, `missing`, `changed`, `all` (also `0`/`false` for none, `failed` for changed, `1`/`true` for all) | `missing` locally, `none` on CI |
 | `BTP_UPDATE_PERF` | `1`, `true` or `yes` to record performance baselines | off |
 | `BTP_RETRIES` | integer | 2 on CI, 0 locally |
+| `BTP_REPEAT_EACH` | positive integer (burn-in: every story runs this many times and fails unless every run passes on its first attempt) | 1 |
 | `BTP_DIAGNOSTICS` | `off`, `on-failure`, `always` (also `0`/`false`, `retain-on-failure`/`failure`, `on`/`1`) | `on-failure` |
 | `BTP_TIMEOUT_MS` | auto-wait timeout of assertions and actions in bUnit and Playwright runs (a positive number of milliseconds; anything else is an error) | 5000 |
 | `BTP_SNAPSHOT_DIR` / `BTP_RESULTS_DIR` / `BTP_PERF_BASELINE` / `BTP_REVIEWS_DIR` | paths (an empty value counts as unset) | `__snapshots__`, `TestResults/btp`, `__baselines__/performance.json`, `a11y-reviews` |
@@ -65,7 +66,7 @@ Settings are resolved in this order: environment variables, then `btp.json` in t
 }
 ```
 
-Every key is optional. Two more exist, `updateSnapshots` (`none`, `missing`, `changed`, `all`) and `retries`, but leave them out unless you mean it: a value in `btp.json` replaces the CI-dependent default, so `"updateSnapshots": "missing"` would let CI write missing baselines and `"retries": 0` would turn off retries on CI. Use the environment variables for one-off changes instead.
+Every key is optional. Two more exist, `updateSnapshots` (`none`, `missing`, `changed`, `all`) and `retries`, but leave them out unless you mean it: a value in `btp.json` replaces the CI-dependent default, so `"updateSnapshots": "missing"` would let CI write missing baselines and `"retries": 0` would turn off retries on CI. Use the environment variables for one-off changes instead. `repeatEach` (burn-in, default 1) is safe to set in either place.
 
 In `btp.json`, `diagnostics` takes the enum names `off`, `retainOnFailure` and `always`; the `on-failure` spelling is for `BTP_DIAGNOSTICS` only.
 

@@ -144,6 +144,31 @@ several were confirmed with throwaway harnesses or by running the new regression
 | CI-1 | Azure Pipelines and GitLab guidance, SARIF upload, sharding there | P2 | docs | Implemented | pipeline templates not executed on Azure or GitLab from here | ci.md |
 | CI-2 | Mutation testing guidance (Stryker.NET on the bUnit suite) | P3 | docs | Implemented | — | ci.md |
 
+### Third pass: gaps from a survey of testing tools across stacks
+
+Research and the full gap list, including what was deferred and why: [reports/Testing solutions across stacks.md](../reports/Testing%20solutions%20across%20stacks.md).
+
+| Id | Description | Priority | Packages | Status | Tests | Docs |
+|---|---|---|---|---|---|---|
+| T-1 | ASP.NET Core 10.0.13 pin had a high-severity advisory (NU1903) | P0 | build | Verified | `dotnet build` reports no NU1903 with 10.0.15 | CHANGELOG |
+| T-2 | bUnit set no `RendererInfo`: components reading it threw `MissingRendererInfoException` | P1 | Bunit | Verified | `RendererInfoTests` (both fail without the change) | CHANGELOG |
+| T-3 | Soft assertions (`ExpectSoft`, `SoftAsync`, `RunPlayAsync`) | P1 | Core, Bunit, Playwright, Workbench | Verified | `PlayApiTests.Soft_assertions_*`; demo "Field states" in every driver | interactions.md |
+| T-4 | `ExpectEventuallyAsync`, `ExpectPollAsync`, `ExpectToRemainAsync` | P1 | Core | Verified | `PlayApiTests` (eventually, deadline, poll, remain on fake time) | interactions.md |
+| T-5 | Accessibility-state and structural matchers; description and error message in both engines | P1 | Core, Accessibility, Workbench | Verified | `MatcherTests` (2); `DriverParityTests` "descriptions" fixture in Chromium | interactions.md |
+| T-6 | Role state options, regex queries, `Filter(locator)`/`FilterNot(locator)`, HTML option selectedness | P1 | Core, Accessibility, Workbench, Playwright | Verified | `LocatorTests`, `DriverJsonTests` (serialization, unsupported options); `DriverParityTests` "role states" fixture and pattern/state/has queries for every fixture (found and fixed default-selected options) | interactions.md |
+| T-7 | Accessibility snapshots: patterns, `Contains` matching, `pressed`/`selected`/`mixed` states | P1 | Core, Accessibility, Workbench | Verified | `AriaSnapshotTemplateTests` (11), `AriaSnapshotTests` states; per-fixture snapshot parity in `DriverParityTests` | interactions.md |
+| T-8 | File uploads (`SetInputFilesAsync`) | P1 | Core, Bunit, Playwright, Workbench | Verified | `UploadTests` (3); demo "File upload" under bUnit, Server, WebAssembly, Auto, Firefox, WebKit, in-app | interactions.md |
+| T-9 | Navigation recording and assertions; frames keep their story | P1 | Core, Bunit, Playwright, Workbench | Verified | `NavigationTests` (2; found bUnit's history dropping replaced and external entries); demo "Navigation" in every driver | interactions.md |
+| T-10 | JavaScript calling `[JSInvokable]` methods (`InvokeDotNetAsync`) | P1 | Core, Bunit, Playwright, Workbench | Verified | demo "JavaScript callbacks" in every driver | interactions.md |
+| T-11 | Burn-in (`BTP_REPEAT_EACH`) | P2 | Core, Bunit, Playwright | Verified | `BurnInTests` (3) | ci.md, configuration.md |
+| T-12 | Evidence attached to test framework results | P2 | Core, Xunit, NUnit, MSTest, TUnit | Verified (xUnit, core), Implemented (NUnit, MSTest, TUnit) | `StoryAttachmentsTests`, `StoryTheoryDataTests.Evidence_of_failed_runs_*` | test-frameworks.md |
+| T-13 | CTRF report | P2 | Reporting, Cli | Verified | `ReportingTests.Ctrf_keeps_retries_flaky_runs_and_quarantine` | ci.md |
+| T-14 | Orphaned baselines | P2 | Visual | Verified | `OrphanedBaselineTests`; demo gate | quality-gates.md |
+| T-15 | Report-only accessibility per story | P2 | Core | Verified | `BunitDriverTests.Report_only_accessibility_*` | quality-gates.md |
+| T-16 | Culture per story | P2 | Core, Bunit, Playwright | Verified (bUnit), Implemented (browser locale) | `CultureAndThemeTests` | stories.md |
+| T-17 | Right-to-left and high-contrast themes | P2 | Core, Accessibility, Playwright, Workbench | Verified | `CultureAndThemeTests`; `ThemeEmulationTests` (Chromium, Firefox, WebKit) | quality-gates.md |
+| T-18 | `aria-errormessage` announcement rule in memory (axe found it in a new demo story; bUnit did not) | P2 | Accessibility | Verified | `AccessibilityEngineTests` (6 cases) | quality-gates.md |
+
 ## Verification log
 
 | Date | Command | Result |
@@ -161,6 +186,10 @@ several were confirmed with throwaway harnesses or by running the new regression
 | 2026-11-03 | `dotnet test --project samples/Contoso.UI.Tests -- --filter-class '*CrossHostingTests' --filter-class '*CrossBrowserTests' --filter-class '*InAppPlayTests'` (emulation stories, accessibility tree story) | 221 passed |
 | 2026-11-03 | `dotnet test --project samples/Contoso.UI.Tests` (full suite: bUnit, cross-hosting matrix, visual, axe, in-app play, Firefox, WebKit, driver parity, workbench access, emulation, metrics, inspector) | first run 427 of 429: two Firefox runs timed out at 60 s under full parallel load (open 10 s, axe 11 s; both pass alone). Contexts without emulation then went back to passing no `Permissions` (an empty list made Playwright grant on every context); second run 429 passed. No retries locally (`BTP_RETRIES` defaults to 2 on CI only) |
 | 2026-11-03 | `dotnet pack` Core, Xunit, NUnit, MSTest, TUnit; a consumer project built against the local packages | Core ships `analyzers/dotnet/cs/BlazorTestPlatform.Generators.dll` and `BlazorTestPlatform.CodeFixes.dll`; the consumer build reports BTP003 from the package, with no analyzer load warnings (CS8032/AD0001) |
+| 2026-11-17 | `dotnet build BlazorTestPlatform.slnx -c Release -p:TreatWarningsAsErrors=true` (third pass) | 0 warnings, 0 errors |
+| 2026-11-17 | unit and in-memory suites (12 projects) | 709 tests: 701 passed, 8 skipped by design (Accessibility 168, Bunit 116, Cli 11, Core 240, Generators 18, MSTest 6, NUnit 6, Reporting 42, TUnit 6, Visual 42, Workbench 46, Xunit 8) |
+| 2026-11-17 | trimmed publish with `-warnaserror:IL2026,IL2060,IL2070,IL2072,IL2091`, then the published app in `Production` with `--filter-class '*CrossHostingTests' '*InAppPlayTests' '*ArgControlsTests' '*WorkbenchInspectorTests'` | no trimming warnings; 233 passed (JavaScript callbacks in trimmed WebAssembly included) |
+| 2026-11-17 | `dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests` (full suite with the play API stories, theme emulation, snapshot parity and the orphaned-baseline gate) | 735 passed. An earlier partial run had one Auto-mode sign-up form fill time out under load; it passed on every rerun |
 
 ## Deferred
 

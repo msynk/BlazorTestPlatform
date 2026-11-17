@@ -153,3 +153,30 @@ public sealed class BrowserMetricsTests(WorkbenchFixture workbench)
         }
     }
 }
+
+/// <summary>Right-to-left and high-contrast themes reach the browser: document direction, media emulation and the story.</summary>
+public sealed class ThemeEmulationTests(WorkbenchFixture workbench)
+{
+    [Theory]
+    [InlineData(Browsers.Chromium)]
+    [InlineData(Browsers.Firefox)]
+    [InlineData(Browsers.WebKit)]
+    public async Task Right_to_left_themes_mirror_the_story(string browser)
+    {
+        var cell = new MatrixCase(ComponentStoryTests.Catalog.Get("inputs-button--primary"), Viewport.Desktop, ThemeDefinition.RightToLeft, HostingModel.InteractiveServer, browser);
+        await using var page = await workbench.Environment.Browser.OpenAsync(cell);
+
+        Assert.Equal("rtl", await page.Page.EvaluateAsync<string>("() => document.documentElement.dir"));
+        Assert.Equal("rtl", await page.Page.EvaluateAsync<string>("() => getComputedStyle(document.querySelector('[data-btp-root] button')).direction"));
+    }
+
+    [Fact]
+    public async Task High_contrast_themes_emulate_forced_colors_and_more_contrast()
+    {
+        var cell = new MatrixCase(ComponentStoryTests.Catalog.Get("inputs-button--primary"), Viewport.Desktop, ThemeDefinition.HighContrast, HostingModel.InteractiveServer, Browsers.Chromium);
+        await using var page = await workbench.Environment.Browser.OpenAsync(cell);
+
+        Assert.True(await page.Page.EvaluateAsync<bool>("() => matchMedia('(forced-colors: active)').matches"));
+        Assert.True(await page.Page.EvaluateAsync<bool>("() => matchMedia('(prefers-contrast: more)').matches"));
+    }
+}

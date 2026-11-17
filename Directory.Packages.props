@@ -1,7 +1,7 @@
 <Project>
 
   <PropertyGroup>
-    <AspNetCorePackageVersion>10.0.13</AspNetCorePackageVersion>
+    <AspNetCorePackageVersion>10.0.15</AspNetCorePackageVersion>
   </PropertyGroup>
 
   <ItemGroup Label="ASP.NET Core / Blazor">

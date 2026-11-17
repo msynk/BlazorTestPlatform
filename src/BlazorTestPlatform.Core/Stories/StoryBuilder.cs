@@ -107,6 +107,7 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
     private TestUser? _user;
     private DateTimeOffset? _fakeTime;
     private TimeSpan? _timeout;
+    private string? _culture;
     private string? _skipReason;
     private bool _autoActions = true;
     private readonly List<CapabilityRequirement> _requirements = [];
@@ -500,6 +501,19 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
         return this;
     }
 
+    /// <summary>
+    /// Renders the story in a culture (<c>"de-DE"</c>, <c>"ar-SA"</c>): dates, numbers and resources format as there. bUnit
+    /// sets the current culture and UI culture for the run; browser runs set the browser locale (<c>navigator.language</c>,
+    /// <c>Accept-Language</c>), which WebAssembly follows and Server or static SSR follow when the app uses request
+    /// localization (<c>app.UseRequestLocalization(...)</c>). Pair it with <see cref="ThemeDefinition.RightToLeft"/> for RTL languages.
+    /// </summary>
+    public StoryBuilder<TComponent> Culture(string culture)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(culture);
+        _culture = System.Globalization.CultureInfo.GetCultureInfo(culture, predefinedOnly: true).Name;
+        return this;
+    }
+
     /// <summary>Marks the story as skipped by test runners (it still appears in the workbench).</summary>
     public StoryBuilder<TComponent> Skip(string reason)
     {
@@ -614,6 +628,7 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
             Performance = _performance?.Clone(),
             Matrix = _matrix.Clone(),
             Timeout = _timeout,
+            Culture = _culture,
             SkipReason = _skipReason,
             Metadata = new Dictionary<string, object?>(_metadata),
             Requirements = _emulation.IsEmpty

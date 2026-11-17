@@ -188,7 +188,9 @@ public sealed class WorkbenchBrowser : IAsyncDisposable
                 _ => Microsoft.Playwright.ColorScheme.NoPreference,
             },
             ReducedMotion = ReducedMotion.Reduce,
-            Locale = options.Locale,
+            Locale = cell.Story.Culture is { } culture && options.Locale == StoryPageOptions.DefaultLocale ? culture : options.Locale,
+            ForcedColors = cell.Theme.ForcedColors ? Microsoft.Playwright.ForcedColors.Active : null,
+            Contrast = cell.Theme.MoreContrast ? Microsoft.Playwright.Contrast.More : null,
             TimezoneId = options.TimezoneId,
         }).ConfigureAwait(false);
 
@@ -256,8 +258,11 @@ public sealed class StoryPageOptions
     /// <summary>Prerender interactive modes (default true, like production). Stories that call <c>.Prerender(false)</c> are never prerendered.</summary>
     public bool Prerender { get; set; } = true;
 
-    /// <summary>Locale (deterministic default <c>en-US</c>).</summary>
-    public string Locale { get; set; } = "en-US";
+    /// <summary>The default <see cref="Locale"/>.</summary>
+    public const string DefaultLocale = "en-US";
+
+    /// <summary>Locale (deterministic default <c>en-US</c>; a story's <c>Culture(...)</c> replaces the default).</summary>
+    public string Locale { get; set; } = DefaultLocale;
 
     /// <summary>Time zone (deterministic default <c>UTC</c>).</summary>
     public string TimezoneId { get; set; } = "UTC";

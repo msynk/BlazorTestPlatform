@@ -45,6 +45,10 @@ public sealed class StoryContext
     /// <summary>Cancellation for the whole story.</summary>
     public CancellationToken CancellationToken { get; }
 
+    private readonly List<string> _softFailures = [];
+
+    private readonly AsyncLocal<TimeSpan?> _assertionTimeout = new();
+
     /// <summary>Seeded random source for the play function.</summary>
     public DeterministicRandom Random { get; }
 
@@ -64,10 +68,26 @@ public sealed class StoryContext
     public ElementLocator Locate(string cssSelector) => Get(By.Css(cssSelector));
 
     /// <summary>Locates elements by ARIA role and accessible name.</summary>
-    public ElementLocator GetByRole(string role, string? name = null, bool exact = false) => Get(By.Role(role, name, exact));
+    public ElementLocator GetByRole(string role, string? name = null, bool exact = false, System.Text.RegularExpressions.Regex? namePattern = null, bool? isChecked = null, bool? pressed = null, bool? expanded = null, bool? selected = null, bool? disabled = null, int? level = null, bool includeHidden = false) =>
+        Get(By.Role(role, name, exact, namePattern, isChecked, pressed, expanded, selected, disabled, level, includeHidden));
 
     /// <summary>Locates elements by text.</summary>
     public ElementLocator GetByText(string text, bool exact = false) => Get(By.Text(text, exact));
+
+    /// <summary>Elements whose text matches <paramref name="pattern"/> (innermost match).</summary>
+    public ElementLocator GetByText(System.Text.RegularExpressions.Regex pattern) => Get(By.Text(pattern));
+
+    /// <summary>Form controls whose label matches <paramref name="pattern"/>.</summary>
+    public ElementLocator GetByLabel(System.Text.RegularExpressions.Regex pattern) => Get(By.Label(pattern));
+
+    /// <summary>Inputs whose placeholder matches <paramref name="pattern"/>.</summary>
+    public ElementLocator GetByPlaceholder(System.Text.RegularExpressions.Regex pattern) => Get(By.Placeholder(pattern));
+
+    /// <summary>Images whose alt text matches <paramref name="pattern"/>.</summary>
+    public ElementLocator GetByAltText(System.Text.RegularExpressions.Regex pattern) => Get(By.AltText(pattern));
+
+    /// <summary>Elements whose title attribute matches <paramref name="pattern"/>.</summary>
+    public ElementLocator GetByTitle(System.Text.RegularExpressions.Regex pattern) => Get(By.Title(pattern));
 
     /// <summary>Locates form controls by label.</summary>
     public ElementLocator GetByLabel(string text, bool exact = false) => Get(By.Label(text, exact));
@@ -145,6 +165,245 @@ public sealed class StoryContext
         }).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Soft assertions on <paramref name="locator"/>: a failure is recorded in the timeline and in
+    /// <see cref="SoftFailures"/>, and the play script continues. The story still fails when play ends
+    /// (<see cref="RunPlayAsync"/>), with every soft failure listed, as Playwright's <c>expect.soft</c>.
+    /// </summary>
+    public LocatorAssertions ExpectSoft(ElementLocator locator) => new(this, locator ?? throw new ArgumentNullException(nameof(locator)), negate: false, soft: true);
+
+    /// <summary>Soft assertions on the elements <paramref name="query"/> finds (see <see cref="ExpectSoft(ElementLocator)"/>).</summary>
+    public LocatorAssertions ExpectSoft(By query) => ExpectSoft(Get(query));
+
+    /// <summary>
+    /// Runs any assertion softly: a <see cref="StoryAssertionException"/> it throws is recorded in
+    /// <see cref="SoftFailures"/> instead of stopping the play script
+    /// (<c>await ctx.SoftAsync(() =&gt; ctx.ExpectAction("OnSave").ToHaveBeenCalledAsync())</c>). Skips, cancellation and
+    /// other exceptions still propagate.
+    /// </summary>
+    public async Task SoftAsync(Func<Task> assertion)
+    {
+        ArgumentNullException.ThrowIfNull(assertion);
+        try
+        {
+            await assertion().ConfigureAwait(false);
+        }
+        catch (StoryAssertionException ex)
+        {
+            lock (_softFailures)
+            {
+                _softFailures.Add(ex.Message);
+            }
+        }
+    }
+
+    /// <summary>Messages of the soft assertions that failed so far, in order.</summary>
+    public IReadOnlyList<string> SoftFailures
+    {
+        get
+        {
+            lock (_softFailures)
+            {
+                return _softFailures.ToArray();
+            }
+        }
+    }
+
+    /// <summary>Throws one <see cref="StoryAssertionException"/> listing every failed soft assertion, if any.</summary>
+    public void ThrowIfSoftFailures()
+    {
+        var failures = SoftFailures;
+        if (failures.Count == 0)
+        {
+            return;
+        }
+
+        var message = new System.Text.StringBuilder()
+            .Append(failures.Count == 1 ? "1 soft assertion failed:" : $"{failures.Count} soft assertions failed:");
+        for (var i = 0; i < failures.Count; i++)
+        {
+            message.AppendLine().Append(i + 1).Append(". ").Append(failures[i].Replace("\n", "\n   ", StringComparison.Ordinal));
+        }
+
+        throw new StoryAssertionException(message.ToString());
+    }
+
+    /// <summary>
+    /// Runs the story's play function (if any), then fails with every soft assertion that failed during it. Runners call
+    /// this; a hard failure during play propagates unchanged (its soft failures stay visible as failed timeline steps).
+    /// </summary>
+    public async Task RunPlayAsync()
+    {
+        if (Story.Play is { } play)
+        {
+            await play(this).ConfigureAwait(false);
+        }
+
+        ThrowIfSoftFailures();
+    }
+
+    /// <summary>
+    /// Retries <paramref name="assertion"/> until it completes without throwing, or fails with its last error after
+    /// <paramref name="timeout"/> (default <see cref="DefaultTimeout"/>), as Playwright's <c>toPass</c>. Assertions inside
+    /// make a single check per attempt unless they pass their own timeout, so the whole block shares one deadline. Only the
+    /// last attempt's steps are kept in the timeline.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// await ctx.ExpectEventuallyAsync(async () =>
+    /// {
+    ///     await ctx.GetByRole("button", "Refresh").ClickAsync();
+    ///     await ctx.Expect(ctx.GetByText("Ready")).ToBeVisibleAsync();
+    /// });
+    /// </code>
+    /// </example>
+    public Task ExpectEventuallyAsync(Func<Task> assertion, TimeSpan? timeout = null, string? description = null)
+    {
+        ArgumentNullException.ThrowIfNull(assertion);
+        var limit = timeout ?? DefaultTimeout;
+        return Recorder.RunAsync($"expect eventually{(description is null ? string.Empty : " " + description)}", StepKind.Assertion, async () =>
+        {
+            var previous = _assertionTimeout.Value;
+            _assertionTimeout.Value = TimeSpan.Zero;
+            try
+            {
+                Exception? last = null;
+                var (success, _) = await Poll.UntilAsync(
+                    async _ =>
+                    {
+                        Recorder.ClearCurrentChildren();
+                        try
+                        {
+                            await assertion().ConfigureAwait(false);
+                            return (true, true);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException and not StorySkippedException)
+                        {
+                            last = ex;
+                            return (false, false);
+                        }
+                    },
+                    limit,
+                    CancellationToken).ConfigureAwait(false);
+                if (!success)
+                {
+                    throw new StoryAssertionException(
+                        $"Expected {description ?? "the block"} to pass within {limit.TotalMilliseconds:0} ms.{Environment.NewLine}  Last error: {last?.Message}",
+                        last!);
+                }
+            }
+            finally
+            {
+                _assertionTimeout.Value = previous;
+            }
+        });
+    }
+
+    /// <summary>
+    /// Polls <paramref name="probe"/> until <paramref name="predicate"/> accepts its value, as Playwright's
+    /// <c>expect.poll</c>. Use it for state the DOM does not show (a service, a store, a mock):
+    /// <c>await ctx.ExpectPollAsync(() =&gt; Task.FromResult(cart.Count), n =&gt; n == 3, "the cart to hold 3 items")</c>.
+    /// </summary>
+    public Task ExpectPollAsync<T>(Func<Task<T>> probe, Func<T, bool> predicate, string description, TimeSpan? timeout = null)
+    {
+        ArgumentNullException.ThrowIfNull(probe);
+        ArgumentNullException.ThrowIfNull(predicate);
+        ArgumentException.ThrowIfNullOrEmpty(description);
+        var limit = AssertionTimeout(timeout);
+        return Recorder.RunAsync($"expect {description}", StepKind.Assertion, async () =>
+        {
+            var (success, last) = await Poll.UntilAsync(
+                async _ =>
+                {
+                    var value = await probe().ConfigureAwait(false);
+                    return (predicate(value), value);
+                },
+                limit,
+                CancellationToken).ConfigureAwait(false);
+            if (!success)
+            {
+                throw new StoryAssertionException($"Expected {description}.{Environment.NewLine}  Last value: {Format(last)} (waited {limit.TotalMilliseconds:0} ms)");
+            }
+        });
+    }
+
+    /// <summary>
+    /// Checks that <paramref name="assertion"/> keeps passing for <paramref name="duration"/> (Kotest's
+    /// <c>continually</c>), e.g. "the tooltip stays closed for 500 ms". When the story uses fake time and the driver can
+    /// advance it, the duration is advanced on the story's clock in small steps, so the check is instant and
+    /// deterministic; otherwise it waits in real time. Assertions inside make a single check each time.
+    /// </summary>
+    public Task ExpectToRemainAsync(Func<Task> assertion, TimeSpan duration, string? description = null)
+    {
+        ArgumentNullException.ThrowIfNull(assertion);
+        if (duration <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(duration), duration, "Must be positive.");
+        }
+
+        return Recorder.RunAsync($"expect {description ?? "block"} to remain true for {duration.TotalMilliseconds:0} ms", StepKind.Assertion, async () =>
+        {
+            var previous = _assertionTimeout.Value;
+            _assertionTimeout.Value = TimeSpan.Zero;
+            try
+            {
+                var fakeTime = Supports(DriverCapabilities.FakeTime) && Story.FakeTimeStart is not null;
+                var step = TimeSpan.FromTicks(Math.Max(TimeSpan.TicksPerMillisecond, Math.Min(TimeSpan.FromMilliseconds(50).Ticks, duration.Ticks / 10)));
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                var elapsed = TimeSpan.Zero;
+                while (true)
+                {
+                    Recorder.ClearCurrentChildren();
+                    try
+                    {
+                        await assertion().ConfigureAwait(false);
+                    }
+                    catch (StoryAssertionException ex)
+                    {
+                        throw new StoryAssertionException(
+                            $"Expected {description ?? "the block"} to remain true for {duration.TotalMilliseconds:0} ms, but it failed after {elapsed.TotalMilliseconds:0} ms.{Environment.NewLine}  {ex.Message}",
+                            ex);
+                    }
+
+                    if (elapsed >= duration)
+                    {
+                        return;
+                    }
+
+                    var next = elapsed + step > duration ? duration - elapsed : step;
+                    if (fakeTime)
+                    {
+                        await Driver.AdvanceTimeAsync(next, CancellationToken).ConfigureAwait(false);
+                        elapsed += next;
+                    }
+                    else
+                    {
+                        await Task.Delay(next, CancellationToken).ConfigureAwait(false);
+                        elapsed = clock.Elapsed;
+                    }
+                }
+            }
+            finally
+            {
+                _assertionTimeout.Value = previous;
+            }
+        });
+    }
+
+    /// <summary>
+    /// The auto-wait timeout of an assertion: its own, else a single check inside <see cref="ExpectEventuallyAsync"/> and
+    /// <see cref="ExpectToRemainAsync"/>, else <see cref="DefaultTimeout"/>.
+    /// </summary>
+    internal TimeSpan AssertionTimeout(TimeSpan? timeout) => timeout ?? _assertionTimeout.Value ?? DefaultTimeout;
+
+    private static string Format<T>(T value) => value switch
+    {
+        null => "(null)",
+        string text => $"\"{text}\"",
+        System.Collections.IEnumerable items => "[" + string.Join(", ", items.Cast<object?>().Select(i => i?.ToString() ?? "null")) + "]",
+        _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+    };
+
     /// <summary>Records a named step that groups the actions/assertions inside it on the timeline.</summary>
     public Task StepAsync(string name, Func<Task> body) => Recorder.RunAsync(name, StepKind.Step, body);
 
@@ -166,6 +425,11 @@ public sealed class StoryContext
     /// (generic containers flattened), as <c>- role "name" [state]</c>, children indented by two spaces under a line
     /// ending in <c>:</c>. Indentation common to all lines, blank lines and trailing spaces are ignored. On failure the
     /// message shows the actual tree, ready to paste. Equal under bUnit, Playwright and the in-app driver.
+    /// <para>
+    /// Names can be patterns (<c>- link /Order \d+/</c>). With <see cref="AriaSnapshotMatch.Contains"/> the expected tree only
+    /// has to be part of the actual one (Playwright's partial matching): leave out nodes, names and states you do not care
+    /// about, and add <c>- /children: equal</c> under a node whose children must all be listed. See <see cref="AriaSnapshotTemplate"/>.
+    /// </para>
     /// </summary>
     /// <example>
     /// <code>
@@ -176,24 +440,25 @@ public sealed class StoryContext
     ///     """);
     /// </code>
     /// </example>
-    public Task ExpectAriaSnapshotAsync(string expected, TimeSpan? timeout = null)
+    public Task ExpectAriaSnapshotAsync(string expected, TimeSpan? timeout = null, AriaSnapshotMatch match = AriaSnapshotMatch.Exact)
     {
         ArgumentNullException.ThrowIfNull(expected);
         var wanted = NormalizeSnapshot(expected);
-        return Recorder.RunAsync("expect accessibility tree to match", StepKind.Assertion, async () =>
+        AriaSnapshotTemplate.Validate(wanted);
+        return Recorder.RunAsync(match == AriaSnapshotMatch.Exact ? "expect accessibility tree to match" : "expect accessibility tree to contain", StepKind.Assertion, async () =>
         {
             var (success, actual) = await Poll.UntilAsync(
                 async ct =>
                 {
                     var snapshot = NormalizeSnapshot(await Driver.GetAriaSnapshotAsync(ct).ConfigureAwait(false));
-                    return (snapshot == wanted, snapshot);
+                    return (AriaSnapshotTemplate.Matches(snapshot, wanted, match), snapshot);
                 },
-                timeout ?? DefaultTimeout,
+                AssertionTimeout(timeout),
                 CancellationToken).ConfigureAwait(false);
             if (!success)
             {
                 throw new StoryAssertionException(
-                    $"Expected the accessibility tree to match.{Environment.NewLine}Expected:{Environment.NewLine}{Indent(wanted)}{Environment.NewLine}" +
+                    $"Expected the accessibility tree to {(match == AriaSnapshotMatch.Exact ? "match" : "contain")}.{Environment.NewLine}Expected:{Environment.NewLine}{Indent(wanted)}{Environment.NewLine}" +
                     $"Actual:{Environment.NewLine}{Indent(actual)}{Environment.NewLine}Driver: {Driver.Name}");
             }
         });
@@ -240,6 +505,25 @@ public sealed class StoryContext
     /// <param name="pattern">URL pattern, as in <see cref="HttpMock.When(HttpMethod?, string)"/>.</param>
     public HttpRequestAssertions ExpectRequest(string? method, string pattern) => new(this, method, pattern);
 
+    /// <summary>
+    /// Assertions on the navigations the story asked for, by target: a path relative to the app (<c>/orders/42</c>, with
+    /// <c>*</c> wildcards; the query is compared only when the pattern has one) or an absolute URL.
+    /// <c>await ctx.ExpectNavigation("/orders/*").ToHaveNavigatedAsync()</c>. In browsers the workbench stops navigations
+    /// that would leave the story frame, so the story stays on screen after the assertion.
+    /// </summary>
+    public NavigationAssertions ExpectNavigation(string pattern)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(pattern);
+        return NavigationAssertions.For(this, pattern);
+    }
+
+    /// <summary>Assertions on navigations whose target, as <c>/relative/path?query#fragment</c>, matches <paramref name="pattern"/>.</summary>
+    public NavigationAssertions ExpectNavigation(System.Text.RegularExpressions.Regex pattern) =>
+        NavigationAssertions.For(this, pattern ?? throw new ArgumentNullException(nameof(pattern)));
+
+    /// <summary>The navigations the story asked for so far.</summary>
+    public Task<IReadOnlyList<NavigationRecord>> GetNavigationsAsync() => Driver.GetNavigationsAsync(CancellationToken);
+
     /// <summary>Requests answered by the story's <see cref="HttpMock"/>.</summary>
     public Task<IReadOnlyList<HttpRequestRecord>> GetHttpRequestsAsync() => Driver.GetHttpRequestsAsync(CancellationToken);
 
@@ -249,6 +533,32 @@ public sealed class StoryContext
     /// under every driver.
     /// </summary>
     public JSCallAssertions ExpectJSCall(string identifier, string? module = null) => new(this, identifier, module);
+
+    /// <summary>
+    /// Plays the JavaScript side of interop: calls the <c>[JSInvokable]</c> <paramref name="method"/> of the
+    /// <c>DotNetObjectReference</c> the component passed in its latest call to <paramref name="identifier"/>, with
+    /// <paramref name="arguments"/>, on the story's renderer, then waits for it to settle. Use it for components that wrap
+    /// a JavaScript widget or observer: <c>await ctx.InvokeDotNetAsync("resizeObserver.observe", "OnResize", 320, 200)</c>.
+    /// The call must be recorded, so mock it (<c>MockJS</c>). Works in bUnit, Playwright and the in-app driver; returns
+    /// the method's result as JSON (null for none).
+    /// </summary>
+    public async Task<string?> InvokeDotNetAsync(string identifier, string method, params object?[] arguments)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(identifier);
+        ArgumentException.ThrowIfNullOrEmpty(method);
+        ArgumentNullException.ThrowIfNull(arguments);
+        var json = DotNetCallbacks.ArgumentsToJson(arguments);
+        return await Recorder.RunAsync($"invoke .NET {method} via {identifier}", StepKind.Action, async () =>
+        {
+            var calls = await Driver.GetJSCallsAsync(CancellationToken).ConfigureAwait(false);
+            var call = calls.LastOrDefault(c => string.Equals(c.Identifier, identifier, StringComparison.Ordinal) && c.DotNetReferences > 0)
+                ?? throw new StoryAssertionException(
+                    $"No call to {identifier} passed a DotNetObjectReference.{Environment.NewLine}  Calls: {(calls.Count == 0 ? "none (mock the call with MockJS so it is recorded)" : string.Join(", ", calls.Select(c => c.ToString())))}");
+            var result = await Driver.InvokeDotNetAsync(call.Sequence, 0, method, json, CancellationToken).ConfigureAwait(false);
+            await Driver.WaitForIdleAsync(CancellationToken).ConfigureAwait(false);
+            return result;
+        }).ConfigureAwait(false);
+    }
 
     /// <summary>JavaScript-interop calls recorded for the story (stories that declare <c>MockJS(...)</c>).</summary>
     public Task<IReadOnlyList<JSCallRecord>> GetJSCallsAsync() => Driver.GetJSCallsAsync(CancellationToken);

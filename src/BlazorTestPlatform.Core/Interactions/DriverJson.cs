@@ -42,6 +42,7 @@ public static class DriverJson
                 ElementActionKind.PointerUp => "pointerup",
                 ElementActionKind.DragTo => "drag",
                 ElementActionKind.ScrollIntoView => "scroll",
+                ElementActionKind.SetInputFiles => "files",
                 _ => throw new NotSupportedException(action.Kind.ToString()),
             });
             if (action.Text is not null)
@@ -56,6 +57,22 @@ public static class DriverJson
             }
 
             writer.WriteEndArray();
+            if (action.Files is { } files)
+            {
+                writer.WriteStartArray("files");
+                foreach (var file in files)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("name", file.Name);
+                    writer.WriteString("type", file.ContentType);
+                    writer.WriteNumber("lastModified", file.LastModified.ToUnixTimeMilliseconds());
+                    writer.WriteBase64String("content", file.Content.Span);
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteEndArray();
+            }
+
             writer.WriteNumber("modifiers", (int)action.Modifiers);
             writer.WriteNumber("button", action.Button switch { MouseButton.Middle => 1, MouseButton.Right => 2, _ => 0 });
             writer.WriteBoolean("force", action.Force);
@@ -97,10 +114,18 @@ public static class DriverJson
                 case LocatorStepKind.HasText:
                     writer.WriteString("kind", "hasText");
                     writer.WriteString("text", step.Text);
+                    WritePattern(writer, step.Pattern);
                     break;
                 case LocatorStepKind.HasNotText:
                     writer.WriteString("kind", "hasNotText");
                     writer.WriteString("text", step.Text);
+                    WritePattern(writer, step.Pattern);
+                    break;
+                case LocatorStepKind.Has:
+                case LocatorStepKind.HasNot:
+                    writer.WriteString("kind", step.Kind == LocatorStepKind.Has ? "has" : "hasNot");
+                    writer.WritePropertyName("inner");
+                    WriteSteps(writer, step.Inner!);
                     break;
             }
 
@@ -132,6 +157,17 @@ public static class DriverJson
                 }
 
                 writer.WriteBoolean("exact", role.Exact);
+                WriteState(writer, "checked", role.Checked);
+                WriteState(writer, "pressed", role.Pressed);
+                WriteState(writer, "expanded", role.Expanded);
+                WriteState(writer, "selected", role.Selected);
+                WriteState(writer, "disabled", role.Disabled);
+                if (role.Level is { } level)
+                {
+                    writer.WriteNumber("level", level);
+                }
+
+                writer.WriteBoolean("includeHidden", role.IncludeHidden);
                 break;
             case TextQuery text:
                 Text(writer, "text", text.Value, text.Exact);
@@ -157,7 +193,37 @@ public static class DriverJson
                 throw new NotSupportedException($"Query type '{query.GetType().Name}' is not supported.");
         }
 
+        WritePattern(writer, query.Pattern);
         writer.WriteEndObject();
+    }
+
+    private static void WriteState(Utf8JsonWriter writer, string name, bool? value)
+    {
+        if (value is { } set)
+        {
+            writer.WriteBoolean(name, set);
+        }
+    }
+
+    // A .NET pattern runs as a JavaScript RegExp in browsers: only options with a JavaScript flag are allowed.
+    private static void WritePattern(Utf8JsonWriter writer, System.Text.RegularExpressions.Regex? pattern)
+    {
+        if (pattern is null)
+        {
+            return;
+        }
+
+        const System.Text.RegularExpressions.RegexOptions Portable = System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            | System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.Singleline
+            | System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.CultureInvariant;
+        if ((pattern.Options & ~Portable) != 0)
+        {
+            throw new NotSupportedException(
+                $"Locator pattern /{pattern}/ uses {pattern.Options & ~Portable}, which browser drivers cannot run as a JavaScript RegExp. Use IgnoreCase, Multiline or Singleline only.");
+        }
+
+        writer.WriteString("pattern", pattern.ToString());
+        writer.WriteString("flags", TextMatch.Flags(pattern));
     }
 
     private static void Text(Utf8JsonWriter writer, string type, string value, bool exact)

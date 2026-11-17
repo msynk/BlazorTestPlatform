@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Play API, drivers and CI from a survey of testing tools across stacks
+
+Informed by a survey of JavaScript, JVM, Apple, Flutter, Python, Go, Rust, Elixir and .NET testing tools (`reports/Testing solutions across stacks.md`), which also lists what was deliberately left for later.
+
+* **Soft assertions**: `ctx.ExpectSoft(locator)` and `ctx.SoftAsync(() => ...)` record a failure and let the play script continue; the story fails when play ends, with every soft failure listed (`ctx.SoftFailures`). Runners call the new `StoryContext.RunPlayAsync()`.
+* **Retrying, polling and lasting assertions**: `ctx.ExpectEventuallyAsync(block)` (Playwright's `toPass`; inner assertions check once per attempt and only the last attempt stays in the timeline), `ctx.ExpectPollAsync(probe, predicate, description)` (`expect.poll`) and `ctx.ExpectToRemainAsync(assertion, duration)` (Kotest's `continually`, advanced on the fake clock when the story uses one).
+* **New matchers**: `ToHaveAccessibleDescriptionAsync`, `ToHaveAccessibleErrorMessageAsync`, `ToBeRequiredAsync`, `ToBeInvalidAsync`, `ToBePartiallyCheckedAsync`, `ToBeEmptyAsync`, `ToHaveIdAsync`, `ToContainClassesAsync`, `ToHaveTextAsync(string[])` for lists, and regex overloads of `ToHaveValueAsync`, `ToHaveAttributeAsync`, `ToHaveClassAsync` and `ToHaveAccessibleNameAsync`. `ElementInfo` carries `AccessibleDescription` and `AccessibleErrorMessage`, computed by both engines.
+* **Locators**: role queries filter by state (`isChecked`, `pressed`, `expanded`, `selected`, `disabled`, `level`, `includeHidden`) and by a name pattern (`namePattern`); text, label, placeholder, alt-text and title queries take a `Regex`; `Filter(locator)` / `FilterNot(locator)` keep matches that contain (or do not contain) a descendant, and `Filter(Regex)` / `FilterNot(Regex)` match text. Both engines implement them; `DriverParityTests` compares them in a real browser. Patterns browsers cannot run as a JavaScript `RegExp` are rejected with an explanation.
+* **Accessibility tree snapshots**: names can be patterns (`- link /Order \d+/`), `AriaSnapshotMatch.Contains` matches a partial tree at any depth (Playwright's partial matching) with `- /children: equal` for nodes whose children must all be listed, and `AriaSnapshotTemplate` exposes the matcher. Toggle buttons now report `pressed`/`pressed=false`/`pressed=mixed` (not `checked`), `aria-selected="true"` reports `selected`, and `aria-checked="mixed"` reports `checked=mixed`.
+* **File uploads**: `locator.SetInputFilesAsync(StoryFile...)` chooses files in a file input (Blazor's `InputFile`) in bUnit, Playwright and the in-app driver; no files clears the choice.
+* **Navigation**: `ctx.ExpectNavigation("/orders/*")` (`ToHaveNavigatedAsync`, `NotToHaveNavigatedAsync`, `ToBeTheLastNavigationAsync`) and `ctx.GetNavigationsAsync()` in every driver. In browsers the workbench records navigations and stops those that would leave the story frame.
+* **JavaScript calling .NET**: `ctx.InvokeDotNetAsync(identifier, method, args)` calls the `[JSInvokable]` methods of the `DotNetObjectReference` a component passed to a (mocked) JavaScript call, on the story's renderer, in every driver. JS call records count their `DotNetReferences`.
+* **Render modes in bUnit**: `BunitStoryOptions.RendererInfo` (default an interactive `Server` renderer). Components that read `RendererInfo` used to throw `MissingRendererInfoException` under bUnit; `new RendererInfo("Static", false)` renders their prerendered branch.
+* **Culture, direction and contrast**: `Culture("de-DE")` on stories (bUnit runs render and play under it; browsers use it as the locale); `ThemeDefinition.RightToLeft` and `ThemeDefinition.HighContrast`, and theme `Direction`, `ForcedColors` and `MoreContrast`, emulated in browsers and in bUnit's media queries. The workbench resolves the preset themes by name.
+* **Burn-in**: `BTP_REPEAT_EACH` / `repeatEach` runs every story that many times and fails it unless every run passes on its first attempt.
+* **Evidence in test framework results**: `Passed(result)` in the xUnit, NUnit and TUnit packages, and `StoryDataRows.Passed(result, TestContext)` in MSTest, attach screenshots, visual diffs, DOM snapshots and traces of failed, flaky and visually changed runs (`StoryAttachments`).
+* **CTRF**: `btp report --ctrf <file>` (`CtrfReportWriter`) keeps retries, flaky runs and quarantine.
+* **Orphaned baselines**: `SnapshotStore.FindOrphanedBaselines(stories)` and `PruneOrphanedBaselines(stories)`.
+* **Report-only accessibility**: `Accessibility(a => a.ReportOnly = true)` turns a story's violations into warnings.
+* **Accessibility rules**: `aria-valid-attr-value` now requires an invalid field's `aria-errormessage` to be announced (live region or `aria-describedby`), as axe-core does; the accessible description no longer repeats a `title` that already named the element (both engines).
+* **Security**: ASP.NET Core packages move to 10.0.15 (10.0.13 has a high-severity advisory, GHSA-g27p-qf6j-c96c).
+* **Demo**: `Testing/Play API` stories (file upload, locator filters, navigation, JavaScript callbacks, field states) run in bUnit, Server, WebAssembly, Auto, Firefox, WebKit and the in-app driver; new tests for theme emulation and orphaned baselines.
+
+**Behaviour changes to check when upgrading:**
+
+* Accessibility snapshots of toggle buttons say `[pressed]` instead of `[checked]`; options and tree items with `aria-selected` say `[selected]` instead of `[checked]`; `aria-checked="mixed"` says `[checked=mixed]` instead of `[checked=false]`.
+* bUnit components see `RendererInfo` as an interactive `Server` renderer instead of throwing.
+* The in-memory `aria-valid-attr-value` rule reports `aria-errormessage` targets that are not announced, as axe-core already did in browsers.
+* In browsers, a story's navigation to another page is stopped and recorded; changes of the query string or fragment still happen.
+* `IStoryDriver` gained default-implemented `GetNavigationsAsync` (none) and `InvokeDotNetAsync` (not supported); custom drivers compile unchanged.
+
 ### Test hub, run history and triage
 
 Informed by a survey of story tools, reporting and analytics platforms, flaky-test and selection tools, visual and accessibility services, cloud grids and the .NET ecosystem (`reports/Modern test platform capabilities.md`).

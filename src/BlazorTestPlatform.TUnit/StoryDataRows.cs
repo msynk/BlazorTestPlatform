@@ -35,10 +35,11 @@ public static class StoryDataRows
         return cases.Select(testCase => new TestDataRow<string>(testCase.Key, testCase.DisplayName, testCase.SkipReason, [.. testCase.Categories]));
     }
 
-    /// <summary>Fails the test for a failed result and skips it for a skipped one; returns passed results.</summary>
+    /// <summary>Attaches the evidence of failed, flaky and visually changed runs to the test result (<see cref="StoryAttachments"/>); fails the test for a failed result and skips it for a skipped one; returns passed results.</summary>
     public static StoryResult Passed(StoryResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
+        Attach(result);
         if (result.IsBlockingFailure)
         {
             throw new StoryFailedException(result);
@@ -54,4 +55,25 @@ public static class StoryDataRows
 
     /// <summary>Awaits a run and applies <see cref="Passed(StoryResult)"/>.</summary>
     public static async Task<StoryResult> PassedAsync(Task<StoryResult> run) => Passed(await (run ?? throw new ArgumentNullException(nameof(run))).ConfigureAwait(false));
+
+    // Screenshots, visual diffs, DOM snapshots and traces become TUnit test artifacts.
+    private static void Attach(StoryResult result)
+    {
+        if (TestContext.Current is not { } context)
+        {
+            return;
+        }
+
+        foreach (var attachment in StoryAttachments.For(result))
+        {
+            try
+            {
+                context.Output.AttachArtifact(attachment.Path, attachment.Name, attachment.Description);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or IOException)
+            {
+                // The file went away: the evidence stays in the results directory.
+            }
+        }
+    }
 }

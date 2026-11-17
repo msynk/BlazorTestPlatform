@@ -30,7 +30,33 @@ public static class AccessibleName
             return TextMatch.Normalize(string.Join(' ', describedBy.Select(e => Referenced(e, scope, [], element))));
         }
 
-        return TextMatch.Normalize(element.GetAttribute("aria-description") ?? (Compute(element, scope).Length > 0 ? element.GetAttribute("title") : null));
+        if (element.GetAttribute("aria-description") is { } description)
+        {
+            return TextMatch.Normalize(description);
+        }
+
+        // title describes an element only when it did not already name it.
+        var title = TextMatch.Normalize(element.GetAttribute("title"));
+        var name = Compute(element, scope);
+        return name.Length > 0 && !string.Equals(name, title, StringComparison.Ordinal) ? title : string.Empty;
+    }
+
+    /// <summary>
+    /// The accessible error message: the text of the <c>aria-errormessage</c> targets while the element is invalid
+    /// (<c>aria-invalid</c> set and not <c>false</c>), else empty.
+    /// </summary>
+    public static string ComputeErrorMessage(IElement element, DomScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        ArgumentNullException.ThrowIfNull(scope);
+        var invalid = element.GetAttribute("aria-invalid")?.Trim();
+        if (string.IsNullOrEmpty(invalid) || string.Equals(invalid, "false", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        var targets = scope.ResolveIdRefs(element.GetAttribute("aria-errormessage"));
+        return TextMatch.Normalize(string.Join(' ', targets.Select(e => Referenced(e, scope, [], element))));
     }
 
     /// <summary>Labels associated with a labelable element (<c>label[for]</c> and wrapping <c>label</c>).</summary>

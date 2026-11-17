@@ -101,6 +101,13 @@ public sealed class StoryAccessibilityOptions : StoryOptionsBase
     /// <summary>Why rules were disabled. Surfaced in reports so suppressions stay reviewable.</summary>
     public Dictionary<string, string> Justifications { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Scan and report, but never fail (Storybook's a11y <c>todo</c>): every violation is a warning in the results and
+    /// reports, for components whose accessibility debt is being paid down. Prefer justified, expiring suppressions of
+    /// single rules; use this to adopt the gate on a library with many existing findings.
+    /// </summary>
+    public bool ReportOnly { get; set { ThrowIfReadOnly(); field = value; } }
+
     /// <summary>CSS selector limiting the scan (defaults to the story root).</summary>
     public string? Include { get; set { ThrowIfReadOnly(); field = value; } }
 
@@ -109,7 +116,7 @@ public sealed class StoryAccessibilityOptions : StoryOptionsBase
 
     internal StoryAccessibilityOptions Clone()
     {
-        var clone = new StoryAccessibilityOptions { Skip = Skip, Include = Include };
+        var clone = new StoryAccessibilityOptions { Skip = Skip, Include = Include, ReportOnly = ReportOnly };
         clone.DisabledRules.UnionWith(DisabledRules);
         foreach (var pair in Justifications)
         {

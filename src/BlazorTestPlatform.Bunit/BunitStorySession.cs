@@ -43,6 +43,15 @@ public sealed class BunitStoryOptions
     public TimeSpan? Timeout { get; set; }
 
     /// <summary>
+    /// What <c>ComponentBase.RendererInfo</c> reports to the story's components. Default: an interactive <c>Server</c>
+    /// renderer, the closest match to how bUnit renders (events run, the component stays live). Set
+    /// <c>new RendererInfo("Static", false)</c> to check what a component renders while it is prerendered, or
+    /// <c>new RendererInfo("WebAssembly", true)</c> for components that branch on the WebAssembly renderer.
+    /// Without a value, bUnit throws <c>MissingRendererInfoException</c> for components that read it.
+    /// </summary>
+    public RendererInfo RendererInfo { get; set; } = new("Server", isInteractive: true);
+
+    /// <summary>
     /// CSS text whose <c>display</c>/<c>visibility</c> rules decide element visibility in memory (in addition to
     /// <see cref="BtpSettings.BunitStylesheets"/>). Load your design system's CSS or CSS-isolation bundle so components
     /// hidden by a class are hidden in bUnit too.
@@ -172,6 +181,12 @@ public sealed class BunitStorySession : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(story);
         options ??= new BunitStoryOptions();
         var settings = options.Settings ?? BtpSettings.Current;
+        if (story.Culture is { } culture)
+        {
+            // Covers the first render; BunitStoryRunner sets it for the whole run (render and play).
+            System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.CurrentUICulture = System.Globalization.CultureInfo.GetCultureInfo(culture);
+        }
+
         var context = new BunitContext();
         try
         {
@@ -213,7 +228,17 @@ public sealed class BunitStorySession : IAsyncDisposable
             await story.InitializeFixturesAsync(context.Services, fixtureContext).ConfigureAwait(false);
 
             // Build the service provider and renderer up front so measurements only see the component's own work.
-            _ = context.Renderer;
+            // (Setting the renderer info creates the renderer, so it comes after every service registration.)
+            context.SetRendererInfo(options.RendererInfo ?? throw new ArgumentException("RendererInfo cannot be null.", nameof(options)));
+
+            // Every navigation the story asks for, in order, external and replaced ones included (the driver adds the
+            // options bUnit's NavigationManager kept in its history).
+            var navigation = context.Services.GetRequiredService<NavigationManager>();
+            _ = navigation.RegisterLocationChangingHandler(change =>
+            {
+                renderContext.Navigations.Add(navigation.ToAbsoluteUri(change.TargetLocation).ToString(), navigation.BaseUri, isLinkClick: change.IsNavigationIntercepted);
+                return ValueTask.CompletedTask;
+            });
             IRenderedComponent<StoryRoot>? root = null;
             var recorderToUse = recorder ?? new StepRecorder();
             await recorderToUse.RunAsync($"render {story.Id}", StepKind.Render, () =>
@@ -241,9 +266,9 @@ public sealed class BunitStorySession : IAsyncDisposable
     /// </summary>
     public async Task PlayAsync()
     {
-        if (Story.Play is { } play)
+        if (Story.Play is not null)
         {
-            await StoryContext.Recorder.RunAsync("play", StepKind.Step, () => play(StoryContext)).ConfigureAwait(false);
+            await StoryContext.Recorder.RunAsync("play", StepKind.Step, StoryContext.RunPlayAsync).ConfigureAwait(false);
         }
 
         await Driver.WaitForIdleAsync(StoryContext.CancellationToken).ConfigureAwait(false);

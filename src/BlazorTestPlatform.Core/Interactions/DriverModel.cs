@@ -54,20 +54,36 @@ public enum LocatorStepKind
 
     /// <summary>Keep matches whose text does not contain a value.</summary>
     HasNotText,
+
+    /// <summary>Keep matches that contain a descendant matching <see cref="LocatorStep.Inner"/>.</summary>
+    Has,
+
+    /// <summary>Keep matches that contain no descendant matching <see cref="LocatorStep.Inner"/>.</summary>
+    HasNot,
 }
 
 /// <summary>One step of a <see cref="LocatorChain"/>.</summary>
 public sealed record LocatorStep(LocatorStepKind Kind, By? Query = null, int Index = 0, string? Text = null)
 {
+    /// <summary>Pattern of <see cref="LocatorStepKind.HasText"/> and <see cref="LocatorStepKind.HasNotText"/> (instead of <see cref="Text"/>).</summary>
+    public System.Text.RegularExpressions.Regex? Pattern { get; init; }
+
+    /// <summary>The descendant locator of <see cref="LocatorStepKind.Has"/> and <see cref="LocatorStepKind.HasNot"/>.</summary>
+    public LocatorChain? Inner { get; init; }
+
     /// <inheritdoc />
     public override string ToString() => Kind switch
     {
         LocatorStepKind.Find => Query!.Describe(),
         LocatorStepKind.Nth => $"nth={Index}",
-        LocatorStepKind.HasText => $"has-text=\"{Text}\"",
-        LocatorStepKind.HasNotText => $"has-not-text=\"{Text}\"",
+        LocatorStepKind.HasText => $"has-text={ShownText()}",
+        LocatorStepKind.HasNotText => $"has-not-text={ShownText()}",
+        LocatorStepKind.Has => $"has=({Inner})",
+        LocatorStepKind.HasNot => $"has-not=({Inner})",
         _ => Kind.ToString(),
     };
+
+    private string ShownText() => Pattern is null ? $"\"{Text}\"" : $"/{Pattern}/{TextMatch.Flags(Pattern)}";
 }
 
 /// <summary>An immutable locator: a sequence of queries and filters resolved lazily by a driver.</summary>
@@ -131,6 +147,12 @@ public sealed record ElementInfo
 
     /// <summary>Computed accessible name.</summary>
     public string AccessibleName { get; init; } = string.Empty;
+
+    /// <summary>Accessible description (<c>aria-describedby</c>, <c>aria-description</c>, then a <c>title</c> that is not the name).</summary>
+    public string AccessibleDescription { get; init; } = string.Empty;
+
+    /// <summary>Accessible error message: the <c>aria-errormessage</c> targets' text while the element is <c>aria-invalid</c>.</summary>
+    public string AccessibleErrorMessage { get; init; } = string.Empty;
 
     /// <summary>Whitespace-normalized text content.</summary>
     public string Text { get; init; } = string.Empty;
@@ -253,6 +275,9 @@ public enum ElementActionKind
 
     /// <summary>Scroll into view.</summary>
     ScrollIntoView,
+
+    /// <summary>Choose files in a file input (<see cref="ElementAction.Files"/>; none clears the selection).</summary>
+    SetInputFiles,
 }
 
 /// <summary>An interaction a driver performs on a resolved element.</summary>
@@ -266,6 +291,9 @@ public sealed record ElementAction(ElementActionKind Kind)
 
     /// <summary>Drop target for <see cref="ElementActionKind.DragTo"/>.</summary>
     public LocatorChain? Target { get; init; }
+
+    /// <summary>Files for <see cref="ElementActionKind.SetInputFiles"/>.</summary>
+    public IReadOnlyList<StoryFile>? Files { get; init; }
 
     /// <summary>Modifiers held during the action.</summary>
     public KeyModifiers Modifiers { get; init; }
@@ -284,6 +312,7 @@ public sealed record ElementAction(ElementActionKind Kind)
         ElementActionKind.Press => $"press {Text}",
         ElementActionKind.SelectOption => $"select {string.Join(", ", Values ?? [])}",
         ElementActionKind.DragTo => $"drag to {Target}",
+        ElementActionKind.SetInputFiles => Files is { Count: > 0 } files ? $"set input files {string.Join(", ", files.Select(f => f.Name))} on" : "clear input files of",
         _ => Kind.ToString().ToLowerInvariant(),
     } + (Modifiers != KeyModifiers.None ? $" [{Modifiers}]" : string.Empty);
 }
@@ -364,6 +393,21 @@ public interface IStoryDriver : IAsyncDisposable
     /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
     Task<IReadOnlyList<JSCallRecord>> GetJSCallsAsync(CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<JSCallRecord>>([]);
+
+    /// <summary>
+    /// Navigations the story's components asked for (<c>NavigateTo</c>, intercepted link clicks), in order. The default
+    /// returns none; drivers that observe navigation override it.
+    /// </summary>
+    Task<IReadOnlyList<NavigationRecord>> GetNavigationsAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<NavigationRecord>>([]);
+
+    /// <summary>
+    /// Calls a <c>[JSInvokable]</c> <paramref name="method"/> on the <paramref name="index"/>-th <c>DotNetObjectReference</c>
+    /// that JavaScript call <paramref name="sequence"/> received, on the story's renderer, as JavaScript would; returns the
+    /// result as JSON. The default throws <see cref="NotSupportedException"/>.
+    /// </summary>
+    Task<string?> InvokeDotNetAsync(int sequence, int index, string method, string argumentsJson, CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"Driver '{Name}' cannot call .NET methods of the story.");
 
     /// <summary>
     /// The story's accessibility tree as text (see <c>AriaSnapshot</c> in BlazorTestPlatform.Accessibility): one line per

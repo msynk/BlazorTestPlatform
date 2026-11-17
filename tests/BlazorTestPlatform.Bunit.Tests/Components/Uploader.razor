@@ -1,0 +1,27 @@
+@* Reads chosen files with InputFile, as an attachment field does. *@
+<label for="files">Attachments</label>
+<InputFile id="files" multiple OnChange="OnChangeAsync" style="display: none" />
+<label for="avatar">Avatar</label>
+<InputFile id="avatar" OnChange="OnChangeAsync" />
+<input type="file" aria-label="Plain" />
+<ul>
+    @foreach (var line in lines)
+    {
+        <li>@line</li>
+    }
+</ul>
+
+@code {
+    private readonly List<string> lines = [];
+
+    private async Task OnChangeAsync(InputFileChangeEventArgs e)
+    {
+        lines.Clear();
+        foreach (var file in e.GetMultipleFiles(10))
+        {
+            using var reader = new StreamReader(file.OpenReadStream());
+            var content = await reader.ReadToEndAsync();
+            lines.Add($"{file.Name} {file.ContentType} {file.Size} {content}");
+        }
+    }
+}

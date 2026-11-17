@@ -112,6 +112,7 @@ public sealed class InaccessibleStories : Stories<Inaccessible>
             .DisableAccessibilityRule("label", "Tracked in #125")
             .DisableAccessibilityRule("aria-roles", "Tracked in #126")
             .DisableAccessibilityRule("list", "Tracked in #127"));
+        stories.Add("Report only", s => s.Accessibility(a => a.ReportOnly = true));
     }
 }
 

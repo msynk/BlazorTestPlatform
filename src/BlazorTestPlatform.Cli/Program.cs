@@ -40,12 +40,13 @@ var pullRequest = new Option<int?>("--pr") { Description = "Pull request number 
 var repository = new Option<string?>("--repository") { Description = "Repository (owner/name) for --pr-comment (default: GITHUB_REPOSITORY)." };
 var reportUrl = new Option<string?>("--report-url") { Description = "Link to the published HTML report, added to the Markdown summary (default: the GitHub Actions run)." };
 var sarif = new Option<string?>("--sarif") { Description = "Also write a SARIF 2.1.0 log (accessibility violations, failures, visual and performance regressions) for code scanning." };
+var ctrf = new Option<string?>("--ctrf") { Description = "Also write a CTRF report (Common Test Report Format JSON, keeps retries and flaky runs) to this path." };
 var sourceRoot = new Option<string?>("--source-root") { Description = "Repository root that SARIF locations are relative to (default: the current directory)." };
 var archive = new Option<string?>("--archive") { Description = "Run archive directory to add this run to (run history for trends, stability and the hub; persist it between CI runs). Typically <project>/.btp/runs." };
 var trigger = new Option<string?>("--trigger") { Description = "What started the run, recorded in the archive (default: ci on CI, else local)." };
 var report = new Command("report", "Aggregate results into an HTML report (plus optional JUnit, Markdown, flake history and a pull-request comment).")
 {
-    results, output, junit, markdown, githubSummary, history, runId, failOnFailures, prComment, pullRequest, repository, reportUrl, sarif, sourceRoot, archive, trigger,
+    results, output, junit, ctrf, markdown, githubSummary, history, runId, failOnFailures, prComment, pullRequest, repository, reportUrl, sarif, sourceRoot, archive, trigger,
 };
 report.SetAction(async (parse, cancellationToken) =>
 {
@@ -93,6 +94,12 @@ report.SetAction(async (parse, cancellationToken) =>
     {
         JUnitReportWriter.Write(summary, junitPath);
         Console.WriteLine($"JUnit XML:   {Path.GetFullPath(junitPath)}");
+    }
+
+    if (parse.GetValue(ctrf) is { } ctrfPath)
+    {
+        CtrfReportWriter.Write(summary, ctrfPath);
+        Console.WriteLine($"CTRF:        {Path.GetFullPath(ctrfPath)}");
     }
 
     if (parse.GetValue(sarif) is { } sarifPath)

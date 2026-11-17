@@ -44,10 +44,11 @@ public static class StoryTestCases
         });
     }
 
-    /// <summary>Fails the test for a failed result and ignores it for a skipped one; returns passed results.</summary>
+    /// <summary>Attaches the evidence of failed, flaky and visually changed runs to the test result (<see cref="StoryAttachments"/>); fails the test for a failed result and ignores it for a skipped one; returns passed results.</summary>
     public static StoryResult Passed(StoryResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
+        Attach(result);
         if (result.IsBlockingFailure)
         {
             throw new StoryFailedException(result);
@@ -63,4 +64,20 @@ public static class StoryTestCases
 
     /// <summary>Awaits a run and applies <see cref="Passed(StoryResult)"/>.</summary>
     public static async Task<StoryResult> PassedAsync(Task<StoryResult> run) => Passed(await (run ?? throw new ArgumentNullException(nameof(run))).ConfigureAwait(false));
+
+    // Screenshots, visual diffs, DOM snapshots and traces become NUnit test attachments (TestContext.AddTestAttachment).
+    private static void Attach(StoryResult result)
+    {
+        foreach (var attachment in StoryAttachments.For(result))
+        {
+            try
+            {
+                TestContext.AddTestAttachment(attachment.Path, attachment.Description);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException or ArgumentException or NullReferenceException)
+            {
+                // Outside a running test, or the file went away: the evidence stays in the results directory.
+            }
+        }
+    }
 }
