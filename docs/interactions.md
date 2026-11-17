@@ -334,6 +334,49 @@ await ctx.ExpectAriaSnapshotAsync("""
 
 `AriaSnapshotTemplate.Matches(actual, expected, match)` applies the same rules outside a play script.
 
+**Updating snapshots in the source.** A failed `ExpectAriaSnapshotAsync` records its call site (the compiler fills in the
+file and line) and the tree the driver saw. `btp snapshots update-source` rewrites the expected raw string literal in place
+with it, as Playwright's `updateSourceMethod` and insta's inline snapshots do: review the diff, rerun, commit. It leaves a
+call site alone, saying why, when runs disagree on the tree (a driver or render-mode difference is a parity bug, not an
+outdated snapshot), when the expected tree has name patterns or `/children` directives (a rewrite would lose them), or when
+the expected text is not a literal at the call. `--dry-run` lists what would change; `--source-root` resolves the
+deterministic paths (`/_/...`) of results built on CI.
+
+## Forcing hover and focus
+
+`locator.ForceStateAsync(PseudoState.Hover)` makes an element match `:hover` (and `:active`, `:focus`, `:focus-visible`,
+`:focus-within`, `:visited`) without a pointer or keyboard, as storybook-addon-pseudo-states does: every style rule that
+uses the pseudo-class gets a twin keyed on an attribute the element carries (its ancestors too for `:hover`, `:active` and
+`:focus-within`, as with a real pointer). Hover and focus looks can then be checked and screenshotted deterministically.
+Each call replaces the states forced before; `PseudoState.None` clears them. Inline styles and cross-origin stylesheets
+are not affected. It needs CSS: bUnit skips the story, with the reason.
+
+```csharp
+var button = ctx.GetByRole("button", "Save changes");
+await button.ForceStateAsync(PseudoState.Hover);
+await ctx.ExpectScreenshotAsync("hover", button);
+await button.ForceStateAsync(PseudoState.FocusVisible);
+await ctx.Expect(button).ToHaveCssAsync("outlineStyle", "solid");
+```
+
+## Exploring sequences of actions
+
+`ctx.ExploreAsync(name, e => ...)` explores a component as a state machine, as Hypothesis' rule-based tests and fast-check's
+model-based commands do: it takes `Steps(n)` random actions (default 20) among those possible at each point (`when:`),
+picked by a seed, and checks every invariant before the first step and after each one.
+
+```csharp
+await ctx.ExploreAsync("stepper", e => e
+    .Action("add", c => c.GetByRole("button", "Add").ClickAsync(), code: "await ctx.GetByRole(\"button\", \"Add\").ClickAsync();")
+    .Action("remove", c => c.GetByRole("button", "Remove").ClickAsync(), when: c => c.GetByRole("button", "Remove").IsEnabledAsync())
+    .Invariant("count is never negative", c => c.Expect(c.GetByTestId("count")).Not.ToHaveTextAsync(new Regex("^-"), TimeSpan.Zero)));
+```
+
+A failure lists the steps that led to it, the seed that replays them (`.Seed(n)` or `BTP_EXPLORE_SEED=n`) and a play script
+built from the actions' `code`, ready to paste as a regression story. The seed derives from the story's, so a run repeats
+exactly; set `BTP_EXPLORE_SEED` (for example to the build number in a nightly job) to try other sequences. Failing sequences
+are not shrunk: that needs a fresh render per attempt.
+
 ## Three drivers, one script
 
 | Driver | Where the play function runs | Used by |

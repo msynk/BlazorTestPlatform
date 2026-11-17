@@ -309,4 +309,20 @@ public sealed class FingerprintTests
     [InlineData("<button></button>")]
     public void Structural_changes_change_the_fingerprint(string changed) =>
         Assert.NotEqual(AccessibilityFingerprint.Compute("<button>Save</button>"), AccessibilityFingerprint.Compute(changed));
+
+    [Fact]
+    public void Component_fingerprints_depend_on_the_distinct_states_not_on_how_many_stories_repeat_them()
+    {
+        string[] stories = ["<button>Save</button>", "<button disabled>Save</button>"];
+        var set = AccessibilityFingerprint.ComputeSet(stories);
+
+        // A story that only adds a play script renders a state another story already renders; order does not matter.
+        Assert.Equal(set, AccessibilityFingerprint.ComputeSet([.. stories, "<button class='x'>Save changes</button>"]));
+        Assert.Equal(set, AccessibilityFingerprint.ComputeSet(stories.Reverse()));
+        Assert.NotEqual(set, AccessibilityFingerprint.ComputeSet([.. stories, "<button aria-pressed='true'>Bold</button><a href='#'>Help</a>"]));
+
+        // The ordered fingerprint of earlier versions changed in both cases; a single snapshot is the same either way.
+        Assert.NotEqual(AccessibilityFingerprint.Compute(stories), AccessibilityFingerprint.Compute([.. stories, "<button>Save</button>"]));
+        Assert.Equal(AccessibilityFingerprint.Compute(stories[0]), AccessibilityFingerprint.ComputeSet([stories[0]]));
+    }
 }

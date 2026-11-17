@@ -7,7 +7,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="NUnit" />
+    <!-- The package is built against NUnit 4 (its lowest supported version); the tests run it on the newest major. -->
+    <PackageReference Include="NUnit" VersionOverride="5.0.0" />
     <PackageReference Include="NUnit3TestAdapter" />
   </ItemGroup>
 

@@ -41,6 +41,13 @@ public sealed class PlayApiAdditionsStories : Stories<RevealsImage>
         }));
 
         stories.Add("Reserved screenshot name", s => s.Tags("fails-on-purpose").Play(ctx => ctx.ExpectScreenshotAsync("initial")));
+
+        stories.Add("Outdated accessibility snapshot", s => s.Tags("fails-on-purpose").Play(async ctx =>
+        {
+            await ctx.ExpectAriaSnapshotAsync("""
+                - button "Show image"
+                """, timeout: TimeSpan.FromMilliseconds(50));
+        }));
     }
 }
 
@@ -119,6 +126,29 @@ public sealed class PlayApiAdditionsTests
 
         Assert.Equal(StoryOutcome.Failed, result.Outcome);
         Assert.Contains(message, result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Outdated_accessibility_snapshots_are_rewritten_in_the_story_source()
+    {
+        var result = await BunitStoryRunner.RunAsync(Catalog.Get("tests-play-api-additions--outdated-accessibility-snapshot"), Options(), TestContext.Current.CancellationToken);
+
+        Assert.Equal(StoryOutcome.Failed, result.Outcome);
+        var mismatch = Assert.Single(result.AriaSnapshotMismatches);
+        Assert.EndsWith("PlayApiAdditionsTests.cs", mismatch.SourceFile, StringComparison.Ordinal);
+        Assert.Equal("- button \"Show image\"", mismatch.Expected);
+        Assert.Equal("- button \"Show picture\"", mismatch.Actual);
+
+        // Applied to a copy: the test must not edit its own source.
+        var copy = Path.Combine(ResultsDirectory(), "PlayApiAdditionsTests.cs");
+        File.Copy(mismatch.SourceFile, copy);
+        var update = Assert.Single(SourceSnapshots.Update([mismatch with { SourceFile = copy }], Path.GetDirectoryName(copy)!));
+
+        Assert.True(update.Updated, update.Message);
+        var text = File.ReadAllText(copy);
+        Assert.Contains("- button \"Show picture\"", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("- button \"Show image\"", text, StringComparison.Ordinal);
+        Assert.Contains("\"\"\", timeout: TimeSpan.FromMilliseconds(50));", text, StringComparison.Ordinal);
     }
 
     private static IEnumerable<StepRecord> Flatten(IEnumerable<StepRecord> steps) => steps.SelectMany(s => Flatten(s.Children).Prepend(s));

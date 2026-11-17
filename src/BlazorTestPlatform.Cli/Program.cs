@@ -445,6 +445,38 @@ init.SetAction(parse =>
 });
 root.Add(init);
 
+// btp snapshots update-source
+var snapshotsSourceRoot = new Option<string?>("--source-root") { Description = "Repository root that deterministic source paths (/_/...) resolve against (default: the repository of the project)." };
+var updateSource = new Command("update-source", "Rewrite the expected accessibility trees of failed ExpectAriaSnapshotAsync calls in the story sources with what the last run saw.") { results, dryRun, snapshotsSourceRoot };
+updateSource.SetAction(parse =>
+{
+    var settings = Settings(parse);
+    var mismatches = ResultDirectories(parse, settings)
+        .SelectMany(directory => new ResultsStore(directory).ReadAll())
+        .SelectMany(result => result.AriaSnapshotMismatches)
+        .ToArray();
+    if (mismatches.Length == 0)
+    {
+        Console.WriteLine("No accessibility snapshot mismatches in the results.");
+        return 0;
+    }
+
+    var sourceRootPath = parse.GetValue(snapshotsSourceRoot) is { Length: > 0 } explicitRoot
+        ? Path.GetFullPath(explicitRoot)
+        : RepositoryRoot(settings.ProjectDirectory) ?? settings.ProjectDirectory;
+    var updates = SourceSnapshots.Update(mismatches, sourceRootPath, parse.GetValue(dryRun));
+    foreach (var update in updates)
+    {
+        Console.WriteLine($"{(update.Updated ? "updated " : "skipped ")} {Path.GetRelativePath(Environment.CurrentDirectory, update.SourceFile)}:{update.SourceLine}  {update.Message}");
+    }
+
+    var updated = updates.Count(u => u.Updated);
+    Console.WriteLine(parse.GetValue(dryRun) ? $"{updated} call site(s) would be updated." : $"{updated} call site(s) updated. Review the diff, rerun the stories and commit.");
+    return updates.All(u => u.Updated) ? 0 : 1;
+});
+var snapshots = new Command("snapshots", "Snapshots written in story sources.") { updateSource };
+root.Add(snapshots);
+
 // btp clean
 var clean = new Command("clean", "Delete the results directory (baselines are kept).");
 clean.SetAction(parse =>

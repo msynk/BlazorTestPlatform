@@ -235,6 +235,12 @@ public sealed record StoryResult
     /// <summary>Visual comparison.</summary>
     public VisualResult? Visual { get; init; }
 
+    /// <summary>
+    /// Accessibility snapshots written in the story's source that did not match, with what the driver saw: the input of
+    /// <c>btp snapshots update-source</c>.
+    /// </summary>
+    public IReadOnlyList<AriaSnapshotMismatch> AriaSnapshotMismatches { get => field ?? []; init; } = [];
+
     /// <summary>The named screenshots the play script compared (<c>ctx.ExpectScreenshotAsync</c>), in order.</summary>
     public IReadOnlyList<VisualResult> Screenshots { get => field ?? []; init; } = [];
 

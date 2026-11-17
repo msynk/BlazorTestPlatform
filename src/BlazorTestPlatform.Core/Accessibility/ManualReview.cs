@@ -258,7 +258,15 @@ public static class ManualReviewGate
     /// <summary>Evaluates every component.</summary>
     /// <param name="fingerprints">Current fingerprint per component title.</param>
     /// <param name="store">Review store.</param>
-    public static IReadOnlyList<ReviewGateEntry> Evaluate(IReadOnlyDictionary<string, string> fingerprints, ManualReviewStore store)
+    public static IReadOnlyList<ReviewGateEntry> Evaluate(IReadOnlyDictionary<string, string> fingerprints, ManualReviewStore store) =>
+        Evaluate(fingerprints, store, legacyFingerprints: null);
+
+    /// <summary>
+    /// Evaluates reviews as <see cref="Evaluate(IReadOnlyDictionary{string, string}, ManualReviewStore)"/>, also accepting a
+    /// review recorded with the component's fingerprint in <paramref name="legacyFingerprints"/> (computed the way earlier
+    /// versions did), so upgrading does not mark every review stale.
+    /// </summary>
+    public static IReadOnlyList<ReviewGateEntry> Evaluate(IReadOnlyDictionary<string, string> fingerprints, ManualReviewStore store, IReadOnlyDictionary<string, string>? legacyFingerprints)
     {
         ArgumentNullException.ThrowIfNull(fingerprints);
         ArgumentNullException.ThrowIfNull(store);
@@ -279,7 +287,8 @@ public static class ManualReviewGate
                 continue;
             }
 
-            if (!string.Equals(review.Fingerprint, fingerprint, StringComparison.Ordinal))
+            if (!string.Equals(review.Fingerprint, fingerprint, StringComparison.Ordinal)
+                && !(legacyFingerprints?.TryGetValue(component, out var legacy) == true && string.Equals(review.Fingerprint, legacy, StringComparison.Ordinal)))
             {
                 entries.Add(new(component, ReviewGateState.Stale, $"Accessibility structure changed since the review on {review.ReviewedAt:yyyy-MM-dd} ({review.Fingerprint} -> {fingerprint}).", fingerprint));
                 continue;

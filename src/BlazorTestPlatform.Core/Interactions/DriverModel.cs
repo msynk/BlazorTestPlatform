@@ -476,6 +476,15 @@ public interface IStoryDriver : IAsyncDisposable
     Task<VisualResult> MatchScreenshotAsync(string name, LocatorChain? target, bool? fullPage, CancellationToken cancellationToken) =>
         throw new NotSupportedException($"The {Name} driver cannot compare screenshots.");
 
+    /// <summary>
+    /// Makes the element <paramref name="locator"/> resolves to match <paramref name="states"/> (<c>:hover</c>,
+    /// <c>:focus-visible</c>...) in the story's stylesheets without a pointer or keyboard, replacing states forced earlier
+    /// (<see cref="PseudoState.None"/> clears them). Requires <see cref="DriverCapabilities.Css"/>.
+    /// </summary>
+    /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
+    Task ForcePseudoStatesAsync(LocatorChain locator, PseudoState states, CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"The {Name} driver cannot force CSS pseudo-classes.");
+
     /// <summary>Takes the page offline or back online. Requires <see cref="DriverCapabilities.BrowserEmulation"/>.</summary>
     /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
     Task SetOfflineAsync(bool offline, CancellationToken cancellationToken) =>

@@ -191,7 +191,7 @@ public sealed class WorkbenchBrowser : IAsyncDisposable
             Locale = cell.Story.Culture is { } culture && options.Locale == StoryPageOptions.DefaultLocale ? culture : options.Locale,
             ForcedColors = cell.Theme.ForcedColors ? Microsoft.Playwright.ForcedColors.Active : null,
             Contrast = cell.Theme.MoreContrast ? Microsoft.Playwright.Contrast.More : null,
-            TimezoneId = options.TimezoneId,
+            TimezoneId = cell.Story.TimeZone is { } zone && options.TimezoneId == StoryPageOptions.DefaultTimezoneId ? zone : options.TimezoneId,
         }).ConfigureAwait(false);
 
         try
@@ -264,8 +264,11 @@ public sealed class StoryPageOptions
     /// <summary>Locale (deterministic default <c>en-US</c>; a story's <c>Culture(...)</c> replaces the default).</summary>
     public string Locale { get; set; } = DefaultLocale;
 
-    /// <summary>Time zone (deterministic default <c>UTC</c>).</summary>
-    public string TimezoneId { get; set; } = "UTC";
+    /// <summary>The default <see cref="TimezoneId"/>.</summary>
+    public const string DefaultTimezoneId = "UTC";
+
+    /// <summary>Time zone (deterministic default <c>UTC</c>; a story's <c>TimeZone(...)</c> replaces the default).</summary>
+    public string TimezoneId { get; set; } = DefaultTimezoneId;
 
     /// <summary>Run the story's play function inside the frame (the workbench's in-app driver) instead of from the test.</summary>
     public bool AutoPlay { get; set; }

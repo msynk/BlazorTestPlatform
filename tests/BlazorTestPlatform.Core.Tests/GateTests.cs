@@ -227,6 +227,19 @@ public sealed class ManualReviewTests
     }
 
     [Fact]
+    public void Reviews_recorded_with_the_earlier_fingerprint_stay_current()
+    {
+        var store = NewStore();
+        var pass = ManualChecklists.Wcag22AA.Select(c => new ReviewItem { CheckId = c.Id, Status = ReviewStatus.Pass }).ToArray();
+        store.Save(new ComponentReview { Component = "A", Fingerprint = "ordered-a", Reviewer = "Ada", ReviewedAt = DateTimeOffset.UnixEpoch, Items = pass });
+
+        var current = new Dictionary<string, string> { ["A"] = "set-a" };
+        Assert.Equal(ReviewGateState.Stale, ManualReviewGate.Evaluate(current, store).Single().State);
+        Assert.Equal(ReviewGateState.Approved, ManualReviewGate.Evaluate(current, store, new Dictionary<string, string> { ["A"] = "ordered-a" }).Single().State);
+        Assert.Equal(ReviewGateState.Stale, ManualReviewGate.Evaluate(current, store, new Dictionary<string, string> { ["A"] = "ordered-changed" }).Single().State);
+    }
+
+    [Fact]
     public void Gate_options_decide_what_fails()
     {
         var entries = new[] { new ReviewGateEntry("X", ReviewGateState.Missing, "none", "f") };

@@ -1,0 +1,6 @@
+@* Shows the time the way components should compute local time: through the injected TimeProvider. *@
+@inject TimeProvider Time
+<p>
+    <span data-testid="zone">@Time.LocalTimeZone.Id</span>
+    <time data-testid="local">@Time.GetLocalNow().ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)</time>
+</p>

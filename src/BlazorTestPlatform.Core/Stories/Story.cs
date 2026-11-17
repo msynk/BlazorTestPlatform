@@ -43,6 +43,7 @@ public sealed class Story
         Matrix = data.Matrix;
         Timeout = data.Timeout;
         Culture = data.Culture;
+        TimeZone = data.TimeZone;
         SkipReason = data.SkipReason;
         Metadata = data.Metadata;
         Requirements = data.Requirements;
@@ -139,6 +140,12 @@ public sealed class Story
     /// </summary>
     public string? Culture { get; }
 
+    /// <summary>
+    /// The IANA time zone the story renders in (<c>Europe/Berlin</c>), or null for the runner's (UTC in browsers). See
+    /// <c>TimeZone(...)</c> on the story builder.
+    /// </summary>
+    public string? TimeZone { get; }
+
     /// <summary>When set, the story is skipped by test runners.</summary>
     public string? SkipReason { get; }
 
@@ -210,7 +217,7 @@ public sealed class Story
     }
 
     /// <summary>True when the story registers services or fixtures that must override the host's services.</summary>
-    public bool HasServiceOverrides => ServiceConfigurations.Count > 0 || Fixtures.Count > 0 || FakeTimeStart is not null || HttpMocks.Count > 0;
+    public bool HasServiceOverrides => ServiceConfigurations.Count > 0 || Fixtures.Count > 0 || FakeTimeStart is not null || HttpMocks.Count > 0 || TimeZone is not null;
 
     /// <summary>Builds the render fragment for the story (decorators + theme decorator + component).</summary>
     public RenderFragment Render(StoryRenderContext context)
@@ -248,11 +255,21 @@ public sealed class Story
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(context);
 
+        var zone = TimeZone is { } id ? TimeZoneInfo.FindSystemTimeZoneById(id) : null;
         if (FakeTimeStart is { } start)
         {
             var fakeTime = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(start);
+            if (zone is not null)
+            {
+                fakeTime.SetLocalTimeZone(zone);
+            }
+
             services.AddSingleton(fakeTime);
             services.AddSingleton<TimeProvider>(fakeTime);
+        }
+        else if (zone is not null)
+        {
+            services.AddSingleton<TimeProvider>(new StoryTimeZone.ZonedTimeProvider(zone));
         }
 
         foreach (var fixture in Fixtures)
@@ -398,6 +415,8 @@ internal sealed class StoryData
     public TimeSpan? Timeout { get; init; }
 
     public string? Culture { get; init; }
+
+    public string? TimeZone { get; init; }
 
     public string? SkipReason { get; init; }
 

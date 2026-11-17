@@ -152,6 +152,16 @@ public sealed class InAppStoryDriver : IStoryDriver
     public async Task<string> GetAriaSnapshotAsync(CancellationToken cancellationToken) => await _module.InvokeAsync<string>("ariaSnapshot", cancellationToken);
 
     /// <inheritdoc />
+    public async Task ForcePseudoStatesAsync(LocatorChain locator, PseudoState states, CancellationToken cancellationToken)
+    {
+        var problem = await _module.InvokeAsync<string?>("forcePseudo", cancellationToken, DriverJson.Steps(locator), DriverJson.PseudoClassNames(states));
+        if (problem is not null)
+        {
+            throw new ElementNotActionableException($"Cannot force {states} on {locator}: {problem}.");
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<ElementMeasurement>> MeasureAsync(LocatorChain locator, string? cssProperty, string? pseudoElement, bool viewportRatio, CancellationToken cancellationToken) =>
         DriverJson.Measurements(await _module.InvokeAsync<string>("measureJson", cancellationToken, DriverJson.Steps(locator), cssProperty, pseudoElement, viewportRatio));
 

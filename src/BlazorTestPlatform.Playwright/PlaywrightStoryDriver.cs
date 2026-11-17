@@ -232,6 +232,16 @@ public sealed class PlaywrightStoryDriver : IStoryDriver
     }
 
     /// <inheritdoc />
+    public async Task ForcePseudoStatesAsync(LocatorChain locator, PseudoState states, CancellationToken cancellationToken)
+    {
+        var problem = await Page.EvaluateAsync<string?>(Scripts.ForcePseudo, new object[] { DriverJson.Steps(locator), DriverJson.PseudoClassNames(states) }).ConfigureAwait(false);
+        if (problem is not null)
+        {
+            throw new ElementNotActionableException($"Cannot force {states} on {locator}: {problem}.");
+        }
+    }
+
+    /// <inheritdoc />
     public Task SetOfflineAsync(bool offline, CancellationToken cancellationToken) => Page.Context.SetOfflineAsync(offline);
 
     /// <inheritdoc />

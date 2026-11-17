@@ -1,0 +1,9 @@
+@* A stepper with a bug only some sequences reach: on an odd count, Remove takes away one more than there is. *@
+<button @onclick="() => count++">Add</button>
+<button disabled="@(count == 0)" @onclick="() => count -= count % 2 == 1 ? count + 1 : 1">Remove</button>
+<button @onclick="() => count *= 2">Double</button>
+<output data-testid="count">@count</output>
+
+@code {
+    private int count;
+}

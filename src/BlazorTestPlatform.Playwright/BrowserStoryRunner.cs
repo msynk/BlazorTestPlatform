@@ -465,6 +465,7 @@ public sealed class BrowserStoryRunner
                 Steps = recorder.Steps,
                 Visual = visual,
                 Screenshots = screenshots,
+                AriaSnapshotMismatches = playContext?.AriaSnapshotMismatches ?? [],
                 Accessibility = a11y,
                 AccessibilityFailures = a11yFailures,
                 Console = failedPage?.Diagnostics.Console ?? [],

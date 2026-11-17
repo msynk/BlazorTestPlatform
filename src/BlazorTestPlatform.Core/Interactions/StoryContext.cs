@@ -408,6 +408,29 @@ public sealed class StoryContext
     public Task StepAsync(string name, Func<Task> body) => Recorder.RunAsync(name, StepKind.Step, body);
 
     /// <summary>
+    /// Explores the component as a state machine (Hypothesis' rule-based testing, fast-check's model-based commands): takes
+    /// <c>Steps</c> random actions among those possible at each point, chosen by a seed, and checks every invariant before
+    /// the first step and after each one. A failure reports the steps, the seed that replays them and a play script to
+    /// paste as a regression story. The seed derives from the story's, so runs repeat; <c>BTP_EXPLORE_SEED</c> tries others.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// await ctx.ExploreAsync("cart", e =&gt; e
+    ///     .Action("add", c =&gt; c.GetByRole("button", "Add").ClickAsync(), code: "await ctx.GetByRole(\"button\", \"Add\").ClickAsync();")
+    ///     .Action("remove", c =&gt; c.GetByRole("button", "Remove").ClickAsync(), when: c =&gt; c.GetByRole("button", "Remove").IsEnabledAsync())
+    ///     .Invariant("count is never negative", c =&gt; c.Expect(c.GetByTestId("count")).Not.ToHaveTextAsync(new Regex("^-"))));
+    /// </code>
+    /// </example>
+    public Task ExploreAsync(string name, Action<ExplorationBuilder> configure)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(configure);
+        var exploration = new ExplorationBuilder();
+        configure(exploration);
+        return Exploration.RunAsync(this, name, exploration);
+    }
+
+    /// <summary>
     /// Records a named step that must finish within <paramref name="timeout"/> (Playwright's <c>test.step</c> timeout): a
     /// step that takes longer fails the story at that step, with its name, instead of using up the whole story's timeout.
     /// </summary>
@@ -621,7 +644,13 @@ public sealed class StoryContext
     ///     """);
     /// </code>
     /// </example>
-    public Task ExpectAriaSnapshotAsync(string expected, TimeSpan? timeout = null, AriaSnapshotMatch match = AriaSnapshotMatch.Exact)
+    /// <param name="expected">The expected tree.</param>
+    /// <param name="timeout">How long to wait for the tree to match.</param>
+    /// <param name="match">Exact, or contained in the actual tree.</param>
+    /// <param name="sourceFile">Filled in by the compiler: where the call is, so <c>btp snapshots update-source</c> can rewrite the expected tree.</param>
+    /// <param name="sourceLine">Filled in by the compiler.</param>
+    public Task ExpectAriaSnapshotAsync(string expected, TimeSpan? timeout = null, AriaSnapshotMatch match = AriaSnapshotMatch.Exact,
+        [System.Runtime.CompilerServices.CallerFilePath] string sourceFile = "", [System.Runtime.CompilerServices.CallerLineNumber] int sourceLine = 0)
     {
         ArgumentNullException.ThrowIfNull(expected);
         var wanted = NormalizeSnapshot(expected);
@@ -638,6 +667,14 @@ public sealed class StoryContext
                 CancellationToken).ConfigureAwait(false);
             if (!success)
             {
+                if (sourceFile.Length > 0 && sourceLine > 0)
+                {
+                    lock (_ariaMismatches)
+                    {
+                        _ariaMismatches.Add(new AriaSnapshotMismatch { SourceFile = sourceFile, SourceLine = sourceLine, Expected = wanted, Actual = actual, Match = match });
+                    }
+                }
+
                 throw new StoryAssertionException(
                     $"Expected the accessibility tree to {(match == AriaSnapshotMatch.Exact ? "match" : "contain")}.{Environment.NewLine}Expected:{Environment.NewLine}{Indent(wanted)}{Environment.NewLine}" +
                     $"Actual:{Environment.NewLine}{Indent(actual)}{Environment.NewLine}Driver: {Driver.Name}");
@@ -645,6 +682,20 @@ public sealed class StoryContext
         });
 
         static string Indent(string text) => string.Join(Environment.NewLine, text.Split('\n').Select(l => "  " + l));
+    }
+
+    private readonly List<AriaSnapshotMismatch> _ariaMismatches = [];
+
+    /// <summary>The accessibility snapshots that did not match, with their call sites (for <c>btp snapshots update-source</c>).</summary>
+    public IReadOnlyList<AriaSnapshotMismatch> AriaSnapshotMismatches
+    {
+        get
+        {
+            lock (_ariaMismatches)
+            {
+                return _ariaMismatches.ToArray();
+            }
+        }
     }
 
     // Same rules as AriaSnapshot.Normalize: line endings, blank lines, trailing spaces and common indentation.
@@ -765,6 +816,29 @@ public sealed class StoryContext
                 $"Driver '{DriverName}' lacks {capabilities & ~Capabilities}{(reason is null ? string.Empty : $" required for {reason}")}.");
         }
     }
+
+    internal Task ForcePseudoStatesAsync(ElementLocator locator, PseudoState states)
+    {
+        Require(DriverCapabilities.Css, "forcing CSS pseudo-classes");
+        var shown = states == PseudoState.None ? "clear forced states of" : $"force {string.Join(", ", Enum.GetValues<PseudoState>().Where(s => s != PseudoState.None && states.HasFlag(s)).Select(PseudoClass))} on";
+        return Recorder.RunAsync($"{shown} {locator}", StepKind.Action, async () =>
+        {
+            await Driver.ForcePseudoStatesAsync(locator.Chain, states, CancellationToken).ConfigureAwait(false);
+            await Driver.WaitForIdleAsync(CancellationToken).ConfigureAwait(false);
+        });
+    }
+
+    /// <summary>The CSS name of a single <see cref="PseudoState"/> (<c>:focus-visible</c>).</summary>
+    public static string PseudoClass(PseudoState state) => state switch
+    {
+        PseudoState.Hover => ":hover",
+        PseudoState.Active => ":active",
+        PseudoState.Focus => ":focus",
+        PseudoState.FocusVisible => ":focus-visible",
+        PseudoState.FocusWithin => ":focus-within",
+        PseudoState.Visited => ":visited",
+        _ => throw new ArgumentOutOfRangeException(nameof(state), state, "Pass a single state."),
+    };
 
     internal Task PerformAsync(ElementLocator locator, ElementAction action, TimeSpan? timeout) =>
         Recorder.RunAsync($"{action.Describe()} {locator}", StepKind.Action, () => Driver.PerformAsync(locator.Chain, action, timeout ?? DefaultTimeout, CancellationToken));

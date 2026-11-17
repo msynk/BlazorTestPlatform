@@ -17,6 +17,10 @@ public static class DriverJson
         return Write(writer => WriteSteps(writer, chain));
     }
 
+    /// <summary>The pseudo-class names (without the colon) of <paramref name="states"/>, for the in-browser engine.</summary>
+    public static string[] PseudoClassNames(PseudoState states) =>
+        [.. Enum.GetValues<PseudoState>().Where(s => s != PseudoState.None && states.HasFlag(s)).Select(s => StoryContext.PseudoClass(s)[1..])];
+
     /// <summary>Parses the measurements the in-browser engine returns (<c>measureJson</c>).</summary>
     public static IReadOnlyList<ElementMeasurement> Measurements(string? json)
     {

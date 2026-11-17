@@ -45,6 +45,7 @@ btp init     [-f xunit|nunit|mstest|tunit] [--ci github|azure|gitlab|none] [--co
 btp approve  [-r <results>...] [-f|--filter <glob>] [--dry-run]
 btp perf approve [-r <results>...] [-f|--filter <glob>] [--baseline <file>]
 btp a11y init [-r <results>...] [--force]   |   btp a11y status [-r <results>...]
+btp snapshots update-source [-r <results>...] [--dry-run] [--source-root <dir>]
 btp flaky --history <file>
 btp clean
 ```

@@ -59,6 +59,9 @@ internal static class Scripts
     /// <summary>The story's accessibility tree as text (the port of <c>AriaSnapshot</c>).</summary>
     public const string AriaSnapshot = "async () => " + Engine + ".ariaSnapshot()";
 
+    /// <summary>Forces pseudo-classes on the single element a locator chain matches; returns null, or why it could not.</summary>
+    public const string ForcePseudo = "async ([steps, names]) => " + Engine + ".forcePseudo(steps, names)";
+
     /// <summary>The single element a locator chain matches, or a string saying why there is none.</summary>
     public const string Single = "async (steps) => " + Engine + ".single(steps)";
 

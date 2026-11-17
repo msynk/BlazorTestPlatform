@@ -144,6 +144,15 @@ public sealed class ElementLocator
     public Task DragToAsync(ElementLocator target) =>
         _context.PerformAsync(this, new ElementAction(ElementActionKind.DragTo) { Target = (target ?? throw new ArgumentNullException(nameof(target))).Chain }, null);
 
+    /// <summary>
+    /// Makes the element match CSS user-action pseudo-classes (<c>:hover</c>, <c>:focus-visible</c>...) without a pointer or
+    /// keyboard, as storybook-addon-pseudo-states does: hover and focus styles can be screenshotted
+    /// (<c>ExpectScreenshotAsync</c>) and checked (<c>ToHaveCssAsync</c>) deterministically. Replaces the states forced
+    /// earlier in the story; <see cref="PseudoState.None"/> clears them. Rules in the page's stylesheets apply; inline
+    /// styles and cross-origin stylesheets do not. Needs a driver that applies CSS: bUnit skips the story, with the reason.
+    /// </summary>
+    public Task ForceStateAsync(PseudoState states) => _context.ForcePseudoStatesAsync(this, states);
+
     /// <summary>Scrolls the element into view.</summary>
     public Task ScrollIntoViewAsync() => _context.PerformAsync(this, new ElementAction(ElementActionKind.ScrollIntoView) { Force = true }, null);
 

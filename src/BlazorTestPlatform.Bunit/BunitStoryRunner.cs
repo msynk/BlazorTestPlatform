@@ -66,6 +66,7 @@ public static class BunitStoryRunner
 
         string? markup = null;
         IReadOnlyList<ArtifactReference> attachments = [];
+        IReadOnlyList<AriaSnapshotMismatch> ariaMismatches = [];
         IReadOnlyList<HttpRequestRecord> httpRequests = [];
         AccessibilityReport? a11y = null;
         IReadOnlyList<string> a11yFailures = [];
@@ -95,6 +96,7 @@ public static class BunitStoryRunner
                 {
                     markup = Truncate(session.Markup, 20_000);
                     attachments = WriteAttachments(session.StoryContext.Attachments, options, settings, key);
+                    ariaMismatches = session.StoryContext.AriaSnapshotMismatches;
                     httpRequests = await session.Driver.GetHttpRequestsAsync(timeout.Token).ConfigureAwait(false);
                 }
 
@@ -190,6 +192,7 @@ public static class BunitStoryRunner
                 Markup = markup,
                 HttpRequests = httpRequests,
                 Artifacts = attachments,
+                AriaSnapshotMismatches = ariaMismatches,
             });
         }
     }

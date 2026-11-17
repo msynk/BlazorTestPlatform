@@ -1,0 +1,12 @@
+@namespace BlazorTestPlatform.Demo.UI.Stories
+@inject TimeProvider Time
+
+@* Fixture for the time zone story: local time through the injected TimeProvider, and the zone the runtime itself uses. *@
+<dl aria-label="Time zone">
+    <dt>Time provider</dt>
+    <dd data-testid="provider-zone">@Time.LocalTimeZone.Id</dd>
+    <dt>Local time</dt>
+    <dd data-testid="local-time">@Time.GetLocalNow().ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)</dd>
+    <dt>Runtime</dt>
+    <dd data-testid="runtime-zone">@TimeZoneInfo.Local.Id</dd>
+</dl>

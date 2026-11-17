@@ -10,10 +10,15 @@ namespace BlazorTestPlatform.Bunit;
 public static class AccessibilityReviews
 {
     /// <summary>Computes the current fingerprint of every component (story title) in the catalog.</summary>
-    public static async Task<IReadOnlyDictionary<string, string>> ComputeFingerprintsAsync(StoryCatalog catalog, BunitStoryOptions? options = null, CancellationToken cancellationToken = default)
+    public static async Task<IReadOnlyDictionary<string, string>> ComputeFingerprintsAsync(StoryCatalog catalog, BunitStoryOptions? options = null, CancellationToken cancellationToken = default) =>
+        (await ComputeBothAsync(catalog, options, cancellationToken).ConfigureAwait(false)).Current;
+
+    // The set-based fingerprint reviews record now, and the ordered one earlier versions recorded.
+    private static async Task<(IReadOnlyDictionary<string, string> Current, IReadOnlyDictionary<string, string> Legacy)> ComputeBothAsync(StoryCatalog catalog, BunitStoryOptions? options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         var fingerprints = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        var legacy = new SortedDictionary<string, string>(StringComparer.Ordinal);
         foreach (var group in catalog.Groups)
         {
             var markups = new List<string>();
@@ -24,10 +29,11 @@ public static class AccessibilityReviews
                 markups.Add(session.Markup);
             }
 
-            fingerprints[group.Title] = AccessibilityFingerprint.Compute(markups);
+            fingerprints[group.Title] = AccessibilityFingerprint.ComputeSet(markups);
+            legacy[group.Title] = AccessibilityFingerprint.Compute(markups);
         }
 
-        return fingerprints;
+        return (fingerprints, legacy);
     }
 
     /// <summary>
@@ -37,9 +43,9 @@ public static class AccessibilityReviews
     public static async Task<IReadOnlyList<ReviewGateEntry>> VerifyAsync(StoryCatalog catalog, ManualReviewGateOptions? gate = null, BunitStoryOptions? options = null, CancellationToken cancellationToken = default)
     {
         var settings = options?.Settings ?? BtpSettings.Current;
-        var fingerprints = await ComputeFingerprintsAsync(catalog, options, cancellationToken).ConfigureAwait(false);
+        var (fingerprints, legacy) = await ComputeBothAsync(catalog, options, cancellationToken).ConfigureAwait(false);
         var store = new ManualReviewStore(settings.ReviewsDirectoryPath);
-        var entries = ManualReviewGate.Evaluate(fingerprints, store);
+        var entries = ManualReviewGate.Evaluate(fingerprints, store, legacy);
 
         var templates = new ManualReviewStore(Path.Combine(settings.ResultsDirectoryPath, "a11y-review-templates"));
         foreach (var entry in entries.Where(e => e.State is ReviewGateState.Missing or ReviewGateState.Stale))

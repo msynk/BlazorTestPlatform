@@ -76,5 +76,24 @@ public sealed class ButtonStories : Stories<Button>
                 await button.ClickAsync(force: true);
                 await ctx.ExpectAction("OnClick").NotToHaveBeenCalledAsync();
             }));
+
+        stories.Add("Hover and focus looks", s => s
+            .Description("ForceStateAsync puts the button in :hover and :focus-visible without a pointer or keyboard, so both looks are checked (ToHaveCssAsync) and screenshotted (ExpectScreenshotAsync) deterministically. Needs CSS: bUnit skips it.")
+            .Play(async ctx =>
+            {
+                var button = ctx.GetByRole("button", "Save changes");
+
+                await button.ForceStateAsync(PseudoState.Hover);
+                await ctx.Expect(button).ToHaveCssAsync("backgroundColor", new System.Text.RegularExpressions.Regex(@"^rgb\((55, 48, 163|199, 210, 254)\)$"));
+                await ctx.ExpectScreenshotAsync("hover", button);
+
+                await button.ForceStateAsync(PseudoState.FocusVisible);
+                await ctx.Expect(button).ToHaveCssAsync("outlineStyle", "solid");
+                // The focus ring is drawn outside the button's box: capture the whole story.
+                await ctx.ExpectScreenshotAsync("focus-visible");
+
+                await button.ForceStateAsync(PseudoState.None);
+                await ctx.Expect(button).ToHaveCssAsync("outlineStyle", "none");
+            }));
     }
 }

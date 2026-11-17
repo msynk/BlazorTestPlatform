@@ -15,6 +15,7 @@ Settings are resolved in this order: environment variables, then `btp.json` in t
 | `BTP_LAST_FAILED` | `1`, `true` or `yes`: run only the stories with a failed result in the results directory (any driver or cell), read once when the run starts; when none failed, everything runs | off |
 | `BTP_FAIL_ON_FLAKY` | `1`, `true` or `yes`: a run that passes only on a retry fails (its attempts and diagnostics are kept) | off |
 | `BTP_MAX_FAILURES` | a number: after this many blocking failures in the test process, stories that start afterwards are reported as skipped (`0` never stops). Quarantined and expected failures do not count | 0 |
+| `BTP_EXPLORE_SEED` | an integer: the seed `ctx.ExploreAsync` picks actions with, to replay a reported failure or try other sequences | derived from the story's seed |
 | `BTP_DIAGNOSTICS` | `off`, `on-failure`, `always` (also `0`/`false`, `retain-on-failure`/`failure`, `on`/`1`) | `on-failure` |
 | `BTP_TIMEOUT_MS` | auto-wait timeout of assertions and actions in bUnit and Playwright runs (a positive number of milliseconds; anything else is an error) | 5000 |
 | `BTP_SNAPSHOT_DIR` / `BTP_RESULTS_DIR` / `BTP_PERF_BASELINE` / `BTP_REVIEWS_DIR` | paths (an empty value counts as unset) | `__snapshots__`, `TestResults/btp`, `__baselines__/performance.json`, `a11y-reviews` |

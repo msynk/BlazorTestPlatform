@@ -68,12 +68,12 @@ Chromium, Firefox, WebKit and the in-app driver), **Deferred** (with the reason)
 | 19 | Ignoring regions in markup | Chromatic `data-chromatic="ignore"` | **Done**: `data-btp-ignore` is always masked |
 | 20 | Container script cannot render one story's baselines | — | **Done**: `scripts/visual-tests.*` pass `BTP_GREP`, `BTP_GREP_INVERT`, `BTP_TAGS` and `BTP_SHARD` through |
 | 21 | Markup snapshots with scrubbers (deferred #20) | Verify, Jest, syrupy | Deferred: browsers and bUnit serialize markup differently; the accessibility tree is the cross-driver structural snapshot |
-| 22 | Inline snapshot rewriting (deferred #21) | insta, Playwright `updateSourceMethod` | Deferred: needs a Roslyn rewriter and a review flow |
-| 23 | Stateful property-based exploration with shrinking (deferred #22) | Hypothesis, fast-check, CsCheck | Deferred: needs generators for actions, replay of a seed and shrinking across fresh renders; a design of its own |
+| 22 | Inline snapshot rewriting (deferred #21) | insta, Playwright `updateSourceMethod` | **Done** for accessibility snapshots: call sites recorded by `[CallerFilePath]`/`[CallerLineNumber]`, `btp snapshots update-source` rewrites the raw literal when every run agrees and nothing (patterns, variables) would be lost |
+| 23 | Stateful property-based exploration (deferred #22) | Hypothesis, fast-check, CsCheck | **Done** without shrinking: `ctx.ExploreAsync` (actions with preconditions, invariants, seeded steps, replay by seed, regression script). Shrinking stays deferred: it needs a fresh render per attempt |
 | 24 | Persistent component state, prerender handoff, circuit pause and resume (deferred #23) | .NET 10/11, bUnit `AddBunitPersistentComponentState` | Deferred: .NET 11 adds nothing new here except server-initiated pause (`Circuit.RequestCircuitPauseAsync`); observing the handoff in browsers needs host support |
-| 25 | Pseudo-state forcing (deferred #24) | storybook-addon-pseudo-states | Deferred: needs stylesheet rewriting in browsers and in bUnit's cascade |
+| 25 | Pseudo-state forcing (deferred #24) | storybook-addon-pseudo-states | **Done** in browsers: `ForceStateAsync(PseudoState...)` rewrites stylesheet rules in Chromium, Firefox, WebKit and the in-app driver; bUnit's cascade does not model pointer state, so it skips such stories |
 | 26 | Autodocs, component harnesses, MCP server (deferred #26) | Storybook 10, Angular CDK | Deferred: product features beyond the testing core |
-| 27 | Culture and time-zone matrix axis, named modes (deferred #27) | Chromatic modes | Deferred: the cell key is part of result files and baselines; per-story `Culture` and themes cover it |
+| 27 | Culture and time-zone matrix axis, named modes (deferred #27) | Chromatic modes | **Partly done**: per-story `TimeZone(...)` joins `Culture(...)`; a matrix axis stays deferred (the cell key is part of result files and baselines) |
 | 28 | HAR record and replay, WebSocket and SignalR mocking (deferred #28) | Playwright `routeWebSocket`, HAR | Deferred: `MockHttp` covers HTTP inside the app; SignalR needs a fake `HubConnection` design |
 | 29 | Code coverage merged with story coverage (deferred #29) | coverlet, MTP | Deferred: a reporting project |
 | 30 | Playwright 1.64 | Playwright | Deferred: an upgrade re-renders every baseline; use the "Regenerate visual baselines" workflow, as `docs/ci.md` describes |
@@ -83,6 +83,8 @@ Chromium, Firefox, WebKit and the in-app driver), **Deferred** (with the reason)
 | 34 | Tags that carry options (timeouts, retries per tag) | Vitest 4.1 | Deferred: `Slow()` and `Timeout(...)` cover the common case |
 | 35 | Clock `pauseAt`, `fastForward`, `setSystemTime` | Playwright clock | Deferred: `FakeTimeProvider` fires due timers whenever time moves, so "move without firing" cannot be honored; `AdvanceTimeAsync` covers `runFor` |
 | 36 | Microsoft.AspNetCore.Components.Testing | .NET 11 | Watched: still preview, app-level E2E (not components) |
+| 37 | A story repeating a state marked a manual review stale | found while adding demo stories | **Done**: set-based review fingerprints, earlier fingerprints still accepted |
+| 38 | Test framework updates | nuget.org | **Done**: patch updates; the NUnit package verified on NUnit 5 |
 
 ## Rules that came out of the work
 

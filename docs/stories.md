@@ -135,6 +135,8 @@ stories.Add("German totals", s => s.Culture("de-DE").Play(async ctx =>
     await ctx.Expect(ctx.GetByTestId("total")).ToHaveTextAsync("1.234,50 €")));
 ```
 
+`TimeZone("Asia/Tokyo")` renders a story in a time zone (IANA ids; Windows ids are converted). Every driver gives the story a `TimeProvider` whose `LocalTimeZone` is that zone (with `UseFakeTime`, the fake clock carries it), so components that compute local time through an injected `TimeProvider` (`Time.GetLocalNow()`) render the same everywhere. Browsers run in that zone too, which JavaScript and WebAssembly's `TimeZoneInfo.Local` follow. Server-side code that reads `DateTime.Now` or `TimeZoneInfo.Local` keeps the host's zone: inject `TimeProvider` instead. An unknown zone fails when the catalog is built.
+
 ## Known failures, unfinished and slow stories
 
 * `ExpectFailure("#123: focus is lost after hydration")` marks a known bug, as Playwright's `test.fail()` or pytest's strict `xfail`: the story keeps running, a failure is reported as expected and passes, and a run that passes on its first attempt fails with "expected to fail", so the annotation goes once the bug is fixed. A failure on any attempt counts, so an intermittent known issue does not fail on a retry. `when:` limits it to some runs: `ExpectFailure("#7", run => run.HostingModel == HostingModel.InteractiveWebAssembly)` (the run's `Driver` is there too). Reports show "expected failure" or "unexpectedly passed"; the in-app driver applies it as well.

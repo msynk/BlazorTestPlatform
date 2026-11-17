@@ -108,6 +108,7 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
     private DateTimeOffset? _fakeTime;
     private TimeSpan? _timeout;
     private string? _culture;
+    private string? _timeZone;
     private string? _skipReason;
     private bool _autoActions = true;
     private readonly List<CapabilityRequirement> _requirements = [];
@@ -516,6 +517,20 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
         return this;
     }
 
+    /// <summary>
+    /// Renders the story in a time zone (<c>"Europe/Berlin"</c>, <c>"America/New_York"</c>; Windows ids are converted to
+    /// IANA). Every driver gives the story a <see cref="System.TimeProvider"/> whose <c>LocalTimeZone</c> is that zone (the
+    /// fake clock's, with <c>UseFakeTime</c>), so components that convert through <c>TimeProvider</c> render the same
+    /// local times everywhere; browsers also run with that time zone, which WebAssembly's <c>TimeZoneInfo.Local</c> and
+    /// JavaScript follow. Code that reads <c>DateTime.Now</c> or <c>TimeZoneInfo.Local</c> on the server cannot be moved:
+    /// inject <c>TimeProvider</c> instead.
+    /// </summary>
+    public StoryBuilder<TComponent> TimeZone(string timeZoneId)
+    {
+        _timeZone = StoryTimeZone.Normalize(timeZoneId);
+        return this;
+    }
+
     /// <summary>Marks the story as skipped by test runners (it still appears in the workbench).</summary>
     public StoryBuilder<TComponent> Skip(string reason)
     {
@@ -668,6 +683,7 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
             Matrix = _matrix.Clone(),
             Timeout = _timeout,
             Culture = _culture,
+            TimeZone = _timeZone,
             SkipReason = _skipReason,
             Metadata = new Dictionary<string, object?>(_metadata),
             Requirements = _emulation.IsEmpty

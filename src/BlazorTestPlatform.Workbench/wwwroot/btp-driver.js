@@ -1124,6 +1124,52 @@ export async function measure(steps, property, pseudo, wantRatio) {
     }];
 }
 
+// Forced pseudo-classes (storybook-addon-pseudo-states' approach, in every browser): each style rule whose selector
+// uses a user-action pseudo-class gets a twin in which the pseudo-class is an attribute selector, and the element (and,
+// for :hover, :active and :focus-within, its ancestors, as with a real pointer) carries the attribute.
+const PSEUDO_CLASSES = ['focus-visible', 'focus-within', 'hover', 'active', 'focus', 'visited'];
+const PSEUDO_PATTERN = new RegExp(':(' + PSEUDO_CLASSES.join('|') + ')(?![\\w-])', 'g');
+const PSEUDO_ATTRIBUTE = 'data-btp-pseudo';
+const rewrittenSheets = new WeakSet();
+
+function rewriteRules(list) {
+    // Backwards, so inserted twins do not shift the rules still to visit.
+    for (let i = list.cssRules.length - 1; i >= 0; i--) {
+        const rule = list.cssRules[i];
+        if (rule.cssRules && !(rule instanceof CSSStyleRule)) { rewriteRules(rule); continue; }
+        if (!(rule instanceof CSSStyleRule) || !PSEUDO_PATTERN.test(rule.selectorText)) continue;
+        PSEUDO_PATTERN.lastIndex = 0;
+        const selector = rule.selectorText.replace(PSEUDO_PATTERN, (_, name) => `[${PSEUDO_ATTRIBUTE}~="${name}"]`);
+        try { list.insertRule(`${selector} { ${rule.style.cssText} }`, i + 1); } catch { /* a selector the engine cannot parse */ }
+    }
+}
+
+function rewriteStylesheets() {
+    for (const sheet of Array.from(document.styleSheets)) {
+        if (rewrittenSheets.has(sheet)) continue;
+        try { rewriteRules(sheet); } catch { /* cross-origin sheets cannot be read */ }
+        rewrittenSheets.add(sheet);
+    }
+}
+
+/** Forces pseudo-classes on the single element a locator matches (empty clears): IStoryDriver.ForcePseudoStatesAsync. */
+export function forcePseudo(stepsJson, names) {
+    const matches = resolve(JSON.parse(stepsJson));
+    if (matches.length !== 1) return matches.length === 0 ? 'no element matches' : `strict mode violation: ${matches.length} elements match`;
+    rewriteStylesheets();
+    const root = storyRoot();
+    for (const e of root.querySelectorAll(`[${PSEUDO_ATTRIBUTE}]`)) e.removeAttribute(PSEUDO_ATTRIBUTE);
+    const own = names.filter(n => n !== 'focus-within');
+    const inherited = names.filter(n => n === 'hover' || n === 'active' || n === 'focus-within');
+    const set = (e, list) => {
+        const merged = new Set([...(e.getAttribute(PSEUDO_ATTRIBUTE) || '').split(' ').filter(Boolean), ...list]);
+        if (merged.size) e.setAttribute(PSEUDO_ATTRIBUTE, [...merged].join(' '));
+    };
+    set(matches[0], names.includes('focus-within') ? [...own, 'focus-within'] : own);
+    for (let e = matches[0].parentElement; e && root.contains(e); e = e.parentElement) set(e, inherited);
+    return null;
+}
+
 /** The single element a locator chain matches, or why there is none (screenshots of a locator). */
 export function single(stepsJson) {
     const matches = resolve(JSON.parse(stepsJson));
