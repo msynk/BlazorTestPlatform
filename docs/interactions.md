@@ -418,6 +418,31 @@ Declare it on the story (`Requires(DriverCapabilities.CircuitControl, "...")`) s
 static SSR, ASP.NET Core rejects a `[PersistentState]` component that has no render mode ("The registered callback
 PersistProperty must be associated with a component or define an explicit render mode type").
 
+## Component harnesses
+
+A component harness is the test API a design system ships with a component, as Angular CDK's harnesses: tests in every
+app that uses the component drive it through methods (`ConfirmAsync`, `PickAsync(date)`) instead of its markup, so the
+markup can change without breaking them. A harness names how to find the component's root and builds on locators, so
+one harness works in bUnit, Playwright and the in-app driver:
+
+```csharp
+public sealed class DialogHarness : ComponentHarness
+{
+    protected override By HostQuery => By.Role("dialog");
+    public Task ConfirmAsync() => Locate(By.Css(".c-dialog__actions button")).Last.ClickAsync();
+    public Task ExpectClosedAsync() => Context.Expect(Host).ToHaveCountAsync(0);
+}
+
+var dialog = ctx.Harness<DialogHarness>();          // inside the story; within: and nth: narrow it
+await dialog.ConfirmAsync();
+var counters = await ctx.HarnessesAsync<CounterHarness>(); // one per instance on screen, in document order
+```
+
+Lookups are lazy and strict, like locators: an action waits for the component and fails when several match (pass
+`nth`). Harnesses compose: inside a harness, `Harness<FieldHarness>()` finds a component inside its host. Put a design
+system's harnesses in a package next to its stories, so consuming apps get both. The demo's `Overlays/Dialog/Confirm`
+uses `DialogHarness`.
+
 ## Three drivers, one script
 
 | Driver | Where the play function runs | Used by |

@@ -1,0 +1,11 @@
+<article class="counter" aria-label="@Name">
+    <output>@count</output>
+    <button @onclick="() => count++">Add @Name</button>
+</article>
+
+@code {
+    private int count;
+
+    /// <summary>What is counted.</summary>
+    [Parameter] public string Name { get; set; } = string.Empty;
+}

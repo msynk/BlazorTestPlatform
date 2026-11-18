@@ -82,14 +82,16 @@ public sealed class DialogStories : Stories<Dialog>
             }));
 
         stories.Add("Confirm", s => s
-            .Description("Confirming raises OnConfirm once, closes the dialog and returns focus to the trigger.")
+            .Description("Confirming raises OnConfirm once, closes the dialog and returns focus to the trigger. The dialog is driven through its harness (DialogHarness), the test API a design system ships with a component.")
             .Play(async ctx =>
             {
                 await ctx.GetByRole("button", "Publish…", exact: true).ClickAsync();
-                await ctx.GetByRole("button", "Publish", exact: true).ClickAsync();
+                var dialog = ctx.Harness<Harnesses.DialogHarness>();
+                await dialog.ExpectOpenAsync("Publish changes?");
+                await dialog.ConfirmAsync();
 
                 await ctx.ExpectAction("OnConfirm").ToHaveBeenCalledAsync(times: 1);
-                await ctx.Expect(ctx.GetByRole("dialog")).ToHaveCountAsync(0);
+                await dialog.ExpectClosedAsync();
                 await ctx.Expect(ctx.GetByRole("button", "Publish…", exact: true)).ToBeFocusedAsync();
             }));
     }

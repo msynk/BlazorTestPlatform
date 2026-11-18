@@ -1,0 +1,7 @@
+@* Harness fixture: a board of counters, each with its own button and value. *@
+<section class="board" aria-label="Counters">
+    @foreach (var name in new[] { "Apples", "Pears", "Plums" })
+    {
+        <CounterCard Name="@name" />
+    }
+</section>

@@ -211,6 +211,7 @@ Research and the full gap list, including what was deferred and why: [reports/Ga
 | U-35 | Component documentation pages (`ComponentDocs`, `ComponentDocsView`, `WorkbenchUrls.Docs`) | P2 | Core, Workbench | Verified | demo `ComponentDocsTests` (model: types, defaults, options, kinds, XML summaries; page in Chromium: parameter rows, one live preview per story, sidebar link, axe without serious violations; a faded badge failed color contrast at first and was restyled); `ComponentDocsTests` in Core (summary text, type names). A review found summaries with `&` shown escaped twice, and two titles sharing a slug opening the same page: both fixed | getting-started.md |
 | U-36 | `btp mcp`: Model Context Protocol server for coding agents (`BtpMcpTools`, read-only tools over the results) | P2 | Cli | Verified | `McpTests`: the tools on a written run (summary, filters, failure detail with violations and artifacts, causes, pending markup snapshots, missing coverage); an MCP client launching `btp mcp` over stdio, listing the six read-only tools and calling `get_failure` | ci.md |
 | U-37 | Playwright 1.64.1 and re-rendered Linux baselines | P2 | Playwright, demo | Verified | `scripts/visual-tests.sh --update=changed` in `v1.64.1-noble`: 621 of 622 (the provenance check ran before the manifest was relabelled), 3 baselines changed by 0.0003% to 0.007% of pixels, 126 missing baselines of 40 stories written and spot-checked; then the comparison run (below) | ci.md |
+| U-38 | Component harnesses (`ComponentHarness`, `ctx.Harness<T>`, `ctx.HarnessesAsync<T>`) | P2 | Core, demo | Verified | `HarnessTests` (instances in document order, composition, strict lookup with several matches, unattached use); demo `DialogHarness` in `Overlays/Dialog/Confirm`: bUnit, Chromium under SSR, Server, WebAssembly and Auto, dark and mobile, Firefox and WebKit | interactions.md |
 | U-15 | Container scripts pass `BTP_GREP`, `BTP_GREP_INVERT`, `BTP_TAGS`, `BTP_SHARD` | P3 | scripts | Verified | Linux baselines of the new story rendered with `BTP_GREP=... scripts/visual-tests.sh --update` | ci.md |
 
 ## Verification log
@@ -258,6 +259,13 @@ Research and the full gap list, including what was deferred and why: [reports/Ga
 | 2026-11-18 | unit and in-memory suites after U-34 and U-35 and the third review's fixes, each on net10.0 and net11.0 | 1,648 tests: 1,632 passed, 16 skipped by design (824 per framework) |
 | 2026-11-18 | `dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests` (full suite, 103 stories, with clock control and the docs pages) | 820 of 820 |
 | 2026-11-18 | trimmed publish after U-34 and U-35 (same command) | no trimming warnings |
+| 2026-11-18 | `scripts/visual-tests.sh` (comparison, `BTP_UPDATE_SNAPSHOTS=none`, as CI) in `v1.64.1-noble` after the re-render | 622 of 622 |
+| 2026-11-18 | unit and in-memory suites on Playwright 1.64.1 with `btp mcp`, each on net10.0 and net11.0 | 1,656 tests: 1,640 passed, 16 skipped by design (828 per framework) |
+| 2026-11-18 | local Windows baselines refreshed for the 1.64.1 browsers (`BTP_UPDATE_SNAPSHOTS=changed`; not committed), then the full demo suite on Windows | 815 of 820: the three Firefox Todo-list cases still compared with 1.63 Windows copies (refreshed: 158 of 158 cross-browser cases), and the Firefox circuit and metrics tests at 60 s under full load (7 of 7 alone) |
+| 2026-11-18 | two more full demo runs on Windows with complete output, to catch the Firefox timeouts | 820 of 820 both times: rare load flakes, which CI's retries absorb |
+| 2026-11-18 | Markdown link and anchor check over the 21 guides, reports and READMEs | no broken links |
+| 2026-11-18 | `dotnet build -c Release -p:ContinuousIntegrationBuild=true` (warnings as errors, as CI) | 0 warnings |
+| 2026-11-18 | unit and in-memory suites after U-38, each on net10.0 and net11.0; trimmed publish | 1,662 tests: 1,646 passed, 16 skipped by design (831 per framework); no trimming warnings |
 
 ## Deferred
 
