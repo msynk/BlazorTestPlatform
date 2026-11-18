@@ -42,6 +42,8 @@ export function register(dotNetRef, storyId, renderer) {
         setArgs: (token) => dotNetRef.invokeMethodAsync('SetArgs', token),
         hasFakeTime: () => dotNetRef.invokeMethodAsync('HasFakeTime'),
         advanceTime: (ms) => dotNetRef.invokeMethodAsync('AdvanceTime', ms),
+        getTime: () => dotNetRef.invokeMethodAsync('GetTime'),
+        setSystemTime: (iso) => dotNetRef.invokeMethodAsync('SetSystemTime', iso),
         waitForIdle: () => dotNetRef.invokeMethodAsync('WaitForIdle'),
         // Workbench inspector and recorder (the same engine the drivers use).
         getConsole: () => JSON.stringify(window.__btpConsole || []),

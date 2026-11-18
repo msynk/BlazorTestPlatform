@@ -414,6 +414,19 @@ public interface IStoryDriver : IAsyncDisposable
     /// <summary>Advances the story's fake <see cref="TimeProvider"/>. Requires <see cref="DriverCapabilities.FakeTime"/>.</summary>
     Task AdvanceTimeAsync(TimeSpan delta, CancellationToken cancellationToken);
 
+    /// <summary>The wall-clock time of the story's fake clock (<see cref="StoryClock"/>). Requires <see cref="DriverCapabilities.FakeTime"/>.</summary>
+    /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
+    Task<DateTimeOffset> GetTimeAsync(CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"The {Name} driver cannot read the story's clock.");
+
+    /// <summary>
+    /// Makes the story's wall clock read <paramref name="now"/> without firing timers (<see cref="StoryClock.SetSystemTime"/>).
+    /// Requires <see cref="DriverCapabilities.FakeTime"/>.
+    /// </summary>
+    /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
+    Task SetSystemTimeAsync(DateTimeOffset now, CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"The {Name} driver cannot set the story's clock.");
+
     /// <summary>Current markup of the story root.</summary>
     Task<string> GetMarkupAsync(CancellationToken cancellationToken);
 

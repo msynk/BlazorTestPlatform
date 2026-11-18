@@ -41,16 +41,31 @@ btp report   [-r <results>...] [-o <dir>] [--junit <file>] [--markdown <file>] [
              [--history <file>] [--run-id <id>] [--fail-on-failures]
              [--pr-comment] [--pr <number>] [--repository <owner/name>] [--report-url <url>]
              [--sarif <file>] [--source-root <dir>] [--ctrf <file>] [--archive <dir>] [--trigger <name>]
+             [--code-coverage <file or dir>...]
 btp init     [-f xunit|nunit|mstest|tunit] [--ci github|azure|gitlab|none] [--component <Type>] [--namespace <ns>] [--force]
 btp approve  [-r <results>...] [-f|--filter <glob>] [--dry-run]
 btp perf approve [-r <results>...] [-f|--filter <glob>] [--baseline <file>]
 btp a11y init [-r <results>...] [--force]   |   btp a11y status [-r <results>...]
 btp snapshots update-source [-r <results>...] [--dry-run] [--source-root <dir>]
+btp snapshots accept [--dry-run]
+btp mcp      [-r <results>...]
 btp flaky --history <file>
 btp clean
 ```
 
 Exit codes: `report` returns 2 when there are no results, and with `--fail-on-failures` 1 when a story failed or a result file could not be read (a crashed run's file must not hide a failure; unreadable files are listed as warnings either way). `approve` returns 1 when some snapshot could not be approved. `clean` returns 1 when it refuses to delete the results directory (see [configuration](configuration.md#environment-variables)).
+
+`btp mcp` serves the results to coding agents over the [Model Context Protocol](https://modelcontextprotocol.io) on
+stdio, so an assistant in the editor can ask what failed and why without parsing files. Its tools are read-only (nothing
+runs, nothing changes) and answer in text: `run_summary`, `list_results` (by outcome or text), `get_failure` (category
+and likely cause, error, last steps, console, accessibility violations, visual diffs, artifact paths and the command
+that reruns the story), `failures_by_cause`, `pending_reviews` (visual baselines, received markup snapshots and
+accessibility snapshots, with the command that accepts each) and `story_coverage`. Register it from the test project's
+directory, for example in Claude Code (`claude mcp add btp -- btp mcp`) or VS Code (`.vscode/mcp.json`):
+
+```json
+{ "servers": { "btp": { "type": "stdio", "command": "btp", "args": ["mcp", "-r", "tests/MyDesignSystem.Tests/TestResults/btp"] } } }
+```
 
 `btp approve` writes baselines only into the project's snapshot directory, named after the snapshot, and copies only PNG images found inside the results directory it read, so it is safe to run on results downloaded from CI (`btp approve -r path/to/downloaded/btp`). A corrupt flake history (for example a truncated cache entry) is reset with a warning instead of failing the report, and history and baseline files are written atomically.
 

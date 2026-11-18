@@ -197,6 +197,17 @@ public static class WorkbenchUrls
         return $"{WorkbenchOptions.FrameRoute}/{Uri.EscapeDataString(storyId)}?{string.Join('&', query)}";
     }
 
+    /// <summary>
+    /// URL of a component's documentation page, by <see cref="StoryGroup.Key"/> (<c>inputs-button</c>) or, when two titles
+    /// share a key, by title (<c>Inputs/Button</c>).
+    /// </summary>
+    public static string Docs(string componentKey, string? theme = null, string? viewport = null, HostingModel? hostingModel = null)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(componentKey);
+        var shell = Shell(storyId: null, theme, viewport, hostingModel);
+        return shell + (shell.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "docs=" + Uri.EscapeDataString(componentKey);
+    }
+
     /// <summary>URL of the workbench UI for a story.</summary>
     public static string Shell(string? storyId = null, string? theme = null, string? viewport = null, HostingModel? hostingModel = null, bool autoPlay = false) =>
         Shell(storyId, theme, viewport, hostingModel, autoPlay, args: null);

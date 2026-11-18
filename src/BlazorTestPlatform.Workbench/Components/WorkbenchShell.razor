@@ -9,7 +9,7 @@
 @* Disabled (production without opt-in) or unauthorized: nothing but a 404. *@
 @if (allowed == true)
 {
-<PageTitle>@(selected is null ? Options.Title : $"{selected.Path} · {Options.Title}")</PageTitle>
+<PageTitle>@(selected is not null ? $"{selected.Path} · {Options.Title}" : docsGroup is not null ? $"{docsGroup.Title} docs · {Options.Title}" : Options.Title)</PageTitle>
 
 <header class="btp-header">
     <a class="btp-brand" href="@WorkbenchUrls.Shell()">
@@ -35,10 +35,13 @@
                 <h2>@category.Key</h2>
                 @foreach (var group in category)
                 {
-                    var open = selected is not null && selected.Title == group.Title || !string.IsNullOrWhiteSpace(Query);
+                    var open = selected is not null && selected.Title == group.Title || docsGroup == group || !string.IsNullOrWhiteSpace(Query);
                     <details open="@open">
                         <summary>@ComponentLabel(group)</summary>
                         <ul>
+                            <li class="btp-docs-link">
+                                <a href="@WorkbenchUrls.Docs(DocsKey(group), ThemeName, ViewportName, mode)" aria-current="@(docsGroup == group ? "page" : null)">Docs</a>
+                            </li>
                             @foreach (var story in group.Stories.Where(Matches))
                             {
                                 <li>
@@ -63,7 +66,11 @@
     </nav>
 
     <main class="btp-main" id="main">
-        @if (selected is null)
+        @if (selected is null && docsGroup is not null)
+        {
+            <ComponentDocsView Doc="ComponentDocs.For(docsGroup)" Coverage="@CoverageLine(docsGroup)" Mode="mode" Theme="@ThemeName" Viewport="@ViewportName" />
+        }
+        else if (selected is null)
         {
             <section class="btp-welcome">
                 <h1>@Options.Title</h1>
@@ -375,6 +382,12 @@
     [SupplyParameterFromQuery(Name = "mode")]
     public string? Mode { get; set; }
 
+    /// <summary>Key of the component whose documentation page is shown (<c>inputs-button</c>).</summary>
+    [SupplyParameterFromQuery(Name = "docs")]
+    public string? Docs { get; set; }
+
+    private StoryGroup? docsGroup;
+
     /// <summary>Search text.</summary>
     [SupplyParameterFromQuery(Name = "q")]
     public string? Query { get; set; }
@@ -444,6 +457,9 @@
         }
 
         selected = StoryId is not null && Catalog.TryGet(StoryId, out var story) ? story : null;
+        docsGroup = Docs is null ? null
+            : Catalog.Groups.FirstOrDefault(g => string.Equals(g.Title, Docs, StringComparison.Ordinal))
+                ?? Catalog.Groups.FirstOrDefault(g => string.Equals(g.Key, Docs, StringComparison.OrdinalIgnoreCase));
         theme = Options.ResolveTheme(ThemeName);
         viewport = Options.ResolveViewport(ViewportName);
         mode = HostingModelExtensions.TryParse(Mode, out var parsed) && parsed != HostingModel.InMemory ? parsed : Options.DefaultHostingModel;
@@ -477,6 +493,15 @@
     private BlazorTestPlatform.Coverage.StoryCoverageReport? catalogCoverage;
 
     private BlazorTestPlatform.Coverage.StoryCoverageReport CatalogCoverage => catalogCoverage ??= BlazorTestPlatform.Coverage.StoryCoverage.Analyze(Catalog);
+
+    // The slug (inputs-button), unless another title slugifies to it too: then the title, which is unique.
+    private string DocsKey(StoryGroup group) =>
+        Catalog.Groups.Count(g => string.Equals(g.Key, group.Key, StringComparison.OrdinalIgnoreCase)) > 1 ? group.Title : group.Key;
+
+    private string? CoverageLine(StoryGroup group) =>
+        CatalogCoverage.Components.FirstOrDefault(c => c.Title == group.Title) is { TotalStates: > 0 } component
+            ? $"State coverage: {component.CoveredStates}/{component.TotalStates}" + (component.MissingStates.Any() ? " · no story for " + string.Join(", ", component.MissingStates) : string.Empty)
+            : null;
 
     private string CoverageSummary(Story story)
     {

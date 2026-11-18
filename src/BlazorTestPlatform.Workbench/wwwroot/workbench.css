@@ -179,3 +179,16 @@ body:has(.btp-app) {
 .btp-inspector summary { cursor: pointer; font-weight: 600; }
 .btp-inspector pre { margin: 6px 0 0; max-height: 320px; overflow: auto; white-space: pre; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .btp-inspector ol { margin: 6px 0 0; padding-left: 22px; max-height: 240px; overflow: auto; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-word; }
+
+/* Component documentation pages (autodocs). */
+.btp-docs { display: grid; gap: 16px; }
+.btp-docs__header h1 { margin: 0 0 4px; }
+.btp-docs__summary { max-width: 72ch; }
+.btp-docs__parameters { width: 100%; border-collapse: collapse; }
+.btp-docs__parameters th, .btp-docs__parameters td { text-align: left; vertical-align: top; padding: 6px 8px; border-top: 1px solid var(--btp-border); }
+.btp-docs__parameters thead th { border-top: 0; color: var(--btp-muted); font-weight: 600; }
+.btp-docs__options { font-size: .85em; }
+.btp-docs__story h3 { margin: 0 0 6px; }
+.btp-docs__preview { width: 100%; height: 240px; border: 1px solid var(--btp-border); border-radius: 8px; background: #fff; }
+.btp-badge--muted { border-style: dashed; }
+.btp-docs-link a { font-style: italic; }

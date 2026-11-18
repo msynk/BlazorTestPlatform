@@ -520,6 +520,49 @@ public sealed class StoryContext
         return Recorder.RunAsync($"advance time {delta}", StepKind.Wait, () => Driver.AdvanceTimeAsync(delta, CancellationToken));
     }
 
+    /// <summary>The story clock's wall-clock time (requires <c>UseFakeTime</c> and <see cref="DriverCapabilities.FakeTime"/>).</summary>
+    public Task<DateTimeOffset> GetTimeAsync()
+    {
+        Require(DriverCapabilities.FakeTime, "reading the fake clock");
+        return Driver.GetTimeAsync(CancellationToken);
+    }
+
+    /// <summary>
+    /// Runs fake time until the clock reads <paramref name="when"/>, firing the timers due on the way, as Playwright's
+    /// <c>clock.pauseAt</c> (the fake clock is always paused between steps): <c>await ctx.AdvanceTimeToAsync(midnight)</c>.
+    /// Time cannot run backwards; <see cref="SetSystemTimeAsync"/> moves the wall clock either way without running it.
+    /// </summary>
+    public Task AdvanceTimeToAsync(DateTimeOffset when)
+    {
+        Require(DriverCapabilities.FakeTime, "advancing fake time");
+        return Recorder.RunAsync($"advance time to {when:O}", StepKind.Wait, async () =>
+        {
+            var now = await Driver.GetTimeAsync(CancellationToken).ConfigureAwait(false);
+            if (when < now)
+            {
+                throw new ArgumentOutOfRangeException(nameof(when), when, $"The story clock already reads {now:O}: time cannot run backwards. Use SetSystemTimeAsync to move the wall clock.");
+            }
+
+            await Driver.AdvanceTimeAsync(when - now, CancellationToken).ConfigureAwait(false);
+        });
+    }
+
+    /// <summary>
+    /// Makes the story's wall clock read <paramref name="now"/> (forwards or backwards) without firing timers, as
+    /// Playwright's <c>clock.setSystemTime</c> or a user changing the system clock: <c>TimeProvider.GetUtcNow()</c> and local
+    /// time change, timers, delays and stopwatches do not. Use it for clock changes, day rollovers seen on the next render,
+    /// or a token issued "in the future"; <see cref="AdvanceTimeAsync"/> runs time instead. Requires <c>UseFakeTime</c>.
+    /// </summary>
+    public Task SetSystemTimeAsync(DateTimeOffset now)
+    {
+        Require(DriverCapabilities.FakeTime, "setting the fake clock");
+        return Recorder.RunAsync($"set system time {now:O}", StepKind.Wait, async () =>
+        {
+            await Driver.SetSystemTimeAsync(now, CancellationToken).ConfigureAwait(false);
+            await Driver.WaitForIdleAsync(CancellationToken).ConfigureAwait(false);
+        });
+    }
+
     /// <summary>
     /// The policy <see cref="ExpectAccessibleAsync"/> evaluates with: runners set the run's policy (<c>btp.json</c> and run
     /// options); null uses <see cref="Configuration.BtpSettings.Current"/>.

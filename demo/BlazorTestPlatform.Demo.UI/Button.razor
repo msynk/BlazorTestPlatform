@@ -12,18 +12,25 @@
 </button>
 
 @code {
+    /// <summary>The label.</summary>
     [Parameter] public RenderFragment? ChildContent { get; set; }
 
+    /// <summary>The visual weight: one <see cref="ButtonVariant.Primary"/> action per view.</summary>
     [Parameter] public ButtonVariant Variant { get; set; } = ButtonVariant.Primary;
 
+    /// <summary>The size.</summary>
     [Parameter] public ButtonSize Size { get; set; } = ButtonSize.Medium;
 
+    /// <summary>Disables the button (it stays in the accessibility tree).</summary>
     [Parameter] public bool Disabled { get; set; }
 
+    /// <summary>Shows a spinner and marks the button busy (<c>aria-busy</c>) while work runs.</summary>
     [Parameter] public bool Loading { get; set; }
 
+    /// <summary>The HTML button type (<c>button</c>, <c>submit</c> or <c>reset</c>).</summary>
     [Parameter] public string Type { get; set; } = "button";
 
+    /// <summary>Raised on click, unless disabled or loading.</summary>
     [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
 
     [Parameter(CaptureUnmatchedValues = true)] public IReadOnlyDictionary<string, object>? AdditionalAttributes { get; set; }

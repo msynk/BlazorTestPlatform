@@ -307,11 +307,23 @@ public sealed class BunitStoryDriver : IStoryDriver
     /// <inheritdoc />
     public async Task AdvanceTimeAsync(TimeSpan delta, CancellationToken cancellationToken)
     {
-        var time = _context.Services.GetService<FakeTimeProvider>()
-            ?? throw new InvalidOperationException("The story does not use fake time. Call UseFakeTime(...) on the story.");
-        await _root.InvokeAsync(() => time.Advance(delta)).ConfigureAwait(false);
-        await WaitForIdleAsync(cancellationToken).ConfigureAwait(false);
+        // Stops at every timer occurrence on the way, settling in between, so loops of delays run once per period.
+        var clock = Clock();
+        await clock.AdvanceAsync(delta, step => _root.InvokeAsync(() => clock.Fake.Advance(step)), () => WaitForIdleAsync(cancellationToken)).ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public Task<DateTimeOffset> GetTimeAsync(CancellationToken cancellationToken) => Task.FromResult(Clock().GetUtcNow());
+
+    /// <inheritdoc />
+    public async Task SetSystemTimeAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var clock = Clock();
+        await _root.InvokeAsync(() => clock.SetSystemTime(now)).ConfigureAwait(false);
+    }
+
+    private StoryClock Clock() => _context.Services.GetService<StoryClock>()
+        ?? throw new InvalidOperationException("The story does not use fake time. Call UseFakeTime(...) on the story.");
 
     /// <inheritdoc />
     public Task<string> GetMarkupAsync(CancellationToken cancellationToken) => Task.FromResult(_root.Markup);

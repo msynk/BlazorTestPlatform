@@ -200,6 +200,16 @@ stories.Add("Recorded", s => s.Play(async ctx =>
 Add assertions (`ctx.Expect(...)`, `ctx.ExpectAriaSnapshotAsync(...)`) where the recording stops: a recording replays
 actions, it does not know what you meant to check.
 
+## Component documentation pages
+
+Each component in the sidebar has a **Docs** entry (`/_workbench?docs=inputs-button`), as Storybook's autodocs: the
+component's summary, a parameter table (name, type, default, the values of enum and bool parameters, required, and
+whether it is content, an event, cascading or spread attributes), its state coverage, and every story with its
+description and a live preview in the current render mode, theme and viewport. Summaries come from the component
+library's XML documentation: set `<GenerateDocumentationFile>true</GenerateDocumentationFile>` in its project (with
+`<NoWarn>$(NoWarn);CS1591</NoWarn>` if not everything is documented) and write `/// <summary>` on parameters, and on the
+component in a partial class (`Button.razor.cs`). `ComponentDocs.For(group)` gives the same model to your own pages.
+
 ## 6. First run
 
 ```bash

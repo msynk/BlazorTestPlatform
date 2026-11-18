@@ -1,0 +1,114 @@
+@* A component's documentation page (Storybook's autodocs): summary, parameters, state coverage and every story live. *@
+<article class="btp-docs" aria-labelledby="btp-docs-title">
+    <header class="btp-docs__header">
+        <h1 id="btp-docs-title">@Doc.Title</h1>
+        <p class="btp-muted"><code>@Doc.Component</code> · @Doc.Stories.Count @(Doc.Stories.Count == 1 ? "story" : "stories")</p>
+        @if (Doc.Summary is not null)
+        {
+            <p class="btp-docs__summary">@Doc.Summary</p>
+        }
+        @if (Coverage is not null)
+        {
+            <p class="btp-muted">@Coverage</p>
+        }
+    </header>
+
+    <section class="btp-panel" aria-labelledby="btp-docs-parameters">
+        <h2 id="btp-docs-parameters">Parameters</h2>
+        @if (Doc.Parameters.Count == 0)
+        {
+            <p class="btp-muted">No parameters.</p>
+        }
+        else
+        {
+            <table class="btp-docs__parameters">
+                <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Default</th><th scope="col">Description</th></tr></thead>
+                <tbody>
+                    @foreach (var parameter in Doc.Parameters)
+                    {
+                        <tr data-parameter="@parameter.Name">
+                            <th scope="row">
+                                <code>@parameter.Name</code>
+                                @if (parameter.Required)
+                                {
+                                    <span class="btp-badge" title="[EditorRequired]">required</span>
+                                }
+                                @if (parameter.Kind != ComponentParameterKind.Value)
+                                {
+                                    <span class="btp-badge btp-badge--muted">@KindLabel(parameter.Kind)</span>
+                                }
+                            </th>
+                            <td>
+                                <code>@parameter.Type</code>
+                                @if (parameter.Options.Count > 0)
+                                {
+                                    <div class="btp-muted btp-docs__options">@string.Join(" | ", parameter.Options)</div>
+                                }
+                            </td>
+                            <td>@if (parameter.Default is { Length: > 0 } value) { <code>@value</code> } else { <span class="btp-muted">—</span> }</td>
+                            <td>@(parameter.Summary ?? string.Empty)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    <section aria-labelledby="btp-docs-stories">
+        <h2 id="btp-docs-stories">Stories</h2>
+        @foreach (var story in Doc.Stories)
+        {
+            <section class="btp-panel btp-docs__story" aria-labelledby="@("btp-docs-" + story.Id)" data-story="@story.Id">
+                <h3 id="@("btp-docs-" + story.Id)"><a href="@WorkbenchUrls.Shell(story.Id, Theme, Viewport, Mode)">@story.Name</a></h3>
+                @if (!string.IsNullOrWhiteSpace(story.Description))
+                {
+                    <p>@story.Description</p>
+                }
+                @if (story.Tags.Count > 0 || story.HasPlay)
+                {
+                    <p class="btp-muted">
+                        @if (story.HasPlay)
+                        {
+                            <span class="btp-badge">play</span>
+                        }
+                        @foreach (var tag in story.Tags.Order(StringComparer.Ordinal))
+                        {
+                            <span class="btp-badge btp-badge--muted">@tag</span>
+                        }
+                    </p>
+                }
+                @if (Mode is { } mode && story.Matrix.Allows(mode))
+                {
+                    <iframe class="btp-docs__preview" title="Preview of @story.Path" loading="lazy"
+                            src="@WorkbenchUrls.Frame(story.Id, mode, Theme, Viewport, story.Prerender)"></iframe>
+                }
+            </section>
+        }
+    </section>
+</article>
+
+@code {
+    /// <summary>The page to show.</summary>
+    [Parameter, EditorRequired] public ComponentDoc Doc { get; set; } = default!;
+
+    /// <summary>The state coverage line, or null.</summary>
+    [Parameter] public string? Coverage { get; set; }
+
+    /// <summary>The render mode of the previews (null: no previews).</summary>
+    [Parameter] public HostingModel? Mode { get; set; }
+
+    /// <summary>Theme of the previews and links.</summary>
+    [Parameter] public string? Theme { get; set; }
+
+    /// <summary>Viewport of the previews and links.</summary>
+    [Parameter] public string? Viewport { get; set; }
+
+    private static string KindLabel(ComponentParameterKind kind) => kind switch
+    {
+        ComponentParameterKind.Content => "content",
+        ComponentParameterKind.Event => "event",
+        ComponentParameterKind.Attributes => "attributes",
+        ComponentParameterKind.Cascading => "cascading",
+        _ => "value",
+    };
+}

@@ -182,6 +182,21 @@ public sealed class PlaywrightStoryDriver : IStoryDriver
     }
 
     /// <inheritdoc />
+    public async Task<DateTimeOffset> GetTimeAsync(CancellationToken cancellationToken)
+    {
+        var text = await Page.EvaluateAsync<string>("async () => { if (!window.__btp) throw new Error('Story bridge not ready'); return await window.__btp.getTime(); }").ConfigureAwait(false);
+        return DateTimeOffset.Parse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
+    }
+
+    /// <inheritdoc />
+    public async Task SetSystemTimeAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        await Page.EvaluateAsync("async (iso) => { if (!window.__btp) throw new Error('Story bridge not ready'); await window.__btp.setSystemTime(iso); }",
+            now.ToString("O", System.Globalization.CultureInfo.InvariantCulture)).ConfigureAwait(false);
+        await SettleAsync().ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public Task<string> GetMarkupAsync(CancellationToken cancellationToken) => Page.Locator(RootSelector).InnerHTMLAsync();
 
     /// <inheritdoc />

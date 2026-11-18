@@ -441,3 +441,22 @@ stories.Add("Expires", s => s
 ```
 
 Components must inject `TimeProvider`. In browsers, the clock is advanced through the story frame bridge, under both Server and WebAssembly.
+
+Advancing stops at every timer occurrence on the way and lets the story settle in between, so a one-minute
+`Task.Delay` loop advanced by three minutes runs three times, as with a real clock and Playwright's `clock.runFor`. The
+story's `TimeProvider` is a `StoryClock`, which also moves the wall clock alone, as Playwright's `clock` API does:
+
+| Call | Effect |
+|---|---|
+| `ctx.AdvanceTimeAsync(TimeSpan)` | Runs time forward, firing every timer due (`clock.runFor`) |
+| `ctx.AdvanceTimeToAsync(DateTimeOffset)` | Runs time to an instant (`clock.pauseAt`; the fake clock is paused between steps anyway) |
+| `ctx.SetSystemTimeAsync(DateTimeOffset)` | Moves the wall clock either way without firing timers (`clock.setSystemTime`): `GetUtcNow()` and local time change, delays, timers and stopwatches do not |
+| `ctx.GetTimeAsync()` | The clock's current wall-clock time |
+
+```csharp
+await ctx.SetSystemTimeAsync(new DateTimeOffset(2026, 3, 2, 8, 0, 0, TimeSpan.Zero)); // the next morning, no timer fired
+await ctx.AdvanceTimeToAsync(new DateTimeOffset(2026, 3, 2, 8, 3, 0, TimeSpan.Zero)); // three minutes of a one-minute timer
+```
+
+They work in bUnit, Playwright (every interactive mode) and the in-app driver. Only timers created through the story's
+`TimeProvider` are stepped through; a timer created on a `FakeTimeProvider` resolved directly fires once per advance.

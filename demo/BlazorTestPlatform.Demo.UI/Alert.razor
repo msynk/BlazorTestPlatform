@@ -18,14 +18,19 @@
 @code {
     private bool dismissed;
 
+    /// <summary>How urgent the message is: errors and warnings are announced (<c>role="alert"</c>), the others are polite (<c>role="status"</c>).</summary>
     [Parameter] public AlertSeverity Severity { get; set; } = AlertSeverity.Info;
 
+    /// <summary>A short heading above the message.</summary>
     [Parameter] public string? Title { get; set; }
 
+    /// <summary>The message.</summary>
     [Parameter] public RenderFragment? ChildContent { get; set; }
 
+    /// <summary>Shows a close button; dismissing removes the alert.</summary>
     [Parameter] public bool Dismissible { get; set; }
 
+    /// <summary>Raised once the alert is dismissed.</summary>
     [Parameter] public EventCallback OnDismiss { get; set; }
 
     private async Task DismissAsync()

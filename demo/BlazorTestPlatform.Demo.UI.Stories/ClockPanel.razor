@@ -1,0 +1,40 @@
+@namespace BlazorTestPlatform.Demo.UI.Stories
+@using Microsoft.AspNetCore.Components.Web
+@implements IDisposable
+@inject TimeProvider Time
+
+@* Fixture for the clock story: the date as of the last render, and a reminder that ticks every minute on a timer. *@
+<p data-testid="today">Today: @Time.GetUtcNow().ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)</p>
+<p data-testid="ticks">Minutes waited: @ticks</p>
+<button type="button" @onclick="() => { }">Refresh</button>
+
+@code {
+    private readonly CancellationTokenSource stop = new();
+    private int ticks;
+
+    /// <inheritdoc />
+    protected override void OnInitialized() => _ = TickAsync();
+
+    private async Task TickAsync()
+    {
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(TimeSpan.FromMinutes(1), Time, stop.Token);
+                ticks++;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        stop.Cancel();
+        stop.Dispose();
+    }
+}

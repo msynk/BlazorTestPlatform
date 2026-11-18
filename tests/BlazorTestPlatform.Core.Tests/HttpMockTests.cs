@@ -147,7 +147,7 @@ public sealed class HttpMockTests
         Assert.Equal("{\"name\":\"Ada\"}", await provider.GetRequiredService<IHttpClientFactory>().CreateClient("named").GetStringAsync("api/me"));
         Assert.Equal("Ada", await provider.GetRequiredService<TypedClient>().NameAsync());
         Assert.Equal(3, provider.GetRequiredService<HttpMock>().Requests.Count);
-        Assert.IsType<FakeTimeProvider>(provider.GetRequiredService<HttpMock>().Time);
+        Assert.IsType<StoryClock>(provider.GetRequiredService<HttpMock>().Time);
     }
 
     private sealed class HttpStories : Stories<Greeter>

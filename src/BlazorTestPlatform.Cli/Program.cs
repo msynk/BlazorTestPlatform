@@ -9,6 +9,9 @@ using BlazorTestPlatform.Performance;
 using BlazorTestPlatform.Reporting;
 using BlazorTestPlatform.Results;
 using BlazorTestPlatform.Visual;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
@@ -538,6 +541,30 @@ accept.SetAction(parse =>
 });
 var snapshots = new Command("snapshots", "Snapshots: markup snapshot files and those written in story sources.") { updateSource, accept };
 root.Add(snapshots);
+
+// btp mcp
+var mcp = new Command("mcp", "Serve the last run's results to coding agents over the Model Context Protocol (stdio): run summary, results, failure details, failures by cause, pending reviews and story coverage. Read-only.") { results };
+mcp.SetAction(async (parse, cancellationToken) =>
+{
+    var settings = Settings(parse);
+    var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder(new Microsoft.Extensions.Hosting.HostApplicationBuilderSettings { ContentRootPath = settings.ProjectDirectory });
+
+    // stdout carries the protocol: logs go to stderr.
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = Microsoft.Extensions.Logging.LogLevel.Trace);
+    builder.Logging.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Warning);
+    builder.Services.AddSingleton(new McpResults(ResultDirectories(parse, settings), settings));
+    builder.Services.AddMcpServer(options => options.ServerInfo = new ModelContextProtocol.Protocol.Implementation
+        {
+            Name = "btp",
+            Version = typeof(McpResults).Assembly.GetName().Version?.ToString() ?? "1.0",
+        })
+        .WithStdioServerTransport()
+        .WithTools<BtpMcpTools>();
+    await builder.Build().RunAsync(cancellationToken);
+    return 0;
+});
+root.Add(mcp);
 
 // btp clean
 var clean = new Command("clean", "Delete the results directory (baselines are kept).");

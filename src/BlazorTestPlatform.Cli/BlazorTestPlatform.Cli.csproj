@@ -21,6 +21,8 @@
     <ProjectReference Include="..\BlazorTestPlatform.Visual\BlazorTestPlatform.Visual.csproj" />
     <ProjectReference Include="..\BlazorTestPlatform.Reporting\BlazorTestPlatform.Reporting.csproj" />
     <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="ModelContextProtocol" />
   </ItemGroup>
 
   <ItemGroup>

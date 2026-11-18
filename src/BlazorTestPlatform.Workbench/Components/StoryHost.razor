@@ -358,11 +358,22 @@
     [JSInvokable]
     public async Task AdvanceTime(double milliseconds)
     {
-        var time = ServiceScope.Overrides?.GetService<Microsoft.Extensions.Time.Testing.FakeTimeProvider>()
-            ?? throw new InvalidOperationException("The story does not use fake time. Call UseFakeTime(...) on the story.");
-        await InvokeAsync(() => time.Advance(TimeSpan.FromMilliseconds(milliseconds)));
-        await Task.Yield();
+        // Stops at every timer occurrence on the way, letting the renderer run in between (see StoryClock.AdvanceAsync).
+        var clock = Clock();
+        await clock.AdvanceAsync(TimeSpan.FromMilliseconds(milliseconds), step => InvokeAsync(() => clock.Fake.Advance(step)), WaitForIdle);
     }
+
+    /// <summary>The story clock's wall-clock time, round-trip formatted.</summary>
+    [JSInvokable]
+    public string GetTime() => Clock().GetUtcNow().ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>Makes the story clock's wall clock read the round-trip formatted instant, without firing timers.</summary>
+    [JSInvokable]
+    public Task SetSystemTime(string now) =>
+        InvokeAsync(() => Clock().SetSystemTime(DateTimeOffset.Parse(now, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind)));
+
+    private StoryClock Clock() => ServiceScope.Overrides?.GetService<StoryClock>()
+        ?? throw new InvalidOperationException("The story does not use fake time. Call UseFakeTime(...) on the story.");
 
     /// <summary>Completes after pending renders were flushed.</summary>
     [JSInvokable]

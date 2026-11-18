@@ -33,7 +33,7 @@ That one definition runs in all of these places:
 |---|---|---|
 | **bUnit** (`BunitStoryRunner`) | Renders the story, runs the play script with browser-faithful keyboard, pointer and focus emulation, applies static accessibility rules, and checks render budgets | milliseconds |
 | **Real browsers** (`BrowserStoryRunner`) | Runs the same play script in Chromium, Firefox or WebKit under **Static SSR, Interactive Server, WebAssembly and Auto**, then takes a visual snapshot, runs an axe-core scan, and checks console errors and the Blazor error UI | seconds |
-| **Workbench** (`/_workbench`) | Lets you browse every story across themes, viewports and render modes, edit its parameters live with generated controls (kept in the URL, so links reproduce what you see), run its play script inside the frame (**▶ Run interactions**), and see its quality gates and manual review status | interactive |
+| **Workbench** (`/_workbench`) | Lets you browse every story across themes, viewports and render modes, edit its parameters live with generated controls (kept in the URL, so links reproduce what you see), run its play script inside the frame (**▶ Run interactions**), and see its quality gates and manual review status | interactive A documentation page per component shows its summary, a parameter table from XML docs and every story live. |
 | **Test hub** (`/_btp`) | A self-hosted test platform website over your results and run history: dashboard and trends, runs and comparisons, stability (flaky, broken, fixed) with quarantine, failures grouped by cause, visual review with grouped accept/reject, accessibility baselines, performance trends, coverage and WCAG traceability, impact analysis and sharding, live in-memory runs and a release-readiness verdict ([guide](docs/hub.md)) | interactive |
 | **Reports** (`btp report`) | Produces an HTML report with a visual-diff viewer, timelines, accessibility and performance details and story state coverage, JUnit XML, a GitHub step summary, a self-updating pull-request comment, cross-run flake history and the run archive the hub reads | — |
 
@@ -154,6 +154,7 @@ dotnet tool install -g BlazorTestPlatform.Cli --prerelease
 btp report -p tests/MyDesignSystem.Tests --junit TestResults/junit.xml --github-summary --history .btp/history.json
 btp approve            # accept intended visual changes, then commit __snapshots__/
 btp perf approve       # accept intended render-performance changes
+btp mcp                # serve the results to coding agents (Model Context Protocol, read-only)
 ```
 
 ## Guides
@@ -194,7 +195,7 @@ The latest preview is `0.1.0-preview.2`; [CHANGELOG.md](CHANGELOG.md) lists what
 
 ```
 src/        the packages
-tests/      unit and driver tests for every package (812 tests, run on net10.0 and net11.0)
+tests/      unit and driver tests for every package (824 tests, run on net10.0 and net11.0)
 demo/       a design system, its stories, a host with the tour, workbench and test hub (Server + WASM), end-to-end tests
 docs/       guides
 ```

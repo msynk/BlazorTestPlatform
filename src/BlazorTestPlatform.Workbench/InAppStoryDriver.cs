@@ -139,11 +139,22 @@ public sealed class InAppStoryDriver : IStoryDriver
     /// <inheritdoc />
     public async Task AdvanceTimeAsync(TimeSpan delta, CancellationToken cancellationToken)
     {
-        var time = _services.Overrides?.GetService<FakeTimeProvider>()
-            ?? throw new InvalidOperationException("The story does not use fake time. Call UseFakeTime(...) on the story.");
-        time.Advance(delta);
-        await WaitForIdleAsync(cancellationToken);
+        var clock = Clock();
+        await clock.AdvanceAsync(delta, step => { clock.Fake.Advance(step); return Task.CompletedTask; }, () => WaitForIdleAsync(cancellationToken));
     }
+
+    /// <inheritdoc />
+    public Task<DateTimeOffset> GetTimeAsync(CancellationToken cancellationToken) => Task.FromResult(Clock().GetUtcNow());
+
+    /// <inheritdoc />
+    public Task SetSystemTimeAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        Clock().SetSystemTime(now);
+        return Task.CompletedTask;
+    }
+
+    private StoryClock Clock() => _services.Overrides?.GetService<StoryClock>()
+        ?? throw new InvalidOperationException("The story does not use fake time. Call UseFakeTime(...) on the story.");
 
     /// <inheritdoc />
     public async Task<string> GetMarkupAsync(CancellationToken cancellationToken) => await _module.InvokeAsync<string>("markup", cancellationToken);

@@ -299,8 +299,11 @@ public sealed class Story
                 fakeTime.SetLocalTimeZone(zone);
             }
 
+            // Components get the story clock: the fake time, plus wall-clock jumps (ctx.SetSystemTimeAsync).
+            var clock = new StoryClock(fakeTime);
             services.AddSingleton(fakeTime);
-            services.AddSingleton<TimeProvider>(fakeTime);
+            services.AddSingleton(clock);
+            services.AddSingleton<TimeProvider>(clock);
         }
         else if (zone is not null)
         {
