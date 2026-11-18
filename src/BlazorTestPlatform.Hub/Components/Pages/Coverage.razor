@@ -5,6 +5,7 @@
 @if (Allowed)
 {
     var coverage = Data.Coverage;
+    var hasCode = coverage?.Code is not null;
     var reviews = Data.Reviews.ToDictionary(r => r.Component, StringComparer.Ordinal);
     var gate = Data.ReviewGate?.Entries.ToDictionary(e => e.Component, StringComparer.Ordinal) ?? new Dictionary<string, ReviewGateEntry>(StringComparer.Ordinal);
     var components = reviews.Keys.Concat(gate.Keys).Concat(coverage?.Components.Select(c => c.Title) ?? []).Distinct().Order(StringComparer.Ordinal).ToArray();
@@ -15,7 +16,7 @@
     <PageHeader Title="Coverage &amp; traceability" Description="Which component states have a story (a state without one has no snapshot, scan or test), and which WCAG 2.2 success criteria each component is verified against, by people and by automation: a traceability matrix with Xray-style verdicts, where a review goes stale when the component's accessibility structure changes." />
 
     <section class="card" style="margin-bottom:16px">
-        <header><div><h2>Story state coverage</h2><p>Every bool and enum parameter value, and whether a story renders it.</p></div>@if (coverage is not null) { <span class="badge @(coverage.Ratio >= 1 ? "pass" : "flaky")">@Fmt.Percent(coverage.Ratio) · @coverage.CoveredStates/@coverage.TotalStates states</span> }</header>
+        <header><div><h2>Story state coverage</h2><p>Every bool and enum parameter value, and whether a story renders it.</p></div>@if (coverage is not null) { <span class="badge @(coverage.Ratio >= 1 ? "pass" : "flaky")">@Fmt.Percent(coverage.Ratio) · @coverage.CoveredStates/@coverage.TotalStates states</span> @if (coverage.Code is { } lines) { <span class="badge" title="@lines.CoveredLines/@lines.TotalLines component lines run by the tests">code @Fmt.Percent(lines.LineRate)</span> } }</header>
         <div class="body flush scroll-x">
             @if (coverage is null)
             {
@@ -24,7 +25,7 @@
             else
             {
                 <table class="table">
-                    <thead><tr><th>Component</th><th class="num">Stories</th><th>Covered</th><th>Missing states</th><th>Open-ended parameters</th></tr></thead>
+                    <thead><tr><th>Component</th><th class="num">Stories</th><th>Covered</th>@if (hasCode) { <th class="num">Lines</th><th class="num">Branches</th> }<th>Missing states</th><th>Open-ended parameters</th></tr></thead>
                     <tbody>
                         @foreach (var component in coverage.Components.OrderBy(c => c.Ratio).ThenBy(c => c.Title, StringComparer.Ordinal))
                         {
@@ -32,13 +33,14 @@
                                 <td><strong>@component.Title</strong><div class="muted small mono">@component.Component</div></td>
                                 <td class="num">@component.Stories</td>
                                 <td>@if (component.TotalStates == 0) { <span class="muted small">no bool or enum parameters</span> } else { <span class="badge @(component.Ratio >= 1 ? "pass" : "flaky")">@component.CoveredStates/@component.TotalStates</span> }</td>
+                                @if (hasCode) { <CodeCells Code="component.Code" /> }
                                 <td class="small">@foreach (var missing in component.MissingStates) { <span class="tag alert">@missing</span> }</td>
                                 <td class="small muted">@string.Join(", ", component.Parameters.Where(p => !p.IsFinite && p.Values.Count > 0).Select(p => $"{p.Name} ({p.Values.Count} values)"))</td>
                             </tr>
                         }
                         @foreach (var missing in coverage.ComponentsWithoutStories)
                         {
-                            <tr><td><strong>@missing</strong></td><td class="num">0</td><td><span class="badge fail">no stories</span></td><td></td><td></td></tr>
+                            <tr><td><strong>@missing</strong></td><td class="num">0</td><td><span class="badge fail">no stories</span></td>@if (hasCode) { <CodeCells Code="coverage.CodeWithoutStories.GetValueOrDefault(missing)" /> }<td></td><td></td></tr>
                         }
                     </tbody>
                 </table>

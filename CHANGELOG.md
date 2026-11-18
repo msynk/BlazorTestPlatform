@@ -4,14 +4,17 @@
 
 ### Leaks, circuit pause and resume, tag options
 
-Items the fourth-pass gap analysis had deferred (`reports/Gap analysis, fourth pass.md`, #15, #23, #24, #33 and #34).
+Items the fourth-pass gap analysis had deferred (`reports/Gap analysis, fourth pass.md`, #15, #21, #23, #24, #28, #29, #33 and #34).
 
 * **Leak detection**: the bUnit runner fails a story whose components, once disposed, are still referenced by a `DotNetObjectReference` they passed to JavaScript, or by a handler on an event of a service they injected (method groups, lambdas and closures). `AllowLeaks(reason)` on a story accepts it; `BunitStoryOptions.DetectLeaks = false` turns the check off.
 * **Circuit pause and resume**: `ctx.PauseAndResumeCircuitAsync()` pauses the story's Blazor Server circuit and resumes it (.NET 10's `Blazor.pauseCircuit()`/`resumeCircuit()`), so a story can check that `[PersistentState]` survives and the rest starts over. New capability `DriverCapabilities.CircuitControl` (browsers under Interactive Server); other drivers and modes skip.
 * **Shrinking in browsers**: the browser runner shrinks a failed `ExploreAsync` on fresh pages on the last attempt (`BrowserRunOptions.ShrinkExplorations`, `MaxShrinkProbes`, default 40), as the bUnit runner does on fresh renders.
 * **Accessibility after every action**: `CheckAccessibilityAfterActions()` checks accessibility after each element action and key press of play (Compose's `enableAccessibilityChecks()`), naming the action that broke the policy; `ctx.CheckAccessibilityAfterActions` turns it on or off mid-play.
 * **Tag options**: `tagOptions` in `btp.json` gives every story with a tag a timeout, the slow multiplier, retries (instead of the run's) or a skip, as Vitest's tag options; `BtpSettings.TimeoutFor`, `RetriesFor` and `TagSkipReason` expose them.
-* **Demo**: `Testing/Circuit/Pause and resume` (Chromium, Firefox and WebKit under Server), `Testing/Exploration/Stepper` (a bug found and shrunk to two steps in every runner, declared with `ExpectFailure`), and `Overlays/Dialog/Keyboard` checks accessibility after every key press.
+* **Markup snapshots**: `ctx.ExpectMarkupSnapshotAsync(name, target)` compares normalized markup (sorted attributes, no comments or framework attributes, `data-btp-ignore` content left out) with a committed `{story-id}/{name}.markup.html`, after scrubbers (GUIDs, and a story's `ScrubMarkup(pattern, replacement)`). Mismatches fail with the changed lines and leave a `.markup.received.html` file; `btp snapshots accept` accepts them. bUnit compares; browsers and the in-app driver skip the check.
+* **HAR replay**: `http.ReplayHar(har, urlFilter, matchHost)` (and `ReplayHarFile`) answers a story's requests from an HTTP Archive recorded with browser tools, Playwright or a proxy, in every driver: repeated requests answer in order, the host is ignored unless asked, later rules win.
+* **Code coverage in story coverage**: `btp report --code-coverage` (default: `*.cobertura.xml` under the results) merges Cobertura reports (Microsoft code coverage, coverlet) into `story-coverage.json`, so the HTML report and the hub show each component's line and branch coverage next to its states (`CoberturaCoverage`, `StoryCoverageReport.WithCodeCoverage`). The demo tests reference Microsoft.Testing.Extensions.CodeCoverage 18.12.0.
+* **Demo**: `Feedback/Alert/Dismissible` takes a markup snapshot; `Data/People directory/From a recording` replays a HAR; `Testing/Circuit/Pause and resume` (Chromium, Firefox and WebKit under Server), `Testing/Exploration/Stepper` (a bug found and shrunk to two steps in every runner, declared with `ExpectFailure`), and `Overlays/Dialog/Keyboard` checks accessibility after every key press.
 
 ### .NET 11, run control, and screenshots and checks in play
 

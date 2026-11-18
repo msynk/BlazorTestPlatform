@@ -83,6 +83,8 @@ Story ids open in the workbench at `/_workbench?story=<id>`; add `&play=1` to ru
 | Prerender parity (`CheckPrerender()`), caught under WebAssembly and declared with `ExpectFailure` | `display-runtime-badge--hydration-parity` | [RuntimeBadgeStories.cs](BlazorTestPlatform.Demo.UI.Stories/RuntimeBadgeStories.cs) | `PrerenderParityTests` |
 | Circuit pause and resume (`PauseAndResumeCircuitAsync`): `[PersistentState]` survives, the rest starts over | `testing-circuit--pause-and-resume` | [CircuitStories.cs](BlazorTestPlatform.Demo.UI.Stories/CircuitStories.cs) | `CircuitPauseTests` (Chromium, Firefox, WebKit under Server; other modes skip) |
 | Stateful exploration (`ExploreAsync`) that finds a bug and shrinks it to two steps, declared with `ExpectFailure` | `testing-exploration--stepper` | [ExplorationStories.cs](BlazorTestPlatform.Demo.UI.Stories/ExplorationStories.cs) | every driver; `BrowserExplorationTests` checks the shrink in Chromium |
+| Markup snapshot (`ExpectMarkupSnapshotAsync`) committed as `__snapshots__/feedback-alert--dismissible/story.markup.html` | `feedback-alert--dismissible` | [AlertStories.cs](BlazorTestPlatform.Demo.UI.Stories/AlertStories.cs) | bUnit (browsers skip the check) |
+| HAR replay (`ReplayHar`) from an embedded recording | `data-people-directory--from-a-recording` | [PeopleDirectoryStories.cs](BlazorTestPlatform.Demo.UI.Stories/PeopleDirectoryStories.cs) | every driver |
 | Accessibility checked after every key press (`CheckAccessibilityAfterActions()`) | `overlays-dialog--keyboard` | [DialogStories.cs](BlazorTestPlatform.Demo.UI.Stories/DialogStories.cs) | every driver |
 | Time zones (`TimeZone`) through `TimeProvider`, and the browser's zone under WebAssembly | `testing-time-zone--tokyo` | [TimeZoneStories.cs](BlazorTestPlatform.Demo.UI.Stories/TimeZoneStories.cs) | every driver |
 | Named screenshots of play states (`ExpectScreenshotAsync`), computed styles (`ToHaveCssAsync`), the viewport (`ToBeInViewportAsync`), a mid-play accessibility scan (`ExpectAccessibleAsync`) and attachments (`Attach`) | `navigation-tabs--states-in-play` | [TabsStories.cs](BlazorTestPlatform.Demo.UI.Stories/TabsStories.cs) | every driver (bUnit and the in-app driver skip what they cannot observe) |
@@ -118,6 +120,7 @@ Story ids open in the workbench at `/_workbench?story=<id>`; add `&play=1` to ru
 | Render budgets and baselines | `inputs-button--click-raises-onclick`, `data-person-list--sort-by-name`, `data-person-list--large-list` | [performance.json](BlazorTestPlatform.Demo.UI.Tests/__baselines__/performance.json) | `ComponentStoryTests` |
 | Browser runtime budgets (layout shift, DOM size) | `data-person-list--large-list`, `testing-browser-emulation--geolocation` | [PersonListStories.cs](BlazorTestPlatform.Demo.UI.Stories/PersonListStories.cs) | `CrossHostingTests`, `BrowserMetricsTests` |
 | Story state coverage | every component | [StoryCoverageTests.cs](BlazorTestPlatform.Demo.UI.Tests/StoryCoverageTests.cs) | `StoryCoverageTests` |
+| Code coverage next to story coverage (`dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests -- --coverage --coverage-output-format cobertura`, then `btp report --code-coverage TestResults`) | every component | [BlazorTestPlatform.Demo.UI.Tests.csproj](BlazorTestPlatform.Demo.UI.Tests/BlazorTestPlatform.Demo.UI.Tests.csproj) | `btp report` |
 
 ### The test hub
 

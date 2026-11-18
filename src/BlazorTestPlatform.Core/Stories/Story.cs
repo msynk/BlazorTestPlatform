@@ -198,6 +198,12 @@ public sealed class Story
     public bool ChecksPrerenderParity => Metadata.TryGetValue(StoryBuilderMetadata.PrerenderParity, out var value) && value is true;
 
     /// <summary>
+    /// The story's own markup scrubbers (<c>ScrubMarkup(...)</c>), applied after <see cref="Results.MarkupSnapshots.DefaultScrubbers"/>.
+    /// </summary>
+    public IReadOnlyList<Results.MarkupScrubber> MarkupScrubbers =>
+        Metadata.TryGetValue(StoryBuilderMetadata.MarkupScrubbers, out var value) && value is IReadOnlyList<Results.MarkupScrubber> scrubbers ? scrubbers : [];
+
+    /// <summary>
     /// Whether play checks accessibility after every element action and key press (<c>CheckAccessibilityAfterActions()</c>).
     /// </summary>
     public bool ChecksAccessibilityAfterActions => Metadata.TryGetValue(StoryBuilderMetadata.AccessibilityAfterActions, out var value) && value is true;
@@ -400,6 +406,9 @@ public static class StoryBuilderMetadata
 
     /// <summary>Key of the prerender parity check metadata (<c>CheckPrerender()</c>).</summary>
     public const string PrerenderParity = "btp:prerender-parity";
+
+    /// <summary>Key of the markup scrubbers metadata (<c>ScrubMarkup(...)</c>).</summary>
+    public const string MarkupScrubbers = "btp:markup-scrubbers";
 
     /// <summary>Key of the leak-check opt-out metadata (<c>AllowLeaks(reason)</c>).</summary>
     public const string AllowLeaks = "btp:allow-leaks";

@@ -72,6 +72,12 @@ public sealed record ComponentCoverage
     /// <summary>Uncovered states as <c>Parameter=value</c>.</summary>
     [JsonIgnore]
     public IEnumerable<string> MissingStates => Parameters.SelectMany(p => p.Missing.Select(v => $"{p.Name}={v}"));
+
+    /// <summary>
+    /// How much of the component's code the test runs executed (from a code coverage report; see
+    /// <see cref="StoryCoverageReport.WithCodeCoverage"/>), or null when none was merged.
+    /// </summary>
+    public CodeCoverage? Code { get; init; }
 }
 
 /// <summary>
@@ -89,6 +95,45 @@ public sealed record StoryCoverageReport
 
     /// <summary>Full names of components that no story renders (only when the analysis was given a component list).</summary>
     public IReadOnlyList<string> ComponentsWithoutStories { get => field ?? []; init; } = [];
+
+    /// <summary>Code coverage of the components without stories, by full name (when a code coverage report was merged).</summary>
+    public IReadOnlyDictionary<string, CodeCoverage> CodeWithoutStories { get => field ?? new Dictionary<string, CodeCoverage>(); init; } = new Dictionary<string, CodeCoverage>();
+
+    /// <summary>Lines of the components (with or without stories) the merged code coverage report covers, or null.</summary>
+    [JsonIgnore]
+    public CodeCoverage? Code
+    {
+        get
+        {
+            // One entry per component type (several titles can render one component).
+            // (nested component types share their outermost type's lines, as Cobertura reports them).
+            var all = Components.Where(c => c.Code is not null).Select(c => (Type: CoberturaCoverage.TypeName(c.Component), c.Code))
+                .Concat(CodeWithoutStories.Select(e => (Type: CoberturaCoverage.TypeName(e.Key), Code: (CodeCoverage?)e.Value)))
+                .DistinctBy(e => e.Type, StringComparer.Ordinal)
+                .Select(e => e.Code!)
+                .ToArray();
+            return all.Length == 0
+                ? null
+                : new CodeCoverage(all.Sum(c => c.CoveredLines), all.Sum(c => c.TotalLines), all.Sum(c => c.CoveredBranches), all.Sum(c => c.TotalBranches));
+        }
+    }
+
+    /// <summary>
+    /// The report with each component's code coverage from <paramref name="code"/> (by type full name, as
+    /// <see cref="CoberturaCoverage.Parse"/> returns it), so a component whose states are all rendered but whose code is
+    /// barely run, or the reverse, stands out. Components the coverage report does not list keep no code coverage. A
+    /// nested component type gets its outermost type's coverage, as Cobertura reports nested types with it.
+    /// </summary>
+    public StoryCoverageReport WithCodeCoverage(IReadOnlyDictionary<string, CodeCoverage> code)
+    {
+        ArgumentNullException.ThrowIfNull(code);
+        CodeCoverage? Find(string component) => code.GetValueOrDefault(component) ?? code.GetValueOrDefault(CoberturaCoverage.TypeName(component));
+        return this with
+        {
+            Components = [.. Components.Select(c => c with { Code = Find(c.Component) })],
+            CodeWithoutStories = ComponentsWithoutStories.Select(name => (Name: name, Code: Find(name))).Where(e => e.Code is not null).ToDictionary(e => e.Name, e => e.Code!, StringComparer.Ordinal),
+        };
+    }
 
     /// <summary>Finite states rendered by at least one story, over every component.</summary>
     [JsonIgnore]

@@ -66,6 +66,7 @@ public static class BunitStoryRunner
 
         string? markup = null;
         IReadOnlyList<ArtifactReference> attachments = [];
+        StoryContext? playContext = null;
         IReadOnlyList<AriaSnapshotMismatch> ariaMismatches = [];
         IReadOnlyList<HttpRequestRecord> httpRequests = [];
         AccessibilityReport? a11y = null;
@@ -77,6 +78,7 @@ public static class BunitStoryRunner
         try
         {
             var session = await BunitStorySession.StartAsync(story, options, recorder, timeout.Token).ConfigureAwait(false);
+            playContext = session.StoryContext;
             session.TrackLeaks = options.DetectLeaks && story.LeaksAllowedReason is null;
             await using (session.ConfigureAwait(false))
             {
@@ -180,11 +182,19 @@ public static class BunitStoryRunner
         }
         catch (Exception ex) when (cancellationToken.IsCancellationRequested)
         {
-            // The caller cancelled (test run aborted): that is not a story failure, and no result is recorded as one.
+            // The caller cancelled (test run aborted): that is not a story failure, and no result is recorded as one. What
+            // it wrote did not pass either, so it is not kept as a reference.
+            playContext?.RevertSnapshotWrites();
             throw ex as OperationCanceledException ?? new OperationCanceledException("The story run was cancelled.", ex, cancellationToken);
         }
         catch (Exception caught)
         {
+            // Markup snapshots this run wrote show a state that failed: they must not become the reference.
+            foreach (var reverted in playContext?.RevertSnapshotWrites() ?? [])
+            {
+                recorder.Log($"markup snapshot '{Path.GetFileName(reverted)}' was not kept because the run failed");
+            }
+
             var ex = caught;
             var stackTrace = ex.StackTrace;
             if (ex is ExplorationFailedException exploration && options.ShrinkExplorations && exploration.Steps.Count > 1 && !timeout.IsCancellationRequested)
@@ -359,7 +369,7 @@ public static class BunitStoryRunner
         sorted.Count % 2 == 1 ? sorted[sorted.Count / 2] : (sorted[(sorted.Count / 2) - 1] + sorted[sorted.Count / 2]) / 2;
 
     /// <summary>A short, stable key for arg overrides, so differently configured runs get their own result file.</summary>
-    private static string? ArgsKey(IDictionary<string, string?> args) =>
+    internal static string? ArgsKey(IDictionary<string, string?> args) =>
         args.Count == 0
             ? null
             : "args-" + DeterministicRandom.StableHash(string.Join('&', args.OrderBy(a => a.Key, StringComparer.OrdinalIgnoreCase).Select(a => $"{a.Key}={a.Value}")))

@@ -1,0 +1,17 @@
+@using BlazorTestPlatform.Coverage
+@* Line and branch coverage cells of a component (two table cells; dashes when the coverage report does not list it). *@
+@if (Code is null)
+{
+    <td class="num muted">—</td>
+    <td class="num muted">—</td>
+}
+else
+{
+    <td class="num" title="@Code.CoveredLines/@Code.TotalLines lines">@Fmt.Percent(Code.LineRate)</td>
+    <td class="num" title="@Code.CoveredBranches/@Code.TotalBranches branches">@(Code.TotalBranches == 0 ? "—" : Fmt.Percent(Code.BranchRate))</td>
+}
+
+@code {
+    /// <summary>The component's code coverage, or null.</summary>
+    [Parameter] public CodeCoverage? Code { get; set; }
+}

@@ -199,6 +199,12 @@ for the stories whose intermediate states matter (dialogs, menus, wizards); `ctx
 stops it for the rest of play. `TabAsync(n)`, `ShiftTabAsync(n)` and `ExpectTabOrderAsync` check once, after their last
 key press. Combined with `ExploreAsync`, accessibility becomes an invariant of every explored step.
 
+### Markup snapshots
+
+`await ctx.ExpectMarkupSnapshotAsync("after-add", ctx.GetByText("Count:"))` compares normalized, scrubbed markup with a
+committed `.markup.html` file in bUnit ([quality gates](quality-gates.md#markup-snapshots)); other drivers record the
+check as skipped.
+
 ### Attachments and step timeouts
 
 `ctx.Attach("cart.json", json)` (text or bytes) attaches a file to the run, as Playwright's `testInfo.attach`: runners write it with the run's artifacts (`TestResults/btp/artifacts/<key>/attachments/`), reports link it, and the xUnit, NUnit, MSTest and TUnit packages attach it to the test result whatever the outcome. `ctx.StepAsync("load the picture", body, TimeSpan.FromSeconds(2))` fails at that step, with its name, when it takes longer than its own timeout.

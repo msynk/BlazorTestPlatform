@@ -107,24 +107,61 @@ public static class HtmlReportWriter
 
     private static void RenderCoverage(StringBuilder h, StoryCoverageReport coverage)
     {
+        var code = coverage.Code;
         h.Append("<section class=\"panel\"><h2>Story state coverage · ").Append(coverage.Ratio.ToString("P0", CultureInfo.InvariantCulture))
-            .Append(" (").Append(coverage.CoveredStates).Append('/').Append(coverage.TotalStates).Append(" states)</h2>")
-            .Append("<table><thead><tr><th>Component</th><th class=\"num\">Stories</th><th class=\"num\">States</th><th>Not rendered by any story</th></tr></thead><tbody>");
+            .Append(" (").Append(coverage.CoveredStates).Append('/').Append(coverage.TotalStates).Append(" states)");
+        if (code is not null)
+        {
+            h.Append(" · code ").Append(code.LineRate.ToString("P0", CultureInfo.InvariantCulture)).Append(" of lines");
+        }
+
+        h.Append("</h2><table><thead><tr><th>Component</th><th class=\"num\">Stories</th><th class=\"num\">States</th>");
+        if (code is not null)
+        {
+            h.Append("<th class=\"num\">Lines</th><th class=\"num\">Branches</th>");
+        }
+
+        h.Append("<th>Not rendered by any story</th></tr></thead><tbody>");
         foreach (var component in coverage.Components)
         {
             var missing = component.MissingStates.ToArray();
             h.Append("<tr class=\"").Append(missing.Length > 0 ? "row-warn" : string.Empty).Append("\"><td>").Append(E(component.Title)).Append("</td><td class=\"num\">").Append(component.Stories)
-                .Append("</td><td class=\"num\">").Append(component.CoveredStates).Append('/').Append(component.TotalStates).Append("</td><td>");
+                .Append("</td><td class=\"num\">").Append(component.CoveredStates).Append('/').Append(component.TotalStates).Append("</td>");
+            if (code is not null)
+            {
+                AppendCode(h, component.Code);
+            }
+
+            h.Append("<td>");
             h.Append(missing.Length == 0 ? "—" : string.Join(" ", missing.Select(m => "<code>" + E(m) + "</code>")));
             h.Append("</td></tr>");
         }
 
         foreach (var component in coverage.ComponentsWithoutStories)
         {
-            h.Append("<tr class=\"row-bad\"><td><code>").Append(E(component)).Append("</code></td><td class=\"num\">0</td><td class=\"num\">—</td><td>No stories</td></tr>");
+            h.Append("<tr class=\"row-bad\"><td><code>").Append(E(component)).Append("</code></td><td class=\"num\">0</td><td class=\"num\">—</td>");
+            if (code is not null)
+            {
+                AppendCode(h, coverage.CodeWithoutStories.GetValueOrDefault(component));
+            }
+
+            h.Append("<td>No stories</td></tr>");
         }
 
         h.Append("</tbody></table></section>");
+    }
+
+    private static void AppendCode(StringBuilder h, CodeCoverage? code)
+    {
+        if (code is null)
+        {
+            h.Append("<td class=\"num\">—</td><td class=\"num\">—</td>");
+            return;
+        }
+
+        h.Append("<td class=\"num\" title=\"").Append(code.CoveredLines).Append('/').Append(code.TotalLines).Append(" lines\">").Append(code.LineRate.ToString("P0", CultureInfo.InvariantCulture))
+            .Append("</td><td class=\"num\" title=\"").Append(code.CoveredBranches).Append('/').Append(code.TotalBranches).Append(" branches\">")
+            .Append(code.TotalBranches == 0 ? "—" : code.BranchRate.ToString("P0", CultureInfo.InvariantCulture)).Append("</td>");
     }
 
     private static void RenderResult(StringBuilder h, StoryResult r, AssetCopier assets)

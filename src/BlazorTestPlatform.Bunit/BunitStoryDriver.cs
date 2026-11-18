@@ -320,6 +320,21 @@ public sealed class BunitStoryDriver : IStoryDriver
     public Task<string> GetAriaSnapshotAsync(CancellationToken cancellationToken) => Task.FromResult(AriaSnapshot.Of(Scope()));
 
     /// <inheritdoc />
+    public Task<string> GetMarkupSnapshotAsync(LocatorChain? locator, CancellationToken cancellationToken)
+    {
+        var scope = Scope();
+        if (locator is null)
+        {
+            return Task.FromResult(MarkupFormatter.Format(scope.Roots));
+        }
+
+        var matches = DomQueries.Resolve(scope, locator);
+        return matches.Count == 1
+            ? Task.FromResult(MarkupFormatter.Format(matches))
+            : throw new StoryAssertionException($"A markup snapshot needs exactly one element; {locator} matched {matches.Count}.");
+    }
+
+    /// <inheritdoc />
     public Task<AccessibilityReport> ScanAccessibilityAsync(AccessibilityPolicy policy, StoryAccessibilityOptions storyOptions, CancellationToken cancellationToken) =>
         Task.FromResult(new MarkupAccessibilityAnalyzer().Analyze(Scope(), policy, storyOptions));
 

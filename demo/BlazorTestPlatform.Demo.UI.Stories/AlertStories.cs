@@ -18,10 +18,11 @@ public sealed class AlertStories : Stories<Alert>
             s => s.Description("Errors and warnings use role=alert, the others role=status. Story state coverage checks that every severity has a story."));
 
         stories.Add("Dismissible", s => s
-            .Description("Defaults(...) gives every story the same title and text. Dismissing removes the alert and raises OnDismiss once.")
+            .Description("Defaults(...) gives every story the same title and text. Dismissing removes the alert and raises OnDismiss once. The markup before dismissing is a committed markup snapshot (compared in bUnit).")
             .Arg(a => a.Dismissible, true)
             .Play(async ctx =>
             {
+                await ctx.ExpectMarkupSnapshotAsync();
                 await ctx.Expect(ctx.GetByRole("status")).ToContainTextAsync("trial ends");
                 await ctx.GetByRole("button", "Dismiss").ClickAsync();
                 await ctx.Expect(ctx.GetByRole("status")).ToHaveCountAsync(0);

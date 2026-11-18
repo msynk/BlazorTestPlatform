@@ -27,3 +27,5 @@ coverage*/
 **/__snapshots__/**/*.png
 !**/__snapshots__/**/*-linux.png
 !**/__snapshots__/**/*-linux.*.png
+# Markup snapshots (*.markup.html) are committed; what a mismatched run rendered is not (btp snapshots accept moves it).
+**/__snapshots__/**/*.markup.received.html

@@ -556,6 +556,108 @@ public sealed class StoryContext
             }
         });
 
+    /// <summary>
+    /// Settings for files the play script writes (markup snapshots); the runner's, else <see cref="Configuration.BtpSettings.Current"/>.
+    /// </summary>
+    public Configuration.BtpSettings? Settings { get; set; }
+
+    /// <summary>
+    /// Separates the markup snapshots of runs of the story that render differently (the runner sets it from the theme and
+    /// arg overrides), or null.
+    /// </summary>
+    public string? SnapshotVariant { get; set; }
+
+    private readonly HashSet<string> _markupNames = new(StringComparer.Ordinal);
+    private readonly List<MarkupSnapshotCheck> _markupWrites = [];
+
+    /// <summary>
+    /// Compares the story's markup (or the single element <paramref name="target"/> matches) with a committed snapshot
+    /// file, as Verify and Jest snapshots do: <c>__snapshots__/{story-id}/{name}.markup.html</c>. The driver normalizes the
+    /// markup (one element per line, sorted attributes, no comments or framework attributes, <c>data-btp-ignore</c>
+    /// content left out) and the scrubbers replace what changes between runs (GUIDs, and the story's
+    /// <c>ScrubMarkup(...)</c>). A missing snapshot is written locally and fails on CI; a different one fails with the
+    /// changed lines and leaves <c>{name}.markup.received.html</c> beside it (also attached to the run), which
+    /// <c>btp snapshots accept</c> or <c>BTP_UPDATE_SNAPSHOTS=changed</c> make the new snapshot. bUnit compares them;
+    /// browsers and the in-app driver record the check as skipped (their DOM carries live state, such as input values,
+    /// differently).
+    /// </summary>
+    /// <param name="name">The snapshot's name, unique within the story (default <c>story</c>).</param>
+    /// <param name="target">An element to snapshot instead of the whole story.</param>
+    public Task ExpectMarkupSnapshotAsync(string? name = null, ElementLocator? target = null)
+    {
+        var slug = StoryId.Slugify(name ?? "story");
+        if (slug.Length == 0)
+        {
+            throw new ArgumentException($"'{name}' cannot name a markup snapshot: use letters or digits.", nameof(name));
+        }
+
+        lock (_markupNames)
+        {
+            if (!_markupNames.Add(slug))
+            {
+                throw new ArgumentException($"The story already took a markup snapshot named '{slug}': each one needs its own name (its own file).", nameof(name));
+            }
+        }
+
+        return Recorder.RunAsync($"expect markup snapshot \"{slug}\"{(target is null ? string.Empty : $" of {target}")}", StepKind.Assertion, async () =>
+        {
+            await Driver.WaitForIdleAsync(CancellationToken).ConfigureAwait(false);
+            string markup;
+            try
+            {
+                markup = await Driver.GetMarkupSnapshotAsync(target?.Chain, CancellationToken).ConfigureAwait(false);
+            }
+            catch (NotSupportedException ex)
+            {
+                Recorder.Log($"markup snapshot skipped: {ex.Message}");
+                return;
+            }
+
+            var settings = Settings ?? Configuration.BtpSettings.Current;
+            var scrubbed = MarkupSnapshots.Scrub(markup, MarkupSnapshots.DefaultScrubbers.Concat(Story.MarkupScrubbers));
+            var check = MarkupSnapshots.Check(MarkupSnapshots.PathFor(settings, Story.Id, slug, SnapshotVariant), scrubbed, settings.UpdateSnapshots);
+            switch (check.Status)
+            {
+                case MarkupSnapshotStatus.Written or MarkupSnapshotStatus.Updated:
+                    lock (_markupWrites)
+                    {
+                        _markupWrites.Add(check);
+                    }
+
+                    Recorder.Log($"markup snapshot {(check.Status == MarkupSnapshotStatus.Written ? "written" : "updated")}: {check.Path}");
+                    return;
+                case MarkupSnapshotStatus.Missing:
+                    Attach(Path.GetFileName(check.ReceivedPath!), scrubbed);
+                    throw new StoryAssertionException(
+                        $"No markup snapshot '{slug}' at {check.Path}, and this run does not write snapshots (CI, or BTP_UPDATE_SNAPSHOTS=none). Run locally, or accept the received file with 'btp snapshots accept'.");
+                case MarkupSnapshotStatus.Mismatched:
+                    Attach(Path.GetFileName(check.ReceivedPath!), scrubbed);
+                    throw new StoryAssertionException(
+                        $"Markup snapshot '{slug}' changed ({check.Path}):{Environment.NewLine}{check.Diff}{Environment.NewLine}" +
+                        $"If the change is intended: 'btp snapshots accept' (the run left {Path.GetFileName(check.ReceivedPath!)}), or rerun with BTP_UPDATE_SNAPSHOTS=changed.");
+            }
+        });
+    }
+
+    /// <summary>
+    /// Removes the markup snapshots this run wrote and restores those it overwrote: a run that failed must not leave its
+    /// markup as the reference. Runners call it on failure; returns the files reverted.
+    /// </summary>
+    public IReadOnlyList<string> RevertSnapshotWrites()
+    {
+        lock (_markupWrites)
+        {
+            foreach (var write in _markupWrites)
+            {
+                MarkupSnapshots.Revert(write);
+            }
+
+            var paths = _markupWrites.Select(w => w.Path).ToArray();
+            _markupWrites.Clear();
+            return paths;
+        }
+    }
+
     private readonly List<VisualResult> _screenshots = [];
 
     /// <summary>The named screenshots compared so far (<see cref="ExpectScreenshotAsync"/>), in order.</summary>

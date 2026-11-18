@@ -96,6 +96,22 @@ stories.Add("Loading", s => s.MockHttp(http => http.Get("api/people").Never()).P
 | `Never()`, `Fail()` | A request that never completes (loading states), or a network failure. |
 | `Times(n)` | Answers the next *n* requests, then lets earlier rules answer. |
 
+**Recorded traffic.** `http.ReplayHar(har)` answers from an HTTP Archive, as Playwright's `routeFromHAR`: record the
+traffic once (the browser's developer tools "Save all as HAR", Playwright's `RecordHarPath` under WebAssembly, a proxy)
+and the story replays it in every driver, offline. Each recorded request answers the same method, path and query (exactly:
+`api/people` does not answer `api/people?page=3`; escaping does not matter) with its status, headers and body; a request recorded several times answers in order, the last answer repeating, so polling replays as it
+happened. The host is ignored by default, so traffic recorded against a deployed API answers the story's client
+(`matchHost: true` keeps it), and `urlFilter: "*/api/*"` limits the entries used. Rules added afterwards win, so a story
+can override one endpoint. Embed the file so WebAssembly can read it:
+
+```csharp
+// <EmbeddedResource Include="Recordings\*.har" LogicalName="Recordings.%(Filename)%(Extension)" />
+.MockHttp(http => http.ReplayHar(typeof(PeopleStories).Assembly.GetManifestResourceStream("Recordings.people.har")!))
+```
+
+`ReplayHarFile(path)` reads a file instead (bUnit and Interactive Server only). WebSocket and SignalR traffic are not
+replayed.
+
 Unmatched requests get a `404` and are still recorded; set `Unmatched = UnmatchedRequestBehavior.Throw` to fail them as network errors instead. Requests appear in the HTML report for bUnit runs and interactive browser runs (static SSR frames have no frame bridge to read them from). Assert on requests in any driver with `ctx.ExpectRequest(method, pattern)`.
 
 To route static assets or third-party scripts (not application API calls), use `BrowserRunOptions.ConfigurePageAsync` and `page.RouteAsync`.

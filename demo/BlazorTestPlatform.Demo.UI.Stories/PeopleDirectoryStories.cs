@@ -33,6 +33,17 @@ public sealed class PeopleDirectoryStories : Stories<PeopleDirectory>
 
         stories.Add("Empty team", s => s.Description("A story adds its own rules; later rules win.").MockHttp(http => http.Get("api/people").RespondJson([], DemoJsonContext.Default.PersonArray)));
 
+        stories.Add("From a recording", s => s
+            .Description("ReplayHar answers from a HAR file recorded against the deployed API (an embedded resource, so it also works under WebAssembly). The host is ignored, so the story's client gets the recorded answers; later MockHttp rules would still win.")
+            .NoVisual()
+            .MockHttp(http => http.ReplayHar(typeof(PeopleDirectoryStories).Assembly.GetManifestResourceStream("Recordings.people.har")!))
+            .Play(async ctx =>
+            {
+                await ctx.Expect(ctx.GetByRole("listitem")).ToHaveCountAsync(2);
+                await ctx.Expect(ctx.GetByRole("listitem").First).ToContainTextAsync("Margaret Hamilton");
+                await ctx.ExpectRequest("GET", "api/people").ToHaveBeenMadeAsync(times: 1);
+            }));
+
         stories.Add("Loading", s => s
             .Description("Never() keeps the request pending, so the loading state is a stable story.")
             .MockHttp(http => http.Get("api/people").Never())

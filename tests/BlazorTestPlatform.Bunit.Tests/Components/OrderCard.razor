@@ -1,0 +1,22 @@
+@* Markup snapshot fixture: a generated id, an event handler, an ignored timestamp and text split by Blazor. *@
+<section class="card  primary" id="@Id">
+    <h2>@Title</h2>
+    <button @onclick="() => count++">Add</button>
+    <p>Count: @count</p>
+    <span data-btp-ignore>@DateTime.Now.Ticks</span>
+    <input type="checkbox" aria-label="Paid" checked disabled />
+    <p>Placed on @Placed</p>
+</section>
+
+@code {
+    private int count;
+
+    /// <summary>The heading.</summary>
+    [Parameter] public string Title { get; set; } = "Orders";
+
+    /// <summary>A generated id (scrubbed to {guid}).</summary>
+    [Parameter] public string Id { get; set; } = Guid.NewGuid().ToString();
+
+    /// <summary>A date (scrubbed by the story).</summary>
+    [Parameter] public string Placed { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+}

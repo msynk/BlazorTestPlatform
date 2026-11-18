@@ -340,6 +340,23 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
     public StoryBuilder<TComponent> CheckAccessibilityAfterActions(bool enabled = true) => Metadata(StoryBuilderMetadata.AccessibilityAfterActions, enabled);
 
     /// <summary>
+    /// Replaces what changes between runs in the story's markup snapshots (<c>ctx.ExpectMarkupSnapshotAsync</c>) before
+    /// they are compared, as Verify's scrubbers: <c>ScrubMarkup(@"\d{4}-\d{2}-\d{2}", "{date}")</c>. Scrubbers apply in
+    /// order, after the default one (GUIDs become <c>{guid}</c>).
+    /// </summary>
+    public StoryBuilder<TComponent> ScrubMarkup(System.Text.RegularExpressions.Regex pattern, string replacement)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+        ArgumentNullException.ThrowIfNull(replacement);
+        var scrubbers = _metadata.TryGetValue(StoryBuilderMetadata.MarkupScrubbers, out var existing) && existing is IReadOnlyList<Results.MarkupScrubber> list ? list : [];
+        return Metadata(StoryBuilderMetadata.MarkupScrubbers, (IReadOnlyList<Results.MarkupScrubber>)[.. scrubbers, new Results.MarkupScrubber(pattern, replacement)]);
+    }
+
+    /// <inheritdoc cref="ScrubMarkup(System.Text.RegularExpressions.Regex, string)" />
+    public StoryBuilder<TComponent> ScrubMarkup([System.Diagnostics.CodeAnalysis.StringSyntax(System.Diagnostics.CodeAnalysis.StringSyntaxAttribute.Regex)] string pattern, string replacement) =>
+        ScrubMarkup(new System.Text.RegularExpressions.Regex(pattern ?? throw new ArgumentNullException(nameof(pattern)), System.Text.RegularExpressions.RegexOptions.CultureInvariant), replacement);
+
+    /// <summary>
     /// Lets the story leave references behind when its components are disposed. The bUnit runner otherwise fails a story
     /// whose components, once disposed, are still referenced by a <c>DotNetObjectReference</c> they passed to JavaScript
     /// or by an event handler on a service they injected (see <c>BunitStoryOptions.DetectLeaks</c>).

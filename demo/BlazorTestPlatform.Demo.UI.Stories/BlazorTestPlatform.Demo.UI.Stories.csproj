@@ -9,6 +9,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- HAR recordings replayed by MockHttp: embedded, so stories read them under WebAssembly too. -->
+    <EmbeddedResource Include="Recordings\*.har" LogicalName="Recordings.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\BlazorTestPlatform.Demo.UI\BlazorTestPlatform.Demo.UI.csproj" />
     <ProjectReference Include="..\..\src\BlazorTestPlatform.Core\BlazorTestPlatform.Core.csproj" />
     <ProjectReference Include="..\..\src\BlazorTestPlatform.Workbench\BlazorTestPlatform.Workbench.csproj" />

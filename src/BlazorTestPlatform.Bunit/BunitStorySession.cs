@@ -270,6 +270,11 @@ public sealed class BunitStorySession : IAsyncDisposable
             var storyContext = new StoryContext(story, driver, settings.DefaultTimeout, recorderToUse, cancellationToken)
             {
                 AccessibilityPolicy = options.AccessibilityPolicy ?? settings.Accessibility,
+                Settings = settings,
+
+                // Runs with a viewport, a theme or arg overrides may render differently (components read the viewport from
+                // the render context): their markup snapshots get their own files.
+                SnapshotVariant = string.Join('.', new[] { options.Viewport?.Name, options.Theme?.Name, BunitStoryRunner.ArgsKey(options.Args) }.Where(p => !string.IsNullOrEmpty(p))) is { Length: > 0 } variant ? variant : null,
             };
             return new BunitStorySession(story, context, root!, renderContext, driver, storyContext, settings);
         }

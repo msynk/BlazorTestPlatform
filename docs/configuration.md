@@ -100,6 +100,8 @@ In `btp.json`, `diagnostics` takes the enum names `off`, `retainOnFailure` and `
 |---|---|
 | `__snapshots__/**/*-{platform}*.png` for the platform CI renders on (`*-linux.png`, `*-linux.initial.png` in the Playwright image) | yes (the visual baselines CI gates on) |
 | `__snapshots__/**/*.png` for other platforms (`*-win32.png`, `*-darwin.png`) | no (written by local runs, and font rendering makes them machine-specific) |
+| `__snapshots__/**/*.markup.html` | yes (markup snapshots; the same on every platform) |
+| `__snapshots__/**/*.markup.received.html` | no (what a mismatched run rendered; `btp snapshots accept` makes it the snapshot) |
 | `__snapshots__/baselines.json` | yes (which Playwright and browser build produced each `{browser}-{platform}`; keep the entries local runs add, so the file doesn't change on every fresh clone) |
 | `__baselines__/performance.json` | yes |
 | `a11y-reviews/*.a11y-review.json` | yes |
@@ -115,4 +117,5 @@ TestResults/
 **/__snapshots__/**/*.png
 !**/__snapshots__/**/*-linux.png
 !**/__snapshots__/**/*-linux.*.png
+**/__snapshots__/**/*.markup.received.html
 ```

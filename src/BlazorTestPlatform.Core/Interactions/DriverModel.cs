@@ -452,6 +452,17 @@ public interface IStoryDriver : IAsyncDisposable
         throw new NotSupportedException($"The {Name} driver cannot take accessibility snapshots.");
 
     /// <summary>
+    /// The story's markup (or the single element <paramref name="locator"/> matches) for a markup snapshot, normalized so
+    /// that it compares across runs: one element per line, attributes sorted, whitespace collapsed, comments and
+    /// framework attributes (event handler ids, element references, CSS-isolation scopes) removed, and the content of
+    /// <c>data-btp-ignore</c> elements left out. The default throws <see cref="NotSupportedException"/>;
+    /// <c>ctx.ExpectMarkupSnapshotAsync</c> then records the check as skipped.
+    /// </summary>
+    /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
+    Task<string> GetMarkupSnapshotAsync(LocatorChain? locator, CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"The {Name} driver does not take markup snapshots (they are compared in bUnit).");
+
+    /// <summary>
     /// Measures what <paramref name="locator"/> matches now (no waiting), one entry per match; only a single match is
     /// measured (assertions are strict), other counts give empty entries. Measured: the computed value of
     /// <paramref name="cssProperty"/> (kebab-case, such as <c>background-color</c>; on <paramref name="pseudoElement"/>

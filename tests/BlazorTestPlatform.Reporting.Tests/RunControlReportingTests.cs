@@ -95,4 +95,23 @@ public sealed class RunControlReportingTests
         Assert.Contains("screenshots: 2, 1 changed", html, StringComparison.Ordinal);
         Assert.Contains("chromium-linux.closed</code>", html, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Story_coverage_shows_code_coverage_when_merged()
+    {
+        var coverage = new BlazorTestPlatform.Coverage.StoryCoverageReport
+        {
+            Components = [new BlazorTestPlatform.Coverage.ComponentCoverage { Title = "Inputs/Button", Component = "MyLib.Button", Stories = 2, Code = new BlazorTestPlatform.Coverage.CodeCoverage(30, 40, 3, 4) }],
+            ComponentsWithoutStories = ["MyLib.Grid"],
+        };
+        var directory = Path.Combine(Path.GetTempPath(), "btp-report-code", Guid.NewGuid().ToString("N"));
+
+        var html = File.ReadAllText(HtmlReportWriter.Write(RunSummary.From([Result("a", StoryOutcome.Passed)]), directory, new HtmlReportOptions { Coverage = coverage }));
+        var without = File.ReadAllText(HtmlReportWriter.Write(RunSummary.From([Result("a", StoryOutcome.Passed)]), directory + "-plain", new HtmlReportOptions { Coverage = coverage with { Components = [coverage.Components[0] with { Code = null }] } }));
+
+        Assert.Contains("code 75 % of lines", html, StringComparison.Ordinal);
+        Assert.Contains("<th class=\"num\">Lines</th><th class=\"num\">Branches</th>", html, StringComparison.Ordinal);
+        Assert.Contains("title=\"30/40 lines\">75 %</td>", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("<th class=\"num\">Lines</th>", without, StringComparison.Ordinal);
+    }
 }

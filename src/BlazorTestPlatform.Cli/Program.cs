@@ -44,9 +44,14 @@ var ctrf = new Option<string?>("--ctrf") { Description = "Also write a CTRF repo
 var sourceRoot = new Option<string?>("--source-root") { Description = "Repository root that SARIF locations are relative to (default: the current directory)." };
 var archive = new Option<string?>("--archive") { Description = "Run archive directory to add this run to (run history for trends, stability and the hub; persist it between CI runs). Typically <project>/.btp/runs." };
 var trigger = new Option<string?>("--trigger") { Description = "What started the run, recorded in the archive (default: ci on CI, else local)." };
+var codeCoverage = new Option<string[]>("--code-coverage")
+{
+    Description = "Cobertura code coverage reports (files or directories searched for *.cobertura.xml) merged into story coverage: each component's line and branch coverage next to its states. Default: the *.cobertura.xml files under the results directories.",
+    AllowMultipleArgumentsPerToken = true,
+};
 var report = new Command("report", "Aggregate results into an HTML report (plus optional JUnit, Markdown, flake history and a pull-request comment).")
 {
-    results, output, junit, ctrf, markdown, githubSummary, history, runId, failOnFailures, prComment, pullRequest, repository, reportUrl, sarif, sourceRoot, archive, trigger,
+    results, output, junit, ctrf, markdown, githubSummary, history, runId, failOnFailures, prComment, pullRequest, repository, reportUrl, sarif, sourceRoot, archive, trigger, codeCoverage,
 };
 report.SetAction(async (parse, cancellationToken) =>
 {
@@ -85,7 +90,48 @@ report.SetAction(async (parse, cancellationToken) =>
         Console.WriteLine($"Run archive: {archived}");
     }
 
-    var coverage = directories.Select(StoryCoverageReport.Load).OfType<StoryCoverageReport>().FirstOrDefault();
+    StoryCoverageReport? coverage = null;
+    try
+    {
+        coverage = directories.Select(StoryCoverageReport.Load).OfType<StoryCoverageReport>().FirstOrDefault();
+    }
+    catch (Exception ex) when (ex is System.Text.Json.JsonException or IOException or NotSupportedException)
+    {
+        Console.Error.WriteLine($"Story coverage not read ({ex.Message}); the report has no coverage section.");
+    }
+
+    if (coverage is null && parse.GetValue(codeCoverage) is { Length: > 0 })
+    {
+        Console.Error.WriteLine($"Code coverage not merged: no {StoryCoverageReport.FileName} in the results (save a StoryCoverage report from a test first).");
+    }
+
+    if (coverage is not null)
+    {
+        // Code coverage of the components, from Cobertura reports given or found next to the results.
+        var given = parse.GetValue(codeCoverage) ?? [];
+        var coberturaFiles = (given.Length > 0 ? given : directories)
+            .SelectMany(p => Directory.Exists(p) ? CoberturaCoverage.Find(p) : File.Exists(p) ? [p] : [])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (given.Length > 0 && coberturaFiles.Length == 0)
+        {
+            Console.Error.WriteLine($"No Cobertura reports at {string.Join(", ", given)}.");
+        }
+
+        if (coberturaFiles.Length > 0)
+        {
+            try
+            {
+                coverage = coverage.WithCodeCoverage(CoberturaCoverage.Load(coberturaFiles));
+                coverage.Save(directories[0]);
+                Console.WriteLine($"Code coverage: {coberturaFiles.Length} report(s) merged into story coverage ({(coverage.Code?.LineRate ?? 0).ToString("P0", CultureInfo.InvariantCulture)} of component lines).");
+            }
+            catch (FormatException ex)
+            {
+                Console.Error.WriteLine($"Code coverage not merged: {ex.Message}");
+            }
+        }
+    }
     var reportDirectory = parse.GetValue(output) ?? Path.Combine(directories[0], "report");
     var path = HtmlReportWriter.Write(summary, reportDirectory, new HtmlReportOptions { Flakes = flakes, Coverage = coverage });
     Console.WriteLine($"HTML report: {path}");
@@ -474,7 +520,23 @@ updateSource.SetAction(parse =>
     Console.WriteLine(parse.GetValue(dryRun) ? $"{updated} call site(s) would be updated." : $"{updated} call site(s) updated. Review the diff, rerun the stories and commit.");
     return updates.All(u => u.Updated) ? 0 : 1;
 });
-var snapshots = new Command("snapshots", "Snapshots written in story sources.") { updateSource };
+// btp snapshots accept
+var accept = new Command("accept", "Make the markup snapshots the last runs received (*.markup.received.html) the committed ones.") { dryRun };
+accept.SetAction(parse =>
+{
+    var settings = Settings(parse);
+    var accepted = MarkupSnapshots.Accept(settings.SnapshotDirectoryPath, parse.GetValue(dryRun));
+    foreach (var path in accepted)
+    {
+        Console.WriteLine($"{(parse.GetValue(dryRun) ? "would accept" : "accepted")}  {Path.GetRelativePath(Environment.CurrentDirectory, path)}");
+    }
+
+    Console.WriteLine(accepted.Count == 0
+        ? $"No received markup snapshots under {settings.SnapshotDirectoryPath}."
+        : parse.GetValue(dryRun) ? $"{accepted.Count} markup snapshot(s) would be accepted." : $"{accepted.Count} markup snapshot(s) accepted. Review the diff and commit.");
+    return 0;
+});
+var snapshots = new Command("snapshots", "Snapshots: markup snapshot files and those written in story sources.") { updateSource, accept };
 root.Add(snapshots);
 
 // btp clean

@@ -141,6 +141,35 @@ read, so lazy or large collections are never enumerated. `AllowLeaks(reason)` on
 purpose and `BunitStoryOptions.DetectLeaks = false` turns the check off. Browsers do not report leaks: Blazor does not
 expose which references a circuit still tracks.
 
+## Markup snapshots
+
+`ctx.ExpectMarkupSnapshotAsync()` compares the story's markup with a committed file, as Verify and Jest snapshots do:
+`__snapshots__/{story-id}/story.markup.html` (or `{name}.markup.html` with a name, and an element with `target:`).
+
+```html
+<div class="c-alert c-alert--info" role="status">
+  <div class="c-alert__body">
+    <p class="c-alert__title">Heads up</p>
+    <div>Your trial ends in 3 days.</div>
+  </div>
+  <button aria-label="Dismiss" class="c-alert__close" type="button">×</button>
+</div>
+```
+
+The markup is normalized so that only real changes show: one element per line, attributes and class tokens sorted,
+whitespace collapsed and adjacent text merged (but kept as written in `pre`, `textarea`, `script` and `style`, and
+`&nbsp;` shown), comments and the attributes Blazor adds (`blazor:onclick`, `_bl_` element references, CSS-isolation
+scopes like `b-3xxtam6d07`) removed, and the content of `data-btp-ignore` elements, whatever it is, replaced by `…`.
+Whitespace between inline elements is not represented (each node has its own line); a visual snapshot catches spacing. Scrubbers then replace what changes between runs: GUIDs become `{guid}`, and a story adds its
+own with `ScrubMarkup(@"\d{4}-\d{2}-\d{2}", "{date}")`. Runs with a theme or arg overrides get their own files.
+
+A missing snapshot is written locally and fails on CI. A different one fails with the changed lines and leaves
+`{name}.markup.received.html` beside the snapshot (also attached to the run); `btp snapshots accept [--dry-run]` makes
+every received file the snapshot, and `BTP_UPDATE_SNAPSHOTS=changed` overwrites while running. A snapshot written by a run
+that then fails is removed again. bUnit compares markup snapshots; browsers and the in-app driver record the check as
+skipped, because their DOM carries live state (input values, hydration markers) differently. For structure that must
+hold in every driver, use [accessibility tree snapshots](#accessibility-tree-snapshots).
+
 ## Accessibility tree snapshots
 
 `ctx.ExpectAriaSnapshotAsync(...)` asserts the roles, names and states of a story as a tree, identically under bUnit,
@@ -167,3 +196,17 @@ public void Every_component_state_has_a_story()
 * `ComponentsIn(assembly)` lists the public, concrete components of a library (layouts and `_Imports` excluded), so `ComponentsWithoutStories` shows the components that have no stories at all.
 
 `btp report` adds the coverage to the HTML report and to the Markdown summary, and so to the pull-request comment. The workbench shows each component's covered and missing states under **Quality gates**.
+
+**Code coverage next to states.** Run the tests with a code coverage collector writing Cobertura, and `btp report` puts
+each component's line and branch coverage next to its states, in the HTML report and the hub, so a component whose
+states all have stories but whose code is barely run (or the reverse) stands out:
+
+```bash
+# Microsoft.Testing.Extensions.CodeCoverage (or coverlet's --collect "XPlat Code Coverage")
+dotnet test --project MyLib.Tests -- --coverage --coverage-output-format cobertura --coverage-output stories.cobertura.xml
+btp report --code-coverage TestResults            # files or directories; default: *.cobertura.xml under the results
+```
+
+Reports from several test projects or runs (bUnit and browsers) merge line by line, and the classes the compiler
+generates for a component (lambdas, async state machines) count towards it. `StoryCoverageReport.WithCodeCoverage` and
+`CoberturaCoverage.Parse` do the same in code. In the demo, the 16 components' stories run 88% of their lines.
