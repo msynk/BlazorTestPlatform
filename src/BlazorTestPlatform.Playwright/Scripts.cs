@@ -59,6 +59,15 @@ internal static class Scripts
     /// <summary>The story's accessibility tree as text (the port of <c>AriaSnapshot</c>).</summary>
     public const string AriaSnapshot = "async () => " + Engine + ".ariaSnapshot()";
 
+    /// <summary>The story's accessibility tree followed by its visible text (prerender parity).</summary>
+    public const string StoryState = "async () => " + Engine + ".storyState()";
+
+    /// <summary>Starts recording the distinct states (tree and visible text) of the story.</summary>
+    public const string WatchAria = "async () => " + Engine + ".watchAria()";
+
+    /// <summary>Stops recording; returns the trees seen as a JSON array.</summary>
+    public const string StopWatchAria = "async () => " + Engine + ".stopWatchAria()";
+
     /// <summary>Forces pseudo-classes on the single element a locator chain matches; returns null, or why it could not.</summary>
     public const string ForcePseudo = "async ([steps, names]) => " + Engine + ".forcePseudo(steps, names)";
 

@@ -196,6 +196,9 @@ Research and the full gap list, including what was deferred and why: [reports/Ga
 | U-20 | `TimeZone(...)` on stories | P2 | Core, Playwright | Verified | `TimeZoneTests`; demo `testing-time-zone--tokyo` in bUnit, Server, WebAssembly (runtime zone Tokyo), Auto, SSR, Firefox, WebKit | stories.md |
 | U-21 | Set-based manual review fingerprints, earlier ones accepted | P2 | Accessibility, Core, Bunit | Verified | `FingerprintTests.Component_fingerprints_depend_on_the_distinct_states_*`, `ManualReviewTests.Reviews_recorded_with_the_earlier_fingerprint_stay_current`; the demo Button review's set fingerprint is the same with and without the new story (`8b0cda7622c79fff`), so its fingerprint was migrated | quality-gates.md |
 | U-22 | xUnit 4.0.3, MSTest 4.5.3, TUnit 1.86.0, NUnit3TestAdapter 6.3.1, Test SDK 18.12.0; NUnit adapter on NUnit 5 | P3 | build | Verified | framework adapter suites | CHANGELOG |
+| U-23 | Shrinking of failed explorations in bUnit (`ExplorationReplay`, delta debugging) | P2 | Core, Bunit | Verified | `ExplorationTests` (a 40-step failure shrinks to `add -> remove`; deterministic; can be turned off) | interactions.md |
+| U-24 | Prerender parity (`CheckPrerender()`, `BrowserRunOptions.PrerenderParity`) | P2 | Core, Workbench, Playwright | Verified | demo `PrerenderParityTests`: the runtime badge's change is caught under WebAssembly and declared expected, Server and Auto pass, every design-system story keeps parity under Server. The first version compared accessibility trees only and missed a text change; visible text was added | cross-hosting.md |
+| U-25 | Culture and time-zone modes (`ThemeDefinition.WithCulture`, `WithTimeZone`, `FrameTheme`) | P2 | Core, Bunit, Playwright | Verified | `ModeTests` (naming, matrix key round trip, culture and zone in bUnit, story precedence); `ThemeEmulationTests.Culture_and_time_zone_modes_*` in Chromium, Firefox and WebKit | stories.md |
 | U-15 | Container scripts pass `BTP_GREP`, `BTP_GREP_INVERT`, `BTP_TAGS`, `BTP_SHARD` | P3 | scripts | Verified | Linux baselines of the new story rendered with `BTP_GREP=... scripts/visual-tests.sh --update` | ci.md |
 
 ## Verification log
@@ -230,6 +233,9 @@ Research and the full gap list, including what was deferred and why: [reports/Ga
 | 2026-11-17 | `BTP_GREP=inputs-button--hover-and-focus-looks`: bUnit, cross-hosting, cross-browser, visual and in-app suites; then `scripts/visual-tests.sh --update` | 685 passed (bUnit reports the story skipped: no CSS); 590 passed in the container, 16 Linux baselines |
 | 2026-11-17 | `BTP_GREP=testing-time-zone`: bUnit, cross-hosting and cross-browser suites | 400 passed; WebAssembly reports `TimeZoneInfo.Local` as Asia/Tokyo, Server the host's zone, `TimeProvider` Asia/Tokyo in both |
 | 2026-11-17 | `dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests` (full suite, 98 stories) | 765 of 768: the local Windows `account-user-badge--signed-in` baseline (2 px, see above) and two Firefox cases that hit 2 min under full parallel load; both pass alone |
+| 2026-11-17 | unit and in-memory suites after U-23 to U-25, each on net10.0 and net11.0 | 1,546 tests: 1,530 passed, 16 skipped by design (773 per framework) |
+| 2026-11-17 | `dotnet test --project demo/BlazorTestPlatform.Demo.UI.Tests` (full suite, 99 stories, with prerender parity and modes) | 777 of 778: only the local Windows `account-user-badge--signed-in` baseline (2 px, see above) |
+| 2026-11-17 | trimmed publish with `-warnaserror:IL2026,IL2060,IL2070,IL2072,IL2091`, the published app in `Production`, cross-hosting, in-app, controls, inspector and prerender parity suites | no trimming warnings; 255 passed |
 
 ## Deferred
 

@@ -188,10 +188,10 @@ public sealed class WorkbenchBrowser : IAsyncDisposable
                 _ => Microsoft.Playwright.ColorScheme.NoPreference,
             },
             ReducedMotion = ReducedMotion.Reduce,
-            Locale = cell.Story.Culture is { } culture && options.Locale == StoryPageOptions.DefaultLocale ? culture : options.Locale,
+            Locale = cell.Story.CultureUnder(cell.Theme) is { } culture && options.Locale == StoryPageOptions.DefaultLocale ? culture : options.Locale,
             ForcedColors = cell.Theme.ForcedColors ? Microsoft.Playwright.ForcedColors.Active : null,
             Contrast = cell.Theme.MoreContrast ? Microsoft.Playwright.Contrast.More : null,
-            TimezoneId = cell.Story.TimeZone is { } zone && options.TimezoneId == StoryPageOptions.DefaultTimezoneId ? zone : options.TimezoneId,
+            TimezoneId = cell.Story.TimeZoneUnder(cell.Theme) is { } zone && options.TimezoneId == StoryPageOptions.DefaultTimezoneId ? zone : options.TimezoneId,
         }).ConfigureAwait(false);
 
         try
@@ -280,6 +280,12 @@ public sealed class StoryPageOptions
     public IDictionary<string, string?> Args { get; } = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Captures the prerendered accessibility tree and every tree seen while Blazor starts (<see cref="StoryPage.PrerenderParity"/>);
+    /// only for interactive render modes with prerendering. Holds Blazor's script back until the prerendered tree is taken.
+    /// </summary>
+    public bool WatchPrerender { get; set; }
+
+    /// <summary>
     /// Runs before navigation, e.g. to route third-party scripts or static assets with <c>page.RouteAsync</c>.
     /// Mock application HTTP calls with the story's <c>MockHttp</c> instead: it works under Server too.
     /// </summary>
@@ -330,6 +336,15 @@ public sealed class StoryPage : IAsyncDisposable
     /// <summary>Root element of the story.</summary>
     public ILocator Root => Page.Locator("[data-btp-root]");
 
+    /// <summary>
+    /// With <see cref="StoryPageOptions.WatchPrerender"/>: the prerendered accessibility tree, and the distinct trees seen
+    /// after Blazor started until the page settled (the last is the current one). Null otherwise. Known after
+    /// <see cref="NavigateAsync"/>.
+    /// </summary>
+    public (string Prerendered, IReadOnlyList<string> AfterStart)? PrerenderParity { get; private set; }
+
+    private string? _prerenderedTree;
+
     /// <summary>Creates the play-function context.</summary>
     public StoryContext CreateStoryContext(Results.StepRecorder? recorder = null, TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
         new(Cell.Story, Driver, timeout ?? BtpSettings.Current.DefaultTimeout, recorder, cancellationToken);
@@ -368,10 +383,40 @@ public sealed class StoryPage : IAsyncDisposable
     {
         var timeout = _readyTimeout;
         var prerender = _options.Prerender && Cell.Story.Prerender;
-        var url = WorkbenchUrls.Frame(Cell.Story.Id, Cell.HostingModel, Cell.Theme.Name, Cell.Viewport.Name, prerender, _options.AutoPlay, _options.Args).TrimStart('/');
+        var url = WorkbenchUrls.Frame(Cell.Story.Id, Cell.HostingModel, Cell.Theme.FrameTheme, Cell.Viewport.Name, prerender, _options.AutoPlay, _options.Args).TrimStart('/');
         var ms = (float)timeout.TotalMilliseconds;
+
+        // Prerender parity: Blazor's script waits until the prerendered tree is captured and the watcher runs.
+        var watch = _options.WatchPrerender && prerender && Cell.HostingModel.IsInteractive();
+        TaskCompletionSource? release = null;
+        const string BlazorScripts = "**/_framework/blazor.*.js*";
+        if (watch)
+        {
+            release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var gate = release;
+            await Page.RouteAsync(BlazorScripts, async route =>
+            {
+                await gate.Task.WaitAsync(timeout).ConfigureAwait(false);
+                await route.ContinueAsync().ConfigureAwait(false);
+            }).ConfigureAwait(false);
+        }
+
         // Commit (not Load): streamed responses of stories with never-completing work stay open by design.
         await Page.GotoAsync(url, new PageGotoOptions { WaitUntil = WaitUntilState.Commit, Timeout = ms }).ConfigureAwait(false);
+
+        if (watch)
+        {
+            try
+            {
+                await Page.WaitForSelectorAsync("[data-btp-root][data-btp-status=ready]", new PageWaitForSelectorOptions { Timeout = ms, State = WaitForSelectorState.Attached }).ConfigureAwait(false);
+                _prerenderedTree = await Page.EvaluateAsync<string?>(Scripts.StoryState).ConfigureAwait(false) ?? string.Empty;
+                await Page.EvaluateAsync(Scripts.WatchAria).ConfigureAwait(false);
+            }
+            finally
+            {
+                release!.TrySetResult();
+            }
+        }
 
         try
         {
@@ -423,6 +468,17 @@ public sealed class StoryPage : IAsyncDisposable
         }
 
         await Page.EvaluateAsync(Scripts.WaitForAssets).ConfigureAwait(false);
+
+        if (watch)
+        {
+            // Settled: the renderer is idle, then a little longer for the work hydration starts (loads, timers).
+            await Driver.WaitForIdleAsync(CancellationToken.None).ConfigureAwait(false);
+            await Task.Delay(300).ConfigureAwait(false);
+            await Driver.WaitForIdleAsync(CancellationToken.None).ConfigureAwait(false);
+            var seen = System.Text.Json.JsonSerializer.Deserialize(await Page.EvaluateAsync<string?>(Scripts.StopWatchAria).ConfigureAwait(false) ?? "[]", PlaywrightJsonContext.Default.StringArray) ?? [];
+            PrerenderParity = (_prerenderedTree!, seen);
+            await Page.UnrouteAsync("**/_framework/blazor.*.js*").ConfigureAwait(false);
+        }
     }
 
     /// <inheritdoc />

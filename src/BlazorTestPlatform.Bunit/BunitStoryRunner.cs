@@ -36,8 +36,8 @@ public static class BunitStoryRunner
 
     private static async Task<StoryResult> RunOnceAsync(Story story, BunitStoryOptions options, BtpSettings settings, CancellationToken cancellationToken)
     {
-        // The story's culture flows into rendering and play (both run in this async flow) and ends with it.
-        if (story.Culture is { } culture)
+        // The story's culture (else the theme's) flows into rendering and play (both run in this async flow) and ends with it.
+        if (story.CultureUnder(options.Theme) is { } culture)
         {
             System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.CurrentUICulture = System.Globalization.CultureInfo.GetCultureInfo(culture);
         }
@@ -171,8 +171,15 @@ public static class BunitStoryRunner
             // The caller cancelled (test run aborted): that is not a story failure, and no result is recorded as one.
             throw ex as OperationCanceledException ?? new OperationCanceledException("The story run was cancelled.", ex, cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception caught)
         {
+            var ex = caught;
+            if (ex is ExplorationFailedException exploration && options.ShrinkExplorations && exploration.Steps.Count > 1 && !timeout.IsCancellationRequested)
+            {
+                ex = await recorder.RunAsync($"shrink exploration {exploration.Exploration} ({exploration.Steps.Count} steps)", StepKind.Check,
+                    () => ShrinkAsync(story, options, exploration, timeout.Token)).ConfigureAwait(false);
+            }
+
             var message = ex is OperationCanceledException && timeout.IsCancellationRequested
                 ? $"Story timed out after {(options.Timeout ?? story.TimeoutOr(TimeSpan.FromSeconds(30))).TotalSeconds:0.#} s."
                 : ex.Message;
@@ -194,6 +201,51 @@ public static class BunitStoryRunner
                 Artifacts = attachments,
                 AriaSnapshotMismatches = ariaMismatches,
             });
+        }
+    }
+
+    // Replays shorter candidates of a failed exploration on fresh renders (delta debugging) and reports the shortest that
+    // still fails the same way; a shrink that runs out of time or finds nothing shorter keeps the original failure.
+    private static async Task<Exception> ShrinkAsync(Story story, BunitStoryOptions options, ExplorationFailedException failure, CancellationToken cancellationToken)
+    {
+        ExplorationFailedException? shortest = null;
+        async Task<IReadOnlyList<string>?> Fails(IReadOnlyList<string> steps)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var replay = ExplorationReplay.Begin(failure.Exploration, steps);
+            try
+            {
+                await using var session = await BunitStorySession.StartAsync(story, options, recorder: null, cancellationToken: cancellationToken).ConfigureAwait(false);
+                await session.PlayAsync().ConfigureAwait(false);
+                return null;
+            }
+            catch (ExplorationFailedException again) when (again.Exploration == failure.Exploration && again.Failure == failure.Failure)
+            {
+                if (shortest is null || again.Steps.Count < shortest.Steps.Count)
+                {
+                    shortest = again;
+                }
+
+                return again.Steps;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Another failure, or a step that is not possible in this order: not the same bug.
+                return null;
+            }
+        }
+
+        try
+        {
+            var steps = await Exploration.ShrinkAsync(failure.Steps, Fails, options.MaxShrinkProbes).ConfigureAwait(false);
+            return shortest is not null && steps.Count < failure.Steps.Count
+                ? failure.WithShrunkSteps(steps, shortest.InnerException!)
+                : failure;
+        }
+        catch (OperationCanceledException)
+        {
+            // Out of time: keep the shortest failure found so far.
+            return shortest is null ? failure : failure.WithShrunkSteps(shortest.Steps, shortest.InnerException!);
         }
     }
 

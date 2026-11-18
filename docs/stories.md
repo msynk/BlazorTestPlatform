@@ -135,6 +135,13 @@ stories.Add("German totals", s => s.Culture("de-DE").Play(async ctx =>
     await ctx.Expect(ctx.GetByTestId("total")).ToHaveTextAsync("1.234,50 €")));
 ```
 
+**Modes.** To run every story in several cultures or time zones, derive themes from the ones you have (as Chromatic's
+modes): `ThemeDefinition.Light.WithCulture("de-DE")` is the light theme named `light-de-de`, rendered in German, and
+`.WithTimeZone("Asia/Tokyo")` adds a zone. Use them like any theme in a matrix (`new TestMatrix().WithThemes(ThemeDefinition.Light,
+ThemeDefinition.Light.WithCulture("ar-SA"))`) or in `BunitStoryOptions.Theme`: the mode's name is part of result keys and
+baseline names, frames look like the base theme, bUnit runs in the mode's culture and time zone and browsers use them as
+locale and zone. A story's own `Culture(...)` and `TimeZone(...)` win over a mode's.
+
 `TimeZone("Asia/Tokyo")` renders a story in a time zone (IANA ids; Windows ids are converted). Every driver gives the story a `TimeProvider` whose `LocalTimeZone` is that zone (with `UseFakeTime`, the fake clock carries it), so components that compute local time through an injected `TimeProvider` (`Time.GetLocalNow()`) render the same everywhere. Browsers run in that zone too, which JavaScript and WebAssembly's `TimeZoneInfo.Local` follow. Server-side code that reads `DateTime.Now` or `TimeZoneInfo.Local` keeps the host's zone: inject `TimeProvider` instead. An unknown zone fails when the catalog is built.
 
 ## Known failures, unfinished and slow stories

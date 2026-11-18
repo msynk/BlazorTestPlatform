@@ -44,6 +44,9 @@ public sealed class BrowserRunOptions
     /// <summary>Prerender interactive modes. Default true. Stories that call <c>.Prerender(false)</c> are never prerendered.</summary>
     public bool Prerender { get; set; } = true;
 
+    /// <summary>Checks prerender parity for every story (as if each called <c>CheckPrerender()</c>). Default false.</summary>
+    public bool PrerenderParity { get; set; }
+
     /// <summary>Write JSON results for reports. Default true.</summary>
     public bool WriteResults { get; set; } = true;
 
@@ -195,6 +198,7 @@ public sealed class BrowserStoryRunner
             {
                 Trace = keepDiagnostics != DiagnosticsMode.Off,
                 Prerender = _options.Prerender && story.Prerender,
+                WatchPrerender = _options.PrerenderParity || story.ChecksPrerenderParity,
                 ConfigurePageAsync = _options.ConfigurePageAsync,
             }).ConfigureAwait(false);
             lock (gate)
@@ -213,6 +217,22 @@ public sealed class BrowserStoryRunner
             if (page.UnsupportedOverrides is { } unsupported)
             {
                 recorder.Log($"warning: these story services do not apply in browsers (the application's are used): {unsupported}");
+            }
+
+            if (page.PrerenderParity is { } parity)
+            {
+                await recorder.RunAsync("prerender parity", StepKind.Check, () =>
+                {
+                    var prerendered = StoryContext.NormalizeSnapshot(parity.Prerendered);
+                    var changed = parity.AfterStart.Select(StoryContext.NormalizeSnapshot).Where(t => !string.Equals(t, prerendered, StringComparison.Ordinal)).Distinct(StringComparer.Ordinal).ToArray();
+                    return changed.Length == 0
+                        ? Task.CompletedTask
+                        : throw new StoryAssertionException(
+                            $"Hydration changed what the prerendered story showed under {cell.HostingModel.ToToken()}: {changed.Length} other state(s) (accessibility tree and visible text) appeared after Blazor started" +
+                            (string.Equals(StoryContext.NormalizeSnapshot(parity.AfterStart[^1]), prerendered, StringComparison.Ordinal) ? " (a flash: it came back)." : ".") +
+                            $"{Environment.NewLine}Prerendered:{Environment.NewLine}{Indent(prerendered)}{Environment.NewLine}Then:{Environment.NewLine}{string.Join(Environment.NewLine + "  ---" + Environment.NewLine, changed.Select(Indent))}" +
+                            $"{Environment.NewLine}Persist state the prerender computed ([PersistentState] or PersistentComponentState), or render the same content in both.");
+                }).ConfigureAwait(false);
             }
 
             var context = page.CreateStoryContext(recorder, _settings.DefaultTimeout, timeout.Token);
@@ -482,6 +502,8 @@ public sealed class BrowserStoryRunner
             await StopAsync(attemptTask).ConfigureAwait(false);
         }
     }
+
+    private static string Indent(string text) => string.Join(Environment.NewLine, text.Split('\n').Select(l => "  " + l));
 
     // Files the play script attached go next to the attempt's other artifacts.
     private IReadOnlyList<ArtifactReference> Attachments(StoryContext? context, string artifactDirectory)

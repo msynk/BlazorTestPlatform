@@ -45,12 +45,26 @@ public sealed class ExplorationTests
         Assert.Equal(StoryOutcome.Failed, first.Outcome);
         Assert.Contains("Exploration 'stepper': invariant 'count is never negative' broke after", first.Error, StringComparison.Ordinal);
         Assert.Matches(@"Steps: [a-z]+( -> [a-z]+)*", first.Error);
-        Assert.Contains("remove", Regex.Match(first.Error!, "Steps: (.*)").Groups[1].Value, StringComparison.Ordinal);
+        // Shrunk on fresh renders to the shortest sequence that breaks it: one step up from zero, then the faulty removal.
+        Assert.Equal("add -> remove", Regex.Match(first.Error!, "Steps: (.*)").Groups[1].Value.Trim());
+        Assert.Matches(@"after 2 step\(s\) \(shrunk from \d+\)\.", first.Error);
+        Assert.Contains(Flatten(first.Steps), s => s.Title.StartsWith("shrink exploration stepper", StringComparison.Ordinal));
         Assert.Matches(@"Replay: \.Seed\(-?\d+\)", first.Error);
         Assert.Contains("await ctx.GetByRole(\"button\", \"Remove\").ClickAsync();", first.Error, StringComparison.Ordinal);
 
         // The seed derives from the story: a rerun takes the same steps.
         Assert.Equal(first.Error, second.Error);
+    }
+
+    [Fact]
+    public async Task Shrinking_can_be_turned_off()
+    {
+        var options = Options;
+        options.ShrinkExplorations = false;
+        var result = await BunitStoryRunner.RunAsync(Catalog.Get("tests-exploration--explored"), options, TestContext.Current.CancellationToken);
+
+        Assert.Equal(StoryOutcome.Failed, result.Outcome);
+        Assert.DoesNotContain("shrunk from", result.Error, StringComparison.Ordinal);
     }
 
     [Fact]

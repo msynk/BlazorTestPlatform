@@ -38,6 +38,25 @@ Each interaction then round-trips through the frame bridge (`window.__btp.waitFo
 
 Interactive modes are prerendered, as in production. If a story's first render never completes (a pending request, an authorizing user), Blazor cannot hydrate it. Call `.Prerender(false)` on such stories; the error message suggests this when it happens. Story frames use streaming rendering, so loading states also render under static SSR.
 
+### Prerender parity
+
+`CheckPrerender()` on a story (or `BrowserRunOptions.PrerenderParity` for every story) checks that hydration keeps what
+the prerendered page showed. The runner holds Blazor's script back until it has captured the prerendered story (its
+accessibility tree and visible text), then records every state the story passes through from the moment Blazor starts until
+it settles; any other state fails the run with both shown. It catches a "Loading..." flash after prerendered data (state
+the prerender computed but did not persist with `[PersistentState]`), content only interactive rendering produces, and
+values computed differently on the server and in WebAssembly. It applies to interactive render modes with prerendering.
+
+```text
+Hydration changed what the prerendered story showed under wasm: 1 other state(s) (accessibility tree and visible text) appeared after Blazor started.
+Prerendered:
+  - paragraph
+  # text: Running on Server
+Then:
+  - paragraph
+  # text: Running on WebAssembly
+```
+
 ## Hosts
 
 | Host | Use when |

@@ -321,6 +321,15 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
     /// <summary>Enables or disables prerendering of interactive modes in browser runs (see <see cref="Story.Prerender"/>).</summary>
     public StoryBuilder<TComponent> Prerender(bool enabled) => Metadata(StoryBuilderMetadata.Prerender, enabled);
 
+    /// <summary>
+    /// Checks in browsers that hydration does not change what the prerendered page showed: the accessibility tree and the
+    /// visible text of the prerendered story are captured before Blazor starts, and every state seen after it starts,
+    /// until the story settles, must equal them. Catches a "Loading..." flash after prerendered data (missing persistent component state), content
+    /// that only interactive rendering produces, and values computed differently on the server and in WebAssembly.
+    /// Applies to interactive render modes with prerendering; bUnit and the in-app driver ignore it.
+    /// </summary>
+    public StoryBuilder<TComponent> CheckPrerender(bool enabled = true) => Metadata(StoryBuilderMetadata.PrerenderParity, enabled);
+
     /// <summary>Sets documentation shown in the workbench.</summary>
     public StoryBuilder<TComponent> Description(string description)
     {

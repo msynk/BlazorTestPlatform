@@ -374,8 +374,12 @@ await ctx.ExploreAsync("stepper", e => e
 
 A failure lists the steps that led to it, the seed that replays them (`.Seed(n)` or `BTP_EXPLORE_SEED=n`) and a play script
 built from the actions' `code`, ready to paste as a regression story. The seed derives from the story's, so a run repeats
-exactly; set `BTP_EXPLORE_SEED` (for example to the build number in a nightly job) to try other sequences. Failing sequences
-are not shrunk: that needs a fresh render per attempt.
+exactly; set `BTP_EXPLORE_SEED` (for example to the build number in a nightly job) to try other sequences.
+
+The bUnit runner **shrinks** a failing sequence before reporting it: it replays shorter candidates on fresh renders (delta
+debugging, `ExplorationReplay`) and reports the shortest that still fails the same way, for example
+`Steps: add -> remove (shrunk from 23)`. `BunitStoryOptions.ShrinkExplorations = false` turns it off and `MaxShrinkProbes`
+(default 200) bounds it. Browser runs report the sequence as found: replay its seed in bUnit to shrink it.
 
 ## Three drivers, one script
 

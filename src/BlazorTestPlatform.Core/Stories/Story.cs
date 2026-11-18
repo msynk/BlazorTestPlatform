@@ -146,6 +146,12 @@ public sealed class Story
     /// </summary>
     public string? TimeZone { get; }
 
+    /// <summary>The culture the story renders in under <paramref name="theme"/>: its own, else the theme's (a culture mode).</summary>
+    public string? CultureUnder(ThemeDefinition? theme) => Culture ?? theme?.Culture;
+
+    /// <summary>The time zone the story renders in under <paramref name="theme"/>: its own, else the theme's.</summary>
+    public string? TimeZoneUnder(ThemeDefinition? theme) => TimeZone ?? theme?.TimeZone;
+
     /// <summary>When set, the story is skipped by test runners.</summary>
     public string? SkipReason { get; }
 
@@ -184,6 +190,12 @@ public sealed class Story
     /// completes (pending loads, authorizing users) must disable it: Blazor only hydrates after prerendering finishes.
     /// </summary>
     public bool Prerender => !Metadata.TryGetValue(StoryBuilderMetadata.Prerender, out var value) || value is not false;
+
+    /// <summary>
+    /// Whether browser runs check that hydration keeps the prerendered accessibility tree (<c>CheckPrerender()</c>): every
+    /// tree the story shows from the moment Blazor starts until it settles must equal the prerendered one.
+    /// </summary>
+    public bool ChecksPrerenderParity => Metadata.TryGetValue(StoryBuilderMetadata.PrerenderParity, out var value) && value is true;
 
     /// <summary><c>Title/Name</c>.</summary>
     public string Path => $"{Title}/{Name}";
@@ -250,12 +262,18 @@ public sealed class Story
     }
 
     /// <summary>Applies the story's service overrides, fixtures and fake time to a service collection.</summary>
-    public void ConfigureServices(IServiceCollection services, FixtureContext context)
+    public void ConfigureServices(IServiceCollection services, FixtureContext context) => ConfigureServices(services, context, TimeZone);
+
+    /// <summary>
+    /// Applies the story's service overrides with <paramref name="timeZone"/> as the zone of its <see cref="TimeProvider"/>
+    /// (a theme's zone, see <see cref="TimeZoneUnder"/>); null keeps the system clock's.
+    /// </summary>
+    public void ConfigureServices(IServiceCollection services, FixtureContext context, string? timeZone)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(context);
 
-        var zone = TimeZone is { } id ? TimeZoneInfo.FindSystemTimeZoneById(id) : null;
+        var zone = timeZone is { } id ? TimeZoneInfo.FindSystemTimeZoneById(id) : null;
         if (FakeTimeStart is { } start)
         {
             var fakeTime = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(start);
@@ -368,6 +386,9 @@ public static class StoryBuilderMetadata
 
     /// <summary>Key of the prerender flag metadata.</summary>
     public const string Prerender = "btp:prerender";
+
+    /// <summary>Key of the prerender parity check metadata (<c>CheckPrerender()</c>).</summary>
+    public const string PrerenderParity = "btp:prerender-parity";
 }
 
 /// <summary>Mutable data collected by builders.</summary>

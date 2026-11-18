@@ -170,6 +170,22 @@ public sealed class ThemeEmulationTests(WorkbenchFixture workbench)
         Assert.Equal("rtl", await page.Page.EvaluateAsync<string>("() => getComputedStyle(document.querySelector('[data-btp-root] button')).direction"));
     }
 
+    [Theory]
+    [InlineData(Browsers.Chromium)]
+    [InlineData(Browsers.Firefox)]
+    [InlineData(Browsers.WebKit)]
+    public async Task Culture_and_time_zone_modes_run_the_browser_in_them_and_keep_the_base_look(string browser)
+    {
+        var mode = ThemeDefinition.Dark.WithCulture("de-DE").WithTimeZone("Asia/Tokyo");
+        var cell = new MatrixCase(ComponentStoryTests.Catalog.Get("inputs-button--primary"), Viewport.Desktop, mode, HostingModel.InteractiveServer, browser);
+        await using var page = await workbench.Environment.Browser.OpenAsync(cell);
+
+        Assert.Equal("de-DE", await page.Page.EvaluateAsync<string>("() => navigator.language"));
+        Assert.Equal("Asia/Tokyo", await page.Page.EvaluateAsync<string>("() => Intl.DateTimeFormat().resolvedOptions().timeZone"));
+        Assert.Equal("dark", await page.Page.EvaluateAsync<string>("() => document.documentElement.getAttribute('data-theme')"));
+        Assert.Equal("inputs-button--primary|desktop|dark-de-de-asia-tokyo|server|" + browser, cell.Key);
+    }
+
     [Fact]
     public async Task High_contrast_themes_emulate_forced_colors_and_more_contrast()
     {
@@ -178,5 +194,62 @@ public sealed class ThemeEmulationTests(WorkbenchFixture workbench)
 
         Assert.True(await page.Page.EvaluateAsync<bool>("() => matchMedia('(forced-colors: active)').matches"));
         Assert.True(await page.Page.EvaluateAsync<bool>("() => matchMedia('(prefers-contrast: more)').matches"));
+    }
+}
+
+/// <summary>
+/// Prerender parity (<c>CheckPrerender()</c>): the prerendered accessibility tree must survive hydration. The runtime badge
+/// changes from "Server" to "WebAssembly" when WebAssembly takes over, which the story declares as an expected failure;
+/// under Server and Auto (a fresh browser starts on Server) nothing changes.
+/// </summary>
+public sealed class PrerenderParityTests(WorkbenchFixture workbench)
+{
+    [Theory]
+    [InlineData(HostingModel.InteractiveServer)]
+    [InlineData(HostingModel.InteractiveWebAssembly)]
+    [InlineData(HostingModel.InteractiveAuto)]
+    public async Task Hydration_keeps_or_reports_the_prerendered_tree(HostingModel model)
+    {
+        var cell = new MatrixCase(ComponentStoryTests.Catalog.Get("display-runtime-badge--hydration-parity"), Viewport.Desktop, ThemeDefinition.Light, model, Browsers.Chromium);
+
+        var result = await workbench.Environment.VerifyAsync(cell, TestContext.Current.CancellationToken);
+
+        Assert.Equal(BlazorTestPlatform.Results.StoryOutcome.Passed, result.Outcome);
+        if (model == HostingModel.InteractiveWebAssembly)
+        {
+            Assert.NotNull(result.ExpectedFailure);
+            Assert.Contains("Hydration changed what the prerendered story showed", result.Error, StringComparison.Ordinal);
+            Assert.Contains("WebAssembly", result.Error, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Null(result.ExpectedFailure);
+            Assert.Contains(result.Steps, s => s.Title == "prerender parity" && !s.Failed);
+        }
+    }
+
+    [Fact]
+    public async Task Design_system_stories_render_the_same_before_and_after_hydration()
+    {
+        // Every component story without play, with the check on for all of them, under Server.
+        var runner = new BlazorTestPlatform.Playwright.BrowserStoryRunner(workbench.Environment.Browser, new BlazorTestPlatform.Playwright.BrowserRunOptions
+        {
+            PrerenderParity = true,
+            Visual = false,
+            Accessibility = false,
+            WriteResults = false,
+        });
+        var stories = ComponentStoryTests.Catalog.Where(s => !s.HasPlay && !s.Title.StartsWith("Testing/", StringComparison.Ordinal) && s.Prerender && s.ExpectedFailure is null && s.SkipReason is null).Stories;
+        var failures = new List<string>();
+        foreach (var story in stories)
+        {
+            var result = await runner.RunAsync(new MatrixCase(story, Viewport.Desktop, ThemeDefinition.Light, HostingModel.InteractiveServer, Browsers.Chromium), TestContext.Current.CancellationToken);
+            if (result.Outcome == BlazorTestPlatform.Results.StoryOutcome.Failed)
+            {
+                failures.Add($"{story.Id}: {result.Error}");
+            }
+        }
+
+        Assert.True(failures.Count == 0, string.Join(Environment.NewLine + Environment.NewLine, failures));
     }
 }

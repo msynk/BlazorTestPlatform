@@ -33,6 +33,15 @@ public sealed class BunitStoryOptions
     /// <summary>Write a JSON result into the results directory. Default true.</summary>
     public bool WriteResults { get; set; } = true;
 
+    /// <summary>
+    /// Shrinks the steps of a failed <c>ctx.ExploreAsync</c> (default true): candidates without some of the steps are replayed
+    /// on fresh renders, and the failure reports the shortest sequence found that still fails the same way.
+    /// </summary>
+    public bool ShrinkExplorations { get; set; } = true;
+
+    /// <summary>The most replays one shrink may make (default 200).</summary>
+    public int MaxShrinkProbes { get; set; } = 200;
+
     /// <summary>Accessibility policy (defaults to <see cref="BtpSettings.Accessibility"/>).</summary>
     public AccessibilityPolicy? AccessibilityPolicy { get; set; }
 
@@ -181,7 +190,7 @@ public sealed class BunitStorySession : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(story);
         options ??= new BunitStoryOptions();
         var settings = options.Settings ?? BtpSettings.Current;
-        if (story.Culture is { } culture)
+        if (story.CultureUnder(options.Theme) is { } culture)
         {
             // Covers the first render; BunitStoryRunner sets it for the whole run (render and play).
             System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.CurrentUICulture = System.Globalization.CultureInfo.GetCultureInfo(culture);
@@ -223,7 +232,7 @@ public sealed class BunitStorySession : IAsyncDisposable
                 context.Services.AddSingleton(authentication);
             }
 
-            story.ConfigureServices(context.Services, fixtureContext);
+            story.ConfigureServices(context.Services, fixtureContext, story.TimeZoneUnder(options.Theme));
             options.ConfigureContext?.Invoke(context);
             await story.InitializeFixturesAsync(context.Services, fixtureContext).ConfigureAwait(false);
 

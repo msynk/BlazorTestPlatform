@@ -1170,6 +1170,47 @@ export function forcePseudo(stepsJson, names) {
     return null;
 }
 
+// Prerender parity: the distinct accessibility trees the story shows while Blazor starts (one per animation frame with DOM
+// changes), compared by the browser runner with the prerendered tree.
+let ariaWatch = null;
+
+/** What the story shows: its accessibility tree, then its visible text (paragraph text has no place in the tree). */
+export function storyState() {
+    const root = storyRoot();
+    const text = root ? (root.innerText || '').replace(/\s+/g, ' ').trim() : '';
+    return `${ariaSnapshot()}
+# text: ${text}`;
+}
+
+/** Starts recording the distinct accessibility trees of the story (watchAria / stopWatchAria). */
+export function watchAria() {
+    stopWatchAria();
+    const seen = [];
+    const record = () => {
+        const tree = storyState();
+        if (!seen.includes(tree)) seen.push(tree);
+    };
+    let pending = false;
+    const observer = new MutationObserver(() => {
+        if (pending) return;
+        pending = true;
+        requestAnimationFrame(() => { pending = false; record(); });
+    });
+    observer.observe(document, { subtree: true, childList: true, characterData: true, attributes: true });
+    ariaWatch = { observer, seen, record };
+    return true;
+}
+
+/** Stops recording and returns the trees seen (the current one last), as JSON. */
+export function stopWatchAria() {
+    if (!ariaWatch) return '[]';
+    const watch = ariaWatch;
+    ariaWatch = null;
+    watch.observer.disconnect();
+    watch.record();
+    return JSON.stringify(watch.seen);
+}
+
 /** The single element a locator chain matches, or why there is none (screenshots of a locator). */
 export function single(stepsJson) {
     const matches = resolve(JSON.parse(stepsJson));

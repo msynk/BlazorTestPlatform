@@ -76,6 +76,56 @@ public sealed record ThemeDefinition(string Name)
     /// <summary>Emulates <c>prefers-contrast: more</c> in browsers and in bUnit's media queries.</summary>
     public bool MoreContrast { get; init; }
 
+    /// <summary>
+    /// The theme a workbench frame renders (its name there): <see cref="Name"/>, except for modes derived with
+    /// <see cref="WithCulture"/> and <see cref="WithTimeZone"/>, which look like the theme they come from.
+    /// </summary>
+    public string FrameTheme { get => field ?? Name; init; }
+
+    /// <summary>
+    /// The culture stories render in under this theme (a matrix "mode", as Chromatic's modes): bUnit's current culture and
+    /// the browser locale. A story's own <c>Culture(...)</c> wins. Build one with <see cref="WithCulture"/>.
+    /// </summary>
+    public string? Culture { get; init; }
+
+    /// <summary>
+    /// The IANA time zone stories render in under this theme: the browser's zone (JavaScript and WebAssembly's
+    /// <c>TimeZoneInfo.Local</c> follow it) and bUnit's <see cref="System.TimeProvider"/>. A story's own <c>TimeZone(...)</c>
+    /// wins, and only the story's reaches the <c>TimeProvider</c> of Server-rendered frames. Build one with <see cref="WithTimeZone"/>.
+    /// </summary>
+    public string? TimeZone { get; init; }
+
+    /// <summary>
+    /// This theme in a culture, named <c>{name}-{culture}</c> (<c>light-de-de</c>) unless <paramref name="name"/> says
+    /// otherwise: a matrix axis for cultures without a new key format (the theme name is part of result keys and baseline
+    /// names). <c>new TestMatrix().WithThemes(ThemeDefinition.Light, ThemeDefinition.Light.WithCulture("de-DE"))</c>.
+    /// </summary>
+    public ThemeDefinition WithCulture(string culture, string? name = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(culture);
+        var normalized = System.Globalization.CultureInfo.GetCultureInfo(culture, predefinedOnly: true).Name;
+        return this with
+        {
+            Name = name ?? StoryId.Slugify($"{Name}-{normalized}"),
+            DisplayName = $"{DisplayName} ({normalized})",
+            FrameTheme = FrameTheme,
+            Culture = normalized,
+        };
+    }
+
+    /// <summary>This theme in a time zone, named <c>{name}-{zone}</c> (<c>light-asia-tokyo</c>) unless <paramref name="name"/> says otherwise.</summary>
+    public ThemeDefinition WithTimeZone(string timeZone, string? name = null)
+    {
+        var normalized = StoryTimeZone.Normalize(timeZone);
+        return this with
+        {
+            Name = name ?? StoryId.Slugify($"{Name}-{normalized}"),
+            DisplayName = $"{DisplayName} ({normalized})",
+            FrameTheme = FrameTheme,
+            TimeZone = normalized,
+        };
+    }
+
     /// <summary>The light theme, right to left (<c>rtl</c>).</summary>
     public static ThemeDefinition RightToLeft { get; } = new("rtl")
     {
