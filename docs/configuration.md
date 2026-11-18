@@ -72,7 +72,23 @@ Settings are resolved in this order: environment variables, then `btp.json` in t
 }
 ```
 
-Run selection and control have keys too: `"tags": "smoke && !visual"` (as `BTP_TAGS`), `"failOnFlaky": true` and `"maxFailures": 10`. `BTP_GREP` and `BTP_LAST_FAILED` exist only as environment variables: they describe one run, not the project.
+Run selection and control have keys too: `"tags": "smoke && !visual"` (as `BTP_TAGS`), `"failOnFlaky": true` and `"maxFailures": 10`.
+
+**Tag options** give every story with a tag a timeout, the slow multiplier, retries or a skip, as Vitest's tag options:
+
+```json
+"tagOptions": {
+  "network": { "retries": 3, "timeoutMilliseconds": 90000 },
+  "cold-start": { "slow": true },
+  "parked": { "skip": "waiting for the redesign (#123)" }
+}
+```
+
+A story's own `Timeout(...)` wins over its tags'. With several tags, the longest timeout and the most retries apply, and
+any `slow` or `skip`. A tag's retries replace the run's (`retries`, `BTP_RETRIES`, `BrowserRunOptions.Retries`) for its
+stories, so retries can go where flakiness is expected instead of everywhere. Tag names are case insensitive. bUnit and
+browser runners apply them (retries are for browser runs); `BtpSettings.TimeoutFor`, `RetriesFor` and `TagSkipReason`
+give the same answers to custom runners. `BTP_GREP` and `BTP_LAST_FAILED` exist only as environment variables: they describe one run, not the project.
 
 Every key is optional. Two more exist, `updateSnapshots` (`none`, `missing`, `changed`, `all`) and `retries`, but leave them out unless you mean it: a value in `btp.json` replaces the CI-dependent default, so `"updateSnapshots": "missing"` would let CI write missing baselines and `"retries": 0` would turn off retries on CI. Use the environment variables for one-off changes instead. `repeatEach` (burn-in, default 1) is safe to set in either place.
 

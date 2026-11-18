@@ -19,6 +19,7 @@ public sealed class StoryContext
         CancellationToken = cancellationToken;
         Random = new DeterministicRandom(story.Seed).Fork("play");
         Fake = new FakeData(Random.Fork("fake"));
+        CheckAccessibilityAfterActions = story.ChecksAccessibilityAfterActions;
     }
 
     /// <summary>The story being played.</summary>
@@ -105,12 +106,18 @@ public sealed class StoryContext
     public ElementLocator GetByTitle(string text, bool exact = false) => Get(By.Title(text, exact));
 
     /// <summary>Presses a key or chord on the focused element (e.g. <c>Enter</c>, <c>Shift+Tab</c>).</summary>
-    public Task PressAsync(string key) =>
-        Recorder.RunAsync($"press {key}", StepKind.Keyboard, () => Driver.KeyboardAsync(new KeyboardAction(KeyboardActionKind.Press, key), CancellationToken));
+    public async Task PressAsync(string key)
+    {
+        await Recorder.RunAsync($"press {key}", StepKind.Keyboard, () => Driver.KeyboardAsync(new KeyboardAction(KeyboardActionKind.Press, key), CancellationToken)).ConfigureAwait(false);
+        await AfterActionAsync($"press {key}").ConfigureAwait(false);
+    }
 
     /// <summary>Types text into the focused element, one key at a time.</summary>
-    public Task TypeAsync(string text) =>
-        Recorder.RunAsync($"type \"{text}\"", StepKind.Keyboard, () => Driver.KeyboardAsync(new KeyboardAction(KeyboardActionKind.Type, text), CancellationToken));
+    public async Task TypeAsync(string text)
+    {
+        await Recorder.RunAsync($"type \"{text}\"", StepKind.Keyboard, () => Driver.KeyboardAsync(new KeyboardAction(KeyboardActionKind.Type, text), CancellationToken)).ConfigureAwait(false);
+        await AfterActionAsync($"type \"{text}\"").ConfigureAwait(false);
+    }
 
     /// <summary>Holds a key down.</summary>
     public Task KeyDownAsync(string key) =>
@@ -123,19 +130,28 @@ public sealed class StoryContext
     /// <summary>Moves focus forward with Tab.</summary>
     public async Task TabAsync(int times = 1)
     {
-        for (var i = 0; i < times; i++)
+        await WithoutActionChecksAsync(async () =>
         {
-            await PressAsync(Keys.Tab).ConfigureAwait(false);
-        }
+            for (var i = 0; i < times; i++)
+            {
+                await PressAsync(Keys.Tab).ConfigureAwait(false);
+            }
+        }).ConfigureAwait(false);
+        await AfterActionAsync(times == 1 ? "press Tab" : $"press Tab {times} times").ConfigureAwait(false);
     }
 
     /// <summary>Moves focus backward with Shift+Tab.</summary>
     public async Task ShiftTabAsync(int times = 1)
     {
-        for (var i = 0; i < times; i++)
+        var chord = Keys.Chord(Keys.Shift, Keys.Tab);
+        await WithoutActionChecksAsync(async () =>
         {
-            await PressAsync(Keys.Chord(Keys.Shift, Keys.Tab)).ConfigureAwait(false);
-        }
+            for (var i = 0; i < times; i++)
+            {
+                await PressAsync(chord).ConfigureAwait(false);
+            }
+        }).ConfigureAwait(false);
+        await AfterActionAsync(times == 1 ? $"press {chord}" : $"press {chord} {times} times").ConfigureAwait(false);
     }
 
     /// <summary>The focused element, or null.</summary>
@@ -155,14 +171,15 @@ public sealed class StoryContext
     public async Task ExpectTabOrderAsync(params ElementLocator[] expected)
     {
         ArgumentNullException.ThrowIfNull(expected);
-        await Recorder.RunAsync("expect tab order", StepKind.Assertion, async () =>
+        await WithoutActionChecksAsync(() => Recorder.RunAsync("expect tab order", StepKind.Assertion, async () =>
         {
             for (var i = 0; i < expected.Length; i++)
             {
                 await PressAsync(Keys.Tab).ConfigureAwait(false);
                 await Expect(expected[i]).ToBeFocusedAsync().ConfigureAwait(false);
             }
-        }).ConfigureAwait(false);
+        })).ConfigureAwait(false);
+        await AfterActionAsync("the tab order").ConfigureAwait(false);
     }
 
     /// <summary>
@@ -721,6 +738,25 @@ public sealed class StoryContext
     }
 
     /// <summary>
+    /// Pauses the story's Blazor Server circuit and resumes it, as when a user leaves a tab long enough for the browser to
+    /// release it and then comes back (.NET 10's <c>Blazor.pauseCircuit()</c> and <c>Blazor.resumeCircuit()</c>). The
+    /// server persists the state of <c>[PersistentState]</c> properties when it pauses; on resume a new circuit renders the
+    /// components again from that state, so anything not persisted starts over. Check what the user sees afterwards:
+    /// <code>await ctx.PauseAndResumeCircuitAsync(); await ctx.Expect(ctx.GetByTestId("draft")).ToHaveTextAsync("Saved: 2");</code>
+    /// Requires <see cref="DriverCapabilities.CircuitControl"/> (browsers under Interactive Server); other drivers and
+    /// render modes report the story as skipped. Recorded actions, JS calls and requests start over with the new circuit.
+    /// </summary>
+    public Task PauseAndResumeCircuitAsync()
+    {
+        Require(DriverCapabilities.CircuitControl, "pausing and resuming the circuit");
+        return Recorder.RunAsync("pause and resume the circuit", StepKind.Action, async () =>
+        {
+            await Driver.PauseAndResumeCircuitAsync(CancellationToken).ConfigureAwait(false);
+            await Driver.WaitForIdleAsync(CancellationToken).ConfigureAwait(false);
+        });
+    }
+
+    /// <summary>
     /// Changes the position <c>navigator.geolocation</c> reports (null: no position) and grants the <c>geolocation</c>
     /// permission. Requires <see cref="DriverCapabilities.BrowserEmulation"/>; other drivers report the story as skipped.
     /// </summary>
@@ -840,6 +876,35 @@ public sealed class StoryContext
         _ => throw new ArgumentOutOfRangeException(nameof(state), state, "Pass a single state."),
     };
 
-    internal Task PerformAsync(ElementLocator locator, ElementAction action, TimeSpan? timeout) =>
-        Recorder.RunAsync($"{action.Describe()} {locator}", StepKind.Action, () => Driver.PerformAsync(locator.Chain, action, timeout ?? DefaultTimeout, CancellationToken));
+    internal async Task PerformAsync(ElementLocator locator, ElementAction action, TimeSpan? timeout)
+    {
+        var title = $"{action.Describe()} {locator}";
+        await Recorder.RunAsync(title, StepKind.Action, () => Driver.PerformAsync(locator.Chain, action, timeout ?? DefaultTimeout, CancellationToken)).ConfigureAwait(false);
+        await AfterActionAsync(title).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Checks accessibility after every element action and key press from here on (true) or stops (false). Starts as the
+    /// story's <c>CheckAccessibilityAfterActions()</c>; stories that skip accessibility checks are never checked.
+    /// </summary>
+    public bool CheckAccessibilityAfterActions { get; set; }
+
+    private Task AfterActionAsync(string title) =>
+        CheckAccessibilityAfterActions && _actionChecksPaused == 0 && !Story.Accessibility.Skip ? ExpectAccessibleAsync("after " + title) : Task.CompletedTask;
+
+    // Tab loops (TabAsync, ShiftTabAsync, ExpectTabOrderAsync) check once at the end, not after every key press.
+    private int _actionChecksPaused;
+
+    private async Task WithoutActionChecksAsync(Func<Task> body)
+    {
+        _actionChecksPaused++;
+        try
+        {
+            await body().ConfigureAwait(false);
+        }
+        finally
+        {
+            _actionChecksPaused--;
+        }
+    }
 }

@@ -105,6 +105,44 @@ public sealed class BtpSettings
     public TagExpression? TagFilter { get; init; }
 
     /// <summary>
+    /// Run options by tag (<c>tagOptions</c> in <c>btp.json</c>; tag names are case insensitive): see <see cref="TagOptions"/>,
+    /// <see cref="TimeoutFor"/>, <see cref="RetriesFor"/> and <see cref="TagSkipReason"/>.
+    /// </summary>
+    public IReadOnlyDictionary<string, TagOptions> TagOptions { get; init; } = new Dictionary<string, TagOptions>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// A runner's timeout for <paramref name="story"/>: its own <c>Timeout(...)</c>, else the longest of its tags', else
+    /// <paramref name="runnerDefault"/>; tripled when the story or one of its tags is slow.
+    /// </summary>
+    public TimeSpan TimeoutFor(Story story, TimeSpan runnerDefault)
+    {
+        ArgumentNullException.ThrowIfNull(story);
+        var tags = OptionsOf(story);
+        var tagTimeout = tags.Max(t => t.TimeoutMilliseconds);
+        var timeout = story.Timeout ?? (tagTimeout is { } ms ? TimeSpan.FromMilliseconds(ms) : runnerDefault);
+        return timeout * (story.IsSlow || tags.Any(t => t.Slow == true) ? 3 : 1);
+    }
+
+    /// <summary>The most retries a tag of <paramref name="story"/> asks for, or null when no tag sets them.</summary>
+    public int? RetriesFor(Story story)
+    {
+        ArgumentNullException.ThrowIfNull(story);
+        return OptionsOf(story).Max(t => t.Retries);
+    }
+
+    /// <summary>Why a tag of <paramref name="story"/> skips it, or null.</summary>
+    public string? TagSkipReason(Story story)
+    {
+        ArgumentNullException.ThrowIfNull(story);
+        return story.Tags.Order(StringComparer.Ordinal)
+            .Select(tag => TagOptions.TryGetValue(tag, out var options) && !string.IsNullOrWhiteSpace(options.Skip) ? $"Skipped by tag '{tag}': {options.Skip}" : null)
+            .FirstOrDefault(reason => reason is not null);
+    }
+
+    private TagOptions[] OptionsOf(Story story) =>
+        TagOptions.Count == 0 ? [] : [.. story.Tags.Select(tag => TagOptions.GetValueOrDefault(tag)).OfType<TagOptions>()];
+
+    /// <summary>
     /// Run only the stories whose id or <c>Title/Name</c> path matches this regular expression (<c>BTP_GREP</c>, case
     /// insensitive), as Playwright's <c>--grep</c>.
     /// </summary>
@@ -227,6 +265,7 @@ public sealed class BtpSettings
             FailOnFlaky = Env("BTP_FAIL_ON_FLAKY") is { } failOnFlaky ? IsTruthy(failOnFlaky) : file?.FailOnFlaky ?? false,
             MaxFailures = ParseNonNegative(Env("BTP_MAX_FAILURES"), "BTP_MAX_FAILURES") ?? ValidateNonNegative(file?.MaxFailures, "maxFailures") ?? 0,
             TagFilter = (Env("BTP_TAGS") ?? NonEmpty(file?.Tags)) is { } tagFilter ? TagExpression.Parse(tagFilter) : null,
+            TagOptions = ValidateTagOptions(file?.TagOptions),
             Grep = ParsePattern(Env("BTP_GREP"), "BTP_GREP"),
             GrepInvert = ParsePattern(Env("BTP_GREP_INVERT"), "BTP_GREP_INVERT"),
             LastFailed = IsTruthy(Env("BTP_LAST_FAILED")),
@@ -328,6 +367,24 @@ public sealed class BtpSettings
                 ? parsed
                 : throw new FormatException($"Invalid {name} value '{value}'. Use 0 (no limit) or a positive number.");
 
+    private static Dictionary<string, TagOptions> ValidateTagOptions(Dictionary<string, TagOptions>? options)
+    {
+        var validated = new Dictionary<string, TagOptions>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (tag, value) in options ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(tag) || value is null)
+            {
+                continue;
+            }
+
+            ValidatePositive(value.TimeoutMilliseconds, $"tagOptions.{tag}.timeoutMilliseconds");
+            ValidateNonNegative(value.Retries, $"tagOptions.{tag}.retries");
+            validated[tag.Trim()] = value;
+        }
+
+        return validated;
+    }
+
     private static int? ValidateNonNegative(int? value, string name) =>
         value is null or >= 0 ? value : throw new FormatException($"Invalid btp.json {name} value '{value}'. Use 0 (no limit) or a positive number.");
 
@@ -401,6 +458,8 @@ public sealed class BtpSettings
         public int? MaxFailures { get; init; }
 
         public string? Tags { get; init; }
+
+        public Dictionary<string, TagOptions>? TagOptions { get; init; }
 
         public int? TimeoutMilliseconds { get; init; }
 

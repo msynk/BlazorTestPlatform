@@ -39,6 +39,12 @@ public enum DriverCapabilities
     /// <see cref="BrowserEmulation"/> and <c>ctx.SetOfflineAsync</c>).
     /// </summary>
     BrowserEmulation = 256,
+
+    /// <summary>
+    /// The story's Blazor Server circuit can be paused and resumed (<c>ctx.PauseAndResumeCircuitAsync</c>): browsers under
+    /// Interactive Server.
+    /// </summary>
+    CircuitControl = 512,
 }
 
 /// <summary>Kind of a locator step.</summary>
@@ -484,6 +490,15 @@ public interface IStoryDriver : IAsyncDisposable
     /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
     Task ForcePseudoStatesAsync(LocatorChain locator, PseudoState states, CancellationToken cancellationToken) =>
         throw new NotSupportedException($"The {Name} driver cannot force CSS pseudo-classes.");
+
+    /// <summary>
+    /// Pauses the story's circuit (<c>Blazor.pauseCircuit()</c>: the server persists component state and releases the
+    /// circuit), resumes it (<c>Blazor.resumeCircuit()</c>: a new circuit restores the state) and waits until the story
+    /// is interactive again. Requires <see cref="DriverCapabilities.CircuitControl"/>.
+    /// </summary>
+    /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>
+    Task PauseAndResumeCircuitAsync(CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"The {Name} driver cannot pause circuits.");
 
     /// <summary>Takes the page offline or back online. Requires <see cref="DriverCapabilities.BrowserEmulation"/>.</summary>
     /// <remarks>Default implementation keeps existing drivers source compatible.</remarks>

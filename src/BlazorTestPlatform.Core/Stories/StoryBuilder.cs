@@ -330,6 +330,26 @@ public sealed class StoryBuilder<[DynamicallyAccessedMembers(DynamicallyAccessed
     /// </summary>
     public StoryBuilder<TComponent> CheckPrerender(bool enabled = true) => Metadata(StoryBuilderMetadata.PrerenderParity, enabled);
 
+    /// <summary>
+    /// Checks accessibility after every element action (click, fill, hover...) and key press of the play function, as
+    /// Compose's <c>enableAccessibilityChecks()</c>: a state that only exists between two assertions (an open menu, a
+    /// revealed image) is checked too. Each check is <c>ctx.ExpectAccessibleAsync("after ...")</c>: markup rules in bUnit,
+    /// axe-core in browsers, so it costs an axe run per action there. Play can turn it on or off for a part with
+    /// <c>ctx.CheckAccessibilityAfterActions</c>.
+    /// </summary>
+    public StoryBuilder<TComponent> CheckAccessibilityAfterActions(bool enabled = true) => Metadata(StoryBuilderMetadata.AccessibilityAfterActions, enabled);
+
+    /// <summary>
+    /// Lets the story leave references behind when its components are disposed. The bUnit runner otherwise fails a story
+    /// whose components, once disposed, are still referenced by a <c>DotNetObjectReference</c> they passed to JavaScript
+    /// or by an event handler on a service they injected (see <c>BunitStoryOptions.DetectLeaks</c>).
+    /// </summary>
+    public StoryBuilder<TComponent> AllowLeaks(string reason)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        return Metadata(StoryBuilderMetadata.AllowLeaks, reason);
+    }
+
     /// <summary>Sets documentation shown in the workbench.</summary>
     public StoryBuilder<TComponent> Description(string description)
     {

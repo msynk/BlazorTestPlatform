@@ -197,6 +197,17 @@ public sealed class Story
     /// </summary>
     public bool ChecksPrerenderParity => Metadata.TryGetValue(StoryBuilderMetadata.PrerenderParity, out var value) && value is true;
 
+    /// <summary>
+    /// Whether play checks accessibility after every element action and key press (<c>CheckAccessibilityAfterActions()</c>).
+    /// </summary>
+    public bool ChecksAccessibilityAfterActions => Metadata.TryGetValue(StoryBuilderMetadata.AccessibilityAfterActions, out var value) && value is true;
+
+    /// <summary>
+    /// Why the story may leave references behind when its components are disposed (<c>AllowLeaks(reason)</c>), or null
+    /// when the bUnit runner checks for leaks.
+    /// </summary>
+    public string? LeaksAllowedReason => Metadata.TryGetValue(StoryBuilderMetadata.AllowLeaks, out var value) ? value as string : null;
+
     /// <summary><c>Title/Name</c>.</summary>
     public string Path => $"{Title}/{Name}";
 
@@ -389,6 +400,12 @@ public static class StoryBuilderMetadata
 
     /// <summary>Key of the prerender parity check metadata (<c>CheckPrerender()</c>).</summary>
     public const string PrerenderParity = "btp:prerender-parity";
+
+    /// <summary>Key of the leak-check opt-out metadata (<c>AllowLeaks(reason)</c>).</summary>
+    public const string AllowLeaks = "btp:allow-leaks";
+
+    /// <summary>Key of the accessibility-after-every-action metadata (<c>CheckAccessibilityAfterActions()</c>).</summary>
+    public const string AccessibilityAfterActions = "btp:a11y-after-actions";
 }
 
 /// <summary>Mutable data collected by builders.</summary>

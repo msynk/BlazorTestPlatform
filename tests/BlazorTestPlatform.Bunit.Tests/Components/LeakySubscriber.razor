@@ -1,0 +1,34 @@
+@* Subscribes to a service event (method group) and to navigation (a closure); removes both only when told to. *@
+@implements IDisposable
+@inject Notifier Notifier
+@inject NavigationManager Navigation
+<p>Changes: @count</p>
+
+@code {
+    private int count;
+    private EventHandler<Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs>? onLocationChanged;
+
+    /// <summary>Whether Dispose removes the handlers.</summary>
+    [Parameter] public bool Unsubscribe { get; set; }
+
+    /// <inheritdoc />
+    protected override void OnInitialized()
+    {
+        Notifier.Changed += OnChanged;
+        var step = 2;
+        onLocationChanged = (_, _) => count += step;
+        Navigation.LocationChanged += onLocationChanged;
+    }
+
+    private void OnChanged() => count++;
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (Unsubscribe)
+        {
+            Notifier.Changed -= OnChanged;
+            Navigation.LocationChanged -= onLocationChanged;
+        }
+    }
+}

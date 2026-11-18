@@ -1,0 +1,15 @@
+@* Passes a reference to an app-level service to JavaScript (a registration that lives as long as the service). *@
+@inject Notifier Notifier
+@inject IJSRuntime JS
+<p>Registered</p>
+
+@code {
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("notifier.register", DotNetObjectReference.Create(Notifier));
+        }
+    }
+}

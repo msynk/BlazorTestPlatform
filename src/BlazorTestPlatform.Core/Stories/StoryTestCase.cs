@@ -28,7 +28,7 @@ public sealed record StoryTestCase(string Key, Story Story, string DisplayName, 
 
     // The story's own skip, else the run's selection (BTP_TAGS, BTP_GREP, BTP_LAST_FAILED): reported as skipped with the
     // reason, rather than removed, so a filter that selects nothing never leaves a test without data rows.
-    private static string? SkipReasonOf(Story story) => story.SkipReason ?? Results.StoryRunFilter.ExcludeReason(story);
+    private static string? SkipReasonOf(Story story) => story.SkipReason ?? Configuration.BtpSettings.Current.TagSkipReason(story) ?? Results.StoryRunFilter.ExcludeReason(story);
 
     private static string[] TagsOf(Story story) => [.. story.Tags.Order(StringComparer.Ordinal)];
 }

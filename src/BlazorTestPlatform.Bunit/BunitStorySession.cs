@@ -42,6 +42,14 @@ public sealed class BunitStoryOptions
     /// <summary>The most replays one shrink may make (default 200).</summary>
     public int MaxShrinkProbes { get; set; } = 200;
 
+    /// <summary>
+    /// Fails a story whose components, once disposed, are still referenced (default true): by a <c>DotNetObjectReference</c>
+    /// they passed to JavaScript and did not dispose, or by a handler they added to an event of a service they injected
+    /// and did not remove. Both keep a removed component in memory and let it be called later. Checked after the story
+    /// passes; a story that leaks on purpose says why with <c>AllowLeaks(reason)</c>.
+    /// </summary>
+    public bool DetectLeaks { get; set; } = true;
+
     /// <summary>Accessibility policy (defaults to <see cref="BtpSettings.Accessibility"/>).</summary>
     public AccessibilityPolicy? AccessibilityPolicy { get; set; }
 
@@ -336,10 +344,46 @@ public sealed class BunitStorySession : IAsyncDisposable
         };
     }
 
+    private LeakCheck? _leakCheck;
+
+    /// <summary>
+    /// Records the components the story shows (now, after every action and before disposal) and what they hold, so
+    /// <see cref="Leaks"/> can be computed after <see cref="DisposeAsync"/>.
+    /// </summary>
+    internal bool TrackLeaks
+    {
+        get => _leakCheck is not null;
+        set
+        {
+            if (value && _leakCheck is null)
+            {
+                var check = new LeakCheck(Context);
+                check.Observe(Root);
+                Driver.Settled = () => check.Observe(Root);
+                _leakCheck = check;
+            }
+        }
+    }
+
+    /// <summary>
+    /// With <see cref="TrackLeaks"/>, after <see cref="DisposeAsync"/>: what the disposed components left behind (see
+    /// <see cref="BunitStoryOptions.DetectLeaks"/>). Empty otherwise.
+    /// </summary>
+    internal IReadOnlyList<string> Leaks { get; private set; } = [];
+
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        var leaks = _leakCheck;
+        if (leaks is not null)
+        {
+            Driver.Settled = null;
+            leaks.Observe(Root);
+            leaks.CaptureReferences();
+        }
+
         await Driver.DisposeAsync().ConfigureAwait(false);
         await Context.DisposeAsync().ConfigureAwait(false);
+        Leaks = leaks?.Find() ?? [];
     }
 }

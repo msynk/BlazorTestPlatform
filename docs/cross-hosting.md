@@ -57,6 +57,12 @@ Then:
   # text: Running on WebAssembly
 ```
 
+### Circuit pause and resume
+
+Under Interactive Server, `ctx.PauseAndResumeCircuitAsync()` pauses the circuit and resumes it, checking that what the
+user returns to is right: `[PersistentState]` restored, everything else reset
+([interactions](interactions.md#pausing-and-resuming-the-circuit)).
+
 ## Hosts
 
 | Host | Use when |

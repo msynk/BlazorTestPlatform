@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Leaks, circuit pause and resume, tag options
+
+Items the fourth-pass gap analysis had deferred (`reports/Gap analysis, fourth pass.md`, #15, #23, #24, #33 and #34).
+
+* **Leak detection**: the bUnit runner fails a story whose components, once disposed, are still referenced by a `DotNetObjectReference` they passed to JavaScript, or by a handler on an event of a service they injected (method groups, lambdas and closures). `AllowLeaks(reason)` on a story accepts it; `BunitStoryOptions.DetectLeaks = false` turns the check off.
+* **Circuit pause and resume**: `ctx.PauseAndResumeCircuitAsync()` pauses the story's Blazor Server circuit and resumes it (.NET 10's `Blazor.pauseCircuit()`/`resumeCircuit()`), so a story can check that `[PersistentState]` survives and the rest starts over. New capability `DriverCapabilities.CircuitControl` (browsers under Interactive Server); other drivers and modes skip.
+* **Shrinking in browsers**: the browser runner shrinks a failed `ExploreAsync` on fresh pages on the last attempt (`BrowserRunOptions.ShrinkExplorations`, `MaxShrinkProbes`, default 40), as the bUnit runner does on fresh renders.
+* **Accessibility after every action**: `CheckAccessibilityAfterActions()` checks accessibility after each element action and key press of play (Compose's `enableAccessibilityChecks()`), naming the action that broke the policy; `ctx.CheckAccessibilityAfterActions` turns it on or off mid-play.
+* **Tag options**: `tagOptions` in `btp.json` gives every story with a tag a timeout, the slow multiplier, retries (instead of the run's) or a skip, as Vitest's tag options; `BtpSettings.TimeoutFor`, `RetriesFor` and `TagSkipReason` expose them.
+* **Demo**: `Testing/Circuit/Pause and resume` (Chromium, Firefox and WebKit under Server), `Testing/Exploration/Stepper` (a bug found and shrunk to two steps in every runner, declared with `ExpectFailure`), and `Overlays/Dialog/Keyboard` checks accessibility after every key press.
+
 ### .NET 11, run control, and screenshots and checks in play
 
 Informed by a survey of .NET 11 and of Playwright Test 1.50 to 1.65, Vitest 4.1, Storybook 10, Swift Testing, pytest 9 and cargo-nextest (`reports/Gap analysis, fourth pass.md`), which also lists what stays deferred.

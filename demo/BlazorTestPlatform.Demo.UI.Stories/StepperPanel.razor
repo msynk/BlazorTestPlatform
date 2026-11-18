@@ -1,0 +1,14 @@
+@namespace BlazorTestPlatform.Demo.UI.Stories
+@using Microsoft.AspNetCore.Components.Web
+
+@* Fixture for exploration: a stepper with a bug only some sequences reach (on an odd count, Remove takes away one more than there is). *@
+<button type="button" @onclick="() => count++">Add</button>
+<button type="button" disabled="@(count == 0)" @onclick="Remove">Remove</button>
+<button type="button" @onclick="() => count *= 2">Double</button>
+<output data-testid="count">@count</output>
+
+@code {
+    private int count;
+
+    private void Remove() => count -= count % 2 == 1 ? count + 1 : 1;
+}

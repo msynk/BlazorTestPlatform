@@ -1,0 +1,36 @@
+@* Passes a reference to itself to JavaScript; disposes it only when told to. *@
+@implements IDisposable
+@inject IJSRuntime JS
+<p>Observing</p>
+
+@code {
+    private DotNetObjectReference<LeakyObserver>? self;
+
+    /// <summary>Whether Dispose disposes the reference.</summary>
+    [Parameter] public bool DisposeReference { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            self = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("leaky.observe", self);
+        }
+    }
+
+    /// <summary>Called by JavaScript.</summary>
+    [JSInvokable]
+    public void Changed()
+    {
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (DisposeReference)
+        {
+            self?.Dispose();
+        }
+    }
+}

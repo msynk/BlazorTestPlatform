@@ -61,7 +61,7 @@ Chromium, Firefox, WebKit and the in-app driver), **Deferred** (with the reason)
 | 12 | Stop after N failures | Playwright `--max-failures`, MTP `--maximum-failed-tests` | **Done**: `BTP_MAX_FAILURES` |
 | 13 | Flaky attempts invisible to CI test views | nextest and Surefire JUnit | **Done**: `flakyFailure` / `rerunFailure` elements; expected failures in JUnit, CTRF (`rawStatus`) and HTML |
 | 14 | Named screenshots inside play (deferred #19) | Playwright `toHaveScreenshot('name')`, Vitest `toMatchScreenshot` | **Done**: `ctx.ExpectScreenshotAsync(name, target, fullPage)` with baselines, tolerances, masks, revert on failure, `btp approve`, hub review, HTML report, SARIF and framework attachments |
-| 15 | Accessibility checks in the middle of play (deferred #25) | Compose `enableAccessibilityChecks` | **Done** as an explicit check: `ctx.ExpectAccessibleAsync(label)` (markup rules in bUnit, axe-core in browsers). A check after every action stays deferred: it costs an axe run per action in browsers |
+| 15 | Accessibility checks in the middle of play (deferred #25) | Compose `enableAccessibilityChecks` | **Done**: `ctx.ExpectAccessibleAsync(label)` (markup rules in bUnit, axe-core in browsers), and opt-in checks after every element action and key press with `CheckAccessibilityAfterActions()`, naming the action that broke the policy |
 | 16 | Computed-style and viewport assertions | Playwright `toHaveCSS` (with `pseudo`), `toBeInViewport({ ratio })` | **Done**: `ToHaveCssAsync`, `ToBeInViewportAsync` and `IStoryDriver.MeasureAsync`; bUnit records them as skipped |
 | 17 | Attachments from play | Playwright `testInfo.attach` | **Done**: `ctx.Attach(name, text or bytes)`, attached to framework results whatever the outcome |
 | 18 | Step timeouts | Playwright `test.step` `timeout` | **Done**: `ctx.StepAsync(name, body, timeout)` |
@@ -69,8 +69,8 @@ Chromium, Firefox, WebKit and the in-app driver), **Deferred** (with the reason)
 | 20 | Container script cannot render one story's baselines | — | **Done**: `scripts/visual-tests.*` pass `BTP_GREP`, `BTP_GREP_INVERT`, `BTP_TAGS` and `BTP_SHARD` through |
 | 21 | Markup snapshots with scrubbers (deferred #20) | Verify, Jest, syrupy | Deferred: browsers and bUnit serialize markup differently; the accessibility tree is the cross-driver structural snapshot |
 | 22 | Inline snapshot rewriting (deferred #21) | insta, Playwright `updateSourceMethod` | **Done** for accessibility snapshots: call sites recorded by `[CallerFilePath]`/`[CallerLineNumber]`, `btp snapshots update-source` rewrites the raw literal when every run agrees and nothing (patterns, variables) would be lost |
-| 23 | Stateful property-based exploration (deferred #22) | Hypothesis, fast-check, CsCheck | **Done**: `ctx.ExploreAsync` (actions with preconditions, invariants, seeded steps, replay by seed, regression script), shrunk by the bUnit runner with delta debugging over fresh renders; browser runs report unshrunk sequences |
-| 24 | Persistent component state, prerender handoff, circuit pause and resume (deferred #23) | .NET 10/11, bUnit `AddBunitPersistentComponentState` | **Prerender handoff done**: `CheckPrerender()` compares the prerendered state with every state after Blazor starts. Circuit pause/resume stays deferred |
+| 23 | Stateful property-based exploration (deferred #22) | Hypothesis, fast-check, CsCheck | **Done**: `ctx.ExploreAsync` (actions with preconditions, invariants, seeded steps, replay by seed, regression script), shrunk with delta debugging over fresh renders (bUnit) and fresh pages (browsers, last attempt, 40 probes) |
+| 24 | Persistent component state, prerender handoff, circuit pause and resume (deferred #23) | .NET 10/11, bUnit `AddBunitPersistentComponentState` | **Done**: `CheckPrerender()` compares the prerendered state with every state after Blazor starts; `ctx.PauseAndResumeCircuitAsync()` pauses and resumes the Server circuit (`Blazor.pauseCircuit()`/`resumeCircuit()`), verified with `[PersistentState]` in Chromium, Firefox and WebKit |
 | 25 | Pseudo-state forcing (deferred #24) | storybook-addon-pseudo-states | **Done** in browsers: `ForceStateAsync(PseudoState...)` rewrites stylesheet rules in Chromium, Firefox, WebKit and the in-app driver; bUnit's cascade does not model pointer state, so it skips such stories |
 | 26 | Autodocs, component harnesses, MCP server (deferred #26) | Storybook 10, Angular CDK | Deferred: product features beyond the testing core |
 | 27 | Culture and time-zone matrix axis, named modes (deferred #27) | Chromatic modes | **Done**: per-story `TimeZone(...)`, and modes as derived themes (`WithCulture`, `WithTimeZone`) whose names carry them through the existing key format |
@@ -79,8 +79,8 @@ Chromium, Firefox, WebKit and the in-app driver), **Deferred** (with the reason)
 | 30 | Playwright 1.64 | Playwright | Deferred: an upgrade re-renders every baseline; use the "Regenerate visual baselines" workflow, as `docs/ci.md` describes |
 | 31 | Test locks, parallel groups, shuffle | Playwright `lock`, TUnit `[NotInParallel]`, `--shuffle` | Deferred: these belong to the test framework, and xUnit, NUnit, MSTest and TUnit each have their own |
 | 32 | Retry strategies (isolated retries at the end, backoff) | Playwright `retryStrategy`, nextest | Deferred: retries run inside one test-framework case; moving them to the end of the run would need framework hooks |
-| 33 | Leak detection (undisposed components, `DotNetObjectReference`) | Flutter `LeakTesting`, Vitest `--detect-async-leaks` | Deferred: Blazor does not expose whether a reference was disposed; needs a tracking JS runtime |
-| 34 | Tags that carry options (timeouts, retries per tag) | Vitest 4.1 | Deferred: `Slow()` and `Timeout(...)` cover the common case |
+| 33 | Leak detection (undisposed components, `DotNetObjectReference`) | Flutter `LeakTesting`, Vitest `--detect-async-leaks` | **Done** in bUnit: after disposal, undisposed `DotNetObjectReference`s passed to JavaScript and handlers left on injected services' events fail the story (`AllowLeaks(reason)`, `DetectLeaks`). Browsers stay out: Blazor does not expose a circuit's tracked references |
+| 34 | Tags that carry options (timeouts, retries per tag) | Vitest 4.1 | **Done**: `tagOptions` in `btp.json` (timeout, slow, retries, skip), applied by the bUnit and browser runners; a story's own timeout wins |
 | 35 | Clock `pauseAt`, `fastForward`, `setSystemTime` | Playwright clock | Deferred: `FakeTimeProvider` fires due timers whenever time moves, so "move without firing" cannot be honored; `AdvanceTimeAsync` covers `runFor` |
 | 36 | Microsoft.AspNetCore.Components.Testing | .NET 11 | Watched: still preview, app-level E2E (not components) |
 | 37 | A story repeating a state marked a manual review stale | found while adding demo stories | **Done**: set-based review fingerprints, earlier fingerprints still accepted |
@@ -95,6 +95,9 @@ Chromium, Firefox, WebKit and the in-app driver), **Deferred** (with the reason)
 * **Leave stories out by reporting them, not by dropping them.** Run filters make the test framework packages report the
   stories they leave out as skipped, with the reason. A filter that selects nothing still runs, and it shows what it
   skipped.
+* **A check that passes must be able to fail.** Each new check was first run against a component that breaks it (a leaked
+  reference, a leaked handler, an image revealed without alternative text, a bug only some sequences reach) before it
+  was run on the demo's design system, where it found nothing to report.
 * **Every result rule lives in one place.** Expected failures, the flaky policy, quarantine and the failure budget are
   applied by `RunPolicy.Apply` before a result is written. They behave the same in bUnit and in browsers, and custom
   runners can reuse them.

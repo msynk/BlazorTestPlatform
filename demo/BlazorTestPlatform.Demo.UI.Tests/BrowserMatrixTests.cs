@@ -253,3 +253,58 @@ public sealed class PrerenderParityTests(WorkbenchFixture workbench)
         Assert.True(failures.Count == 0, string.Join(Environment.NewLine + Environment.NewLine, failures));
     }
 }
+
+/// <summary>
+/// Circuit pause and resume (<c>ctx.PauseAndResumeCircuitAsync()</c>): under Interactive Server the [PersistentState] count
+/// survives a paused circuit and the in-memory one starts over; render modes without a circuit skip the story.
+/// </summary>
+public sealed class CircuitPauseTests(WorkbenchFixture workbench)
+{
+    [Theory]
+    [InlineData("chromium")]
+    [InlineData("firefox")]
+    [InlineData("webkit")]
+    public async Task Persistent_state_survives_a_paused_circuit(string browser)
+    {
+        var cell = new MatrixCase(ComponentStoryTests.Catalog.Get("testing-circuit--pause-and-resume"), Viewport.Desktop, ThemeDefinition.Light, HostingModel.InteractiveServer, browser);
+
+        var result = await workbench.Environment.VerifyAsync(cell, TestContext.Current.CancellationToken);
+
+        Assert.Equal(BlazorTestPlatform.Results.StoryOutcome.Passed, result.Outcome);
+        Assert.Contains(result.Steps.SelectMany(s => s.Children.Prepend(s)), s => s.Title == "pause and resume the circuit" && !s.Failed);
+    }
+
+    [Theory]
+    [InlineData(HostingModel.InteractiveWebAssembly)]
+    [InlineData(HostingModel.InteractiveAuto)]
+    public async Task Render_modes_without_a_circuit_to_control_skip_it(HostingModel model)
+    {
+        var cell = new MatrixCase(ComponentStoryTests.Catalog.Get("testing-circuit--pause-and-resume"), Viewport.Desktop, ThemeDefinition.Light, model, Browsers.Chromium);
+
+        var result = await workbench.Environment.Runner.RunAsync(cell, TestContext.Current.CancellationToken);
+
+        Assert.Equal(BlazorTestPlatform.Results.StoryOutcome.Skipped, result.Outcome);
+        Assert.Contains("CircuitControl (pausing and resuming the circuit)", result.SkipReason, StringComparison.Ordinal);
+    }
+}
+
+/// <summary>
+/// Exploration in browsers: the stepper's bug is found by seeded random steps and the failing sequence is shrunk on fresh
+/// pages to the two steps that cause it (the story declares the failure with <c>ExpectFailure</c>).
+/// </summary>
+public sealed class BrowserExplorationTests(WorkbenchFixture workbench)
+{
+    [Fact]
+    public async Task A_failing_exploration_is_shrunk_on_fresh_pages()
+    {
+        var cell = new MatrixCase(ComponentStoryTests.Catalog.Get("testing-exploration--stepper"), Viewport.Desktop, ThemeDefinition.Light, HostingModel.InteractiveServer, Browsers.Chromium);
+
+        var result = await workbench.Environment.VerifyAsync(cell, TestContext.Current.CancellationToken);
+
+        Assert.Equal(BlazorTestPlatform.Results.StoryOutcome.Passed, result.Outcome);
+        Assert.NotNull(result.ExpectedFailure);
+        Assert.Contains("Exploration 'stepper': invariant 'count is never negative' broke after 2 step(s) (shrunk from", result.Error, StringComparison.Ordinal);
+        Assert.Equal("add -> remove", System.Text.RegularExpressions.Regex.Match(result.Error!, "Steps: (.*)").Groups[1].Value.Trim());
+        Assert.Contains(result.Steps, s => s.Title.StartsWith("shrink exploration stepper", StringComparison.Ordinal));
+    }
+}

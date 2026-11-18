@@ -50,6 +50,18 @@ public sealed class BrowserRunOptions
     /// <summary>Write JSON results for reports. Default true.</summary>
     public bool WriteResults { get; set; } = true;
 
+    /// <summary>
+    /// Shrinks the steps of a failed <c>ctx.ExploreAsync</c> on the last attempt (default true): candidates without some of
+    /// the steps are replayed on fresh pages, and the failure reports the shortest sequence that still fails the same way.
+    /// </summary>
+    public bool ShrinkExplorations { get; set; } = true;
+
+    /// <summary>
+    /// The most replays one shrink may make (default 40: each opens a page). It also stops when the attempt's timeout has
+    /// passed again; the shortest sequence found so far is reported.
+    /// </summary>
+    public int MaxShrinkProbes { get; set; } = 40;
+
     /// <summary>Runs before each navigation (e.g. <c>page.RouteAsync</c> for third-party scripts). See <see cref="StoryPageOptions.ConfigurePageAsync"/>.</summary>
     public Func<Microsoft.Playwright.IPage, MatrixCase, Task>? ConfigurePageAsync { get; set; }
 }
@@ -115,12 +127,13 @@ public sealed class BrowserStoryRunner
             return Base(cell, key, started) with { Outcome = StoryOutcome.Skipped, SkipReason = notSelected };
         }
 
-        if ((cell.Story.SkipReason ?? cell.Story.UnsupportedReason(capabilities, $"{cell.Browser} ({cell.HostingModel.ToToken()})")) is { } skip)
+        if ((cell.Story.SkipReason ?? _settings.TagSkipReason(cell.Story) ?? cell.Story.UnsupportedReason(capabilities, $"{cell.Browser} ({cell.HostingModel.ToToken()})")) is { } skip)
         {
             return Write(cell.Story, Base(cell, key, started) with { Outcome = StoryOutcome.Skipped, SkipReason = skip });
         }
 
-        var maxAttempts = 1 + Math.Max(0, _options.Retries ?? _settings.Retries);
+        // A tag's retries win over the run's (Vitest's tag options): flaky-by-nature stories can retry more than the rest.
+        var maxAttempts = 1 + Math.Max(0, _settings.RetriesFor(cell.Story) ?? _options.Retries ?? _settings.Retries);
         var attemptErrors = new List<string>();
         var attemptArtifacts = new List<ArtifactReference>();
         var transientRetryUsed = false;
@@ -129,7 +142,7 @@ public sealed class BrowserStoryRunner
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            last = await RunAttemptAsync(cell, key, started, attempt, cancellationToken).ConfigureAwait(false);
+            last = await RunAttemptAsync(cell, key, started, attempt, finalAttempt: attempt == maxAttempts, cancellationToken).ConfigureAwait(false);
             if (last.Outcome != StoryOutcome.Failed)
             {
                 break;
@@ -169,14 +182,14 @@ public sealed class BrowserStoryRunner
         return result.IsBlockingFailure ? throw new StoryFailedException(result) : result;
     }
 
-    private async Task<StoryResult> RunAttemptAsync(MatrixCase cell, string key, DateTimeOffset started, int attempt, CancellationToken cancellationToken)
+    private async Task<StoryResult> RunAttemptAsync(MatrixCase cell, string key, DateTimeOffset started, int attempt, bool finalAttempt, CancellationToken cancellationToken)
     {
         var story = cell.Story;
         var recorder = new StepRecorder();
         var artifacts = new List<ArtifactReference>();
         var artifactDirectory = Path.Combine(_settings.CreateResultsStore().ArtifactsDirectoryFor(key), $"attempt-{attempt}");
         var keepDiagnostics = _settings.Diagnostics;
-        var limit = _options.Timeout ?? story.TimeoutOr(TimeSpan.FromSeconds(60));
+        var limit = _options.Timeout ?? _settings.TimeoutFor(story, TimeSpan.FromSeconds(60));
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(limit);
 
@@ -444,6 +457,22 @@ public sealed class BrowserStoryRunner
             // From here on the captured state (visual, a11y, metrics, steps) no longer changes under us.
             await StopAsync(attemptTask).ConfigureAwait(false);
 
+            // Retries would find the same sequence: shrink it once, on the last attempt. A shrink that breaks (the browser
+            // went away) keeps the failure as found.
+            var stackTrace = ex.StackTrace;
+            if (ex is ExplorationFailedException exploration && finalAttempt && _options.ShrinkExplorations && exploration.Steps.Count > 1)
+            {
+                try
+                {
+                    ex = await recorder.RunAsync($"shrink exploration {exploration.Exploration} ({exploration.Steps.Count} steps)", StepKind.Check,
+                        () => ShrinkAsync(cell, exploration, limit, cancellationToken)).ConfigureAwait(false);
+                }
+                catch (Exception shrinkFailure) when (shrinkFailure is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                {
+                    recorder.Log($"shrinking stopped: {shrinkFailure.GetType().Name}: {shrinkFailure.Message}");
+                }
+            }
+
             if (visual?.DiffPath is { } diff)
             {
                 artifacts.Add(new ArtifactReference("diff", diff, "Visual difference"));
@@ -481,7 +510,7 @@ public sealed class BrowserStoryRunner
                 Attempts = attempt,
                 Error = timedOut ? $"Story timed out after {limit.TotalSeconds:0.#} s." : ex.Message,
                 ErrorType = ex.GetType().FullName,
-                StackTrace = ex.StackTrace,
+                StackTrace = stackTrace,
                 Steps = recorder.Steps,
                 Visual = visual,
                 Screenshots = screenshots,
@@ -500,6 +529,77 @@ public sealed class BrowserStoryRunner
         finally
         {
             await StopAsync(attemptTask).ConfigureAwait(false);
+        }
+    }
+
+    // Replays shorter candidates of a failed exploration on fresh pages (delta debugging) and reports the shortest that still
+    // fails the same way; a shrink that runs out of probes or time keeps the shortest failure found so far.
+    private async Task<Exception> ShrinkAsync(MatrixCase cell, ExplorationFailedException failure, TimeSpan limit, CancellationToken cancellationToken)
+    {
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        budget.CancelAfter(limit);
+        ExplorationFailedException? shortest = null;
+
+        async Task<IReadOnlyList<string>?> Fails(IReadOnlyList<string> steps)
+        {
+            budget.Token.ThrowIfCancellationRequested();
+            using var replay = ExplorationReplay.Begin(failure.Exploration, steps);
+            var opening = _browser.CreatePageAsync(cell, new StoryPageOptions
+            {
+                Prerender = _options.Prerender && cell.Story.Prerender,
+                ConfigurePageAsync = _options.ConfigurePageAsync,
+            });
+            StoryPage probe;
+            try
+            {
+                probe = await opening.WaitAsync(budget.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Out of time while a page was opening: close it whenever it opens.
+                _ = opening.ContinueWith(t => ClosePageAsync(t.Result), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+                throw;
+            }
+
+            try
+            {
+                await probe.NavigateAsync().WaitAsync(budget.Token).ConfigureAwait(false);
+                var context = probe.CreateStoryContext(new StepRecorder(), _settings.DefaultTimeout, budget.Token);
+                context.AccessibilityPolicy = _options.AccessibilityPolicy ?? _settings.Accessibility;
+
+                // Named screenshots are not compared while shrinking: only the exploration's failure matters.
+                probe.Driver.ScreenshotMatcher = (name, _, _, _) => Task.FromResult(new VisualResult { SnapshotName = name, Status = VisualStatus.Matched, Note = "Not compared while shrinking." });
+                await context.RunPlayAsync().WaitAsync(budget.Token).ConfigureAwait(false);
+                return null;
+            }
+            catch (ExplorationFailedException again) when (again.Exploration == failure.Exploration && again.Failure == failure.Failure)
+            {
+                if (shortest is null || again.Steps.Count < shortest.Steps.Count)
+                {
+                    shortest = again;
+                }
+
+                return again.Steps;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Another failure, or a step that is not possible in this order: not the same bug.
+                return null;
+            }
+            finally
+            {
+                await ClosePageAsync(probe).ConfigureAwait(false);
+            }
+        }
+
+        try
+        {
+            var steps = await Exploration.ShrinkAsync(failure.Steps, Fails, _options.MaxShrinkProbes).ConfigureAwait(false);
+            return shortest is not null && steps.Count < failure.Steps.Count ? failure.WithShrunkSteps(steps, shortest.InnerException!) : failure;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return shortest is null ? failure : failure.WithShrunkSteps(shortest.Steps, shortest.InnerException!);
         }
     }
 

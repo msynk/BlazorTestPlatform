@@ -68,6 +68,18 @@ internal static class Scripts
     /// <summary>Stops recording; returns the trees seen as a JSON array.</summary>
     public const string StopWatchAria = "async () => " + Engine + ".stopWatchAria()";
 
+    /// <summary>Pauses and resumes the circuit; returns why it could not, or an empty string.</summary>
+    public const string PauseAndResumeCircuit = """
+        async () => {
+            const blazor = window.Blazor;
+            if (!blazor || typeof blazor.pauseCircuit !== 'function') return 'This app cannot pause circuits: Blazor.pauseCircuit needs .NET 10 or later.';
+            document.documentElement.removeAttribute('data-btp-bridge');
+            if (!await blazor.pauseCircuit()) return 'Blazor did not pause the circuit (rendering failed, or it was not connected).';
+            if (!await blazor.resumeCircuit()) return 'Blazor could not resume the circuit: the server no longer had its state.';
+            return '';
+        }
+        """;
+
     /// <summary>Forces pseudo-classes on the single element a locator chain matches; returns null, or why it could not.</summary>
     public const string ForcePseudo = "async ([steps, names]) => " + Engine + ".forcePseudo(steps, names)";
 

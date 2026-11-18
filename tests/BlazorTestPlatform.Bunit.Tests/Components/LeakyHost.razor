@@ -1,0 +1,10 @@
+@* Shows a LeakySubscriber until Hide is clicked: the removed child must still be checked for leaks. *@
+@if (shown)
+{
+    <LeakySubscriber />
+}
+<button @onclick="() => shown = false">Hide</button>
+
+@code {
+    private bool shown = true;
+}

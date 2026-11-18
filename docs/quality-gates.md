@@ -116,6 +116,31 @@ report). A limit on a metric the browser does not report is listed in the timeli
 runs never pass a layout-shift budget silently. Metrics cover the story frame: render, hydration and play, not the
 workbench shell.
 
+## Leaks
+
+The bUnit runner fails a story whose components, once disposed, are still referenced, as Flutter's leak tracking does
+for widgets:
+
+* a `DotNetObjectReference` they passed to JavaScript and did not dispose (JavaScript could still call the disposed
+  component, and the reference keeps it in memory);
+* a handler they added to an event of a service they injected (`[Inject]` properties, constructor-injected fields) and did
+  not remove: `NavigationManager.LocationChanged`, an app state container's `Changed`, a subscriber list. A singleton or a
+  circuit-scoped service would keep calling the removed component.
+
+```text
+The story's components left 2 reference(s) behind when they were disposed:
+  Notifier.Changed still calls LeakySubscriber.OnChanged after the component was disposed: ... Remove the handler when the component is disposed.
+  DotNetObjectReference<Chart> passed to JavaScript (chart.observe) was not disposed: ...
+```
+
+It runs after the story passes, on every component the story showed: those on screen at the end (bUnit disposes them with
+the renderer) and those play removed. Method groups, lambdas and closures that capture the component are recognized.
+Handlers on transient services do not count (the service goes with the component), nor do references to services (an
+app-level registration may live as long as the service); only delegate fields and delegate collections of a service are
+read, so lazy or large collections are never enumerated. `AllowLeaks(reason)` on a story accepts a leak on
+purpose and `BunitStoryOptions.DetectLeaks = false` turns the check off. Browsers do not report leaks: Blazor does not
+expose which references a circuit still tracks.
+
 ## Accessibility tree snapshots
 
 `ctx.ExpectAriaSnapshotAsync(...)` asserts the roles, names and states of a story as a tree, identically under bUnit,

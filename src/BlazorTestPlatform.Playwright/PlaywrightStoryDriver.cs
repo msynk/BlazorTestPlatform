@@ -39,7 +39,8 @@ public sealed class PlaywrightStoryDriver : IStoryDriver
         DriverCapabilities.RealBrowser | DriverCapabilities.Layout | DriverCapabilities.Screenshots
         | DriverCapabilities.NativeFocus | DriverCapabilities.JavaScript | DriverCapabilities.Css | DriverCapabilities.Network
         | DriverCapabilities.BrowserEmulation
-        | (fakeTime && hostingModel.IsInteractive() ? DriverCapabilities.FakeTime : DriverCapabilities.None);
+        | (fakeTime && hostingModel.IsInteractive() ? DriverCapabilities.FakeTime : DriverCapabilities.None)
+        | (hostingModel == HostingModel.InteractiveServer ? DriverCapabilities.CircuitControl : DriverCapabilities.None);
 
     /// <summary>The Playwright page.</summary>
     public IPage Page { get; }
@@ -243,6 +244,21 @@ public sealed class PlaywrightStoryDriver : IStoryDriver
 
     /// <inheritdoc />
     public Task SetOfflineAsync(bool offline, CancellationToken cancellationToken) => Page.Context.SetOfflineAsync(offline);
+
+    /// <inheritdoc />
+    public async Task PauseAndResumeCircuitAsync(CancellationToken cancellationToken)
+    {
+        // The story frame registers its bridge again once the new circuit renders it: wait for that, not the old page.
+        var problem = await Page.EvaluateAsync<string>(Scripts.PauseAndResumeCircuit).ConfigureAwait(false);
+        if (!string.IsNullOrEmpty(problem))
+        {
+            throw new StoryAssertionException(problem);
+        }
+
+        await Page.WaitForSelectorAsync("html[data-btp-bridge=ready] [data-btp-root][data-btp-status=ready][data-btp-interactive=true]",
+            new PageWaitForSelectorOptions { State = WaitForSelectorState.Attached, Timeout = 30_000 }).ConfigureAwait(false);
+        await SettleAsync().ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     public async Task SetGeolocationAsync(GeoPosition? position, CancellationToken cancellationToken)

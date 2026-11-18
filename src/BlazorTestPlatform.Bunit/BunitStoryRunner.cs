@@ -55,14 +55,14 @@ public static class BunitStoryRunner
             return Base(story, key, started, options) with { Outcome = StoryOutcome.Skipped, SkipReason = notSelected };
         }
 
-        if ((story.SkipReason ?? story.UnsupportedReason(BunitStoryDriver.CapabilitiesFor(story), "bunit")) is { } skip)
+        if ((story.SkipReason ?? settings.TagSkipReason(story) ?? story.UnsupportedReason(BunitStoryDriver.CapabilitiesFor(story), "bunit")) is { } skip)
         {
             return Write(story, options, settings, Base(story, key, started, options) with { Outcome = StoryOutcome.Skipped, SkipReason = skip });
         }
 
         var recorder = new StepRecorder();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(options.Timeout ?? story.TimeoutOr(TimeSpan.FromSeconds(30)));
+        timeout.CancelAfter(options.Timeout ?? settings.TimeoutFor(story, TimeSpan.FromSeconds(30)));
 
         string? markup = null;
         IReadOnlyList<ArtifactReference> attachments = [];
@@ -76,7 +76,9 @@ public static class BunitStoryRunner
 
         try
         {
-            await using (var session = await BunitStorySession.StartAsync(story, options, recorder, timeout.Token).ConfigureAwait(false))
+            var session = await BunitStorySession.StartAsync(story, options, recorder, timeout.Token).ConfigureAwait(false);
+            session.TrackLeaks = options.DetectLeaks && story.LeaksAllowedReason is null;
+            await using (session.ConfigureAwait(false))
             {
                 try
                 {
@@ -112,6 +114,16 @@ public static class BunitStoryRunner
                         throw new AccessibilityViolationException(evaluation, story.Id);
                     }
                 }
+            }
+
+            if (session.TrackLeaks)
+            {
+                // The session is disposed: its components were disposed by the renderer.
+                await recorder.RunAsync("leak check (disposed components)", StepKind.Check, () => session.Leaks.Count == 0
+                    ? Task.CompletedTask
+                    : throw new StoryAssertionException(
+                        $"The story's components left {session.Leaks.Count} reference(s) behind when they were disposed:{Environment.NewLine}  " + string.Join(Environment.NewLine + "  ", session.Leaks)
+                        + $"{Environment.NewLine}  If this is intended, say why with AllowLeaks(reason) on the story.")).ConfigureAwait(false);
             }
 
             if (options.MeasurePerformance && story.Performance is { } budget)
@@ -174,6 +186,7 @@ public static class BunitStoryRunner
         catch (Exception caught)
         {
             var ex = caught;
+            var stackTrace = ex.StackTrace;
             if (ex is ExplorationFailedException exploration && options.ShrinkExplorations && exploration.Steps.Count > 1 && !timeout.IsCancellationRequested)
             {
                 ex = await recorder.RunAsync($"shrink exploration {exploration.Exploration} ({exploration.Steps.Count} steps)", StepKind.Check,
@@ -181,14 +194,14 @@ public static class BunitStoryRunner
             }
 
             var message = ex is OperationCanceledException && timeout.IsCancellationRequested
-                ? $"Story timed out after {(options.Timeout ?? story.TimeoutOr(TimeSpan.FromSeconds(30))).TotalSeconds:0.#} s."
+                ? $"Story timed out after {(options.Timeout ?? settings.TimeoutFor(story, TimeSpan.FromSeconds(30))).TotalSeconds:0.#} s."
                 : ex.Message;
             return Write(story, options, settings, Base(story, key, started, options) with
             {
                 Outcome = StoryOutcome.Failed,
                 Error = message,
                 ErrorType = ex.GetType().FullName,
-                StackTrace = ex.StackTrace,
+                StackTrace = stackTrace,
                 DurationMilliseconds = clock.Elapsed.TotalMilliseconds,
                 Steps = recorder.Steps,
                 Accessibility = a11y,

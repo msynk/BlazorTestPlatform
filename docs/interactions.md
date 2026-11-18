@@ -192,6 +192,13 @@ await ctx.Expect(ctx.GetByRole("dialog")).ToBeInViewportAsync(ratio: 1);
 
 `ctx.ExpectAccessibleAsync("menu open")` scans the story now and fails when the accessibility policy fails, with the story's disabled rules and waivers: the states play passes through (an open menu, a validation error) that the scan after play never sees. bUnit applies its markup rules, browsers run axe-core, and the in-app driver records the check as skipped.
 
+`CheckAccessibilityAfterActions()` on a story runs that check after every element action (click, fill, hover...) and key
+press of its play function, as Compose's `enableAccessibilityChecks()`, and names the action that broke the policy:
+`expect accessible (after click role=button[name="Show picture"i])`. In browsers each check is an axe run, so turn it on
+for the stories whose intermediate states matter (dialogs, menus, wizards); `ctx.CheckAccessibilityAfterActions = false`
+stops it for the rest of play. `TabAsync(n)`, `ShiftTabAsync(n)` and `ExpectTabOrderAsync` check once, after their last
+key press. Combined with `ExploreAsync`, accessibility becomes an invariant of every explored step.
+
 ### Attachments and step timeouts
 
 `ctx.Attach("cart.json", json)` (text or bytes) attaches a file to the run, as Playwright's `testInfo.attach`: runners write it with the run's artifacts (`TestResults/btp/artifacts/<key>/attachments/`), reports link it, and the xUnit, NUnit, MSTest and TUnit packages attach it to the test result whatever the outcome. `ctx.StepAsync("load the picture", body, TimeSpan.FromSeconds(2))` fails at that step, with its name, when it takes longer than its own timeout.
@@ -250,6 +257,7 @@ Drivers differ in what they can really do. Each one states its capabilities, and
 | `Network` | no | yes | yes | no |
 | `FakeTime` | with `UseFakeTime` | no (not interactive) | with `UseFakeTime` | with `UseFakeTime` |
 | `BrowserEmulation` (geolocation, permissions, latency, offline) | no | yes | yes | no |
+| `CircuitControl` (`PauseAndResumeCircuitAsync`) | no | no | Server only | no |
 
 **Declare requirements on the story** when the whole story needs them. Runners check them before rendering, and test data sources can leave the story out entirely:
 
@@ -379,7 +387,30 @@ exactly; set `BTP_EXPLORE_SEED` (for example to the build number in a nightly jo
 The bUnit runner **shrinks** a failing sequence before reporting it: it replays shorter candidates on fresh renders (delta
 debugging, `ExplorationReplay`) and reports the shortest that still fails the same way, for example
 `Steps: add -> remove (shrunk from 23)`. `BunitStoryOptions.ShrinkExplorations = false` turns it off and `MaxShrinkProbes`
-(default 200) bounds it. Browser runs report the sequence as found: replay its seed in bUnit to shrink it.
+(default 200) bounds it. The browser runner shrinks the same way on fresh pages, on the last attempt only (retries would
+find the same sequence): `BrowserRunOptions.ShrinkExplorations` and `MaxShrinkProbes` (default 40, as each probe opens a
+page); a shrink also stops once the attempt's timeout has passed again, keeping the shortest sequence found. Named
+screenshots are not compared while shrinking.
+
+## Pausing and resuming the circuit
+
+`await ctx.PauseAndResumeCircuitAsync()` releases the story's Blazor Server circuit and resumes it, as when a user returns
+to a tab the browser put to sleep (.NET 10's `Blazor.pauseCircuit()` and `Blazor.resumeCircuit()`). The server persists
+`[PersistentState]` properties when it pauses; on resume a new circuit renders the components again from that state, so
+everything else starts over. Assert what the user sees afterwards:
+
+```csharp
+await add.ClickAsync();
+await ctx.PauseAndResumeCircuitAsync();
+await ctx.Expect(ctx.GetByTestId("saved")).ToHaveTextAsync("Saved: 1");     // [PersistentState]
+await ctx.Expect(ctx.GetByTestId("unsaved")).ToHaveTextAsync("Unsaved: 0"); // in memory only
+```
+
+It needs `DriverCapabilities.CircuitControl`: browsers under Interactive Server. bUnit, the in-app driver and the other
+render modes report the story as skipped. Recorded actions, JavaScript calls and requests start over with the new circuit.
+Declare it on the story (`Requires(DriverCapabilities.CircuitControl, "...")`) so other cells skip before rendering: under
+static SSR, ASP.NET Core rejects a `[PersistentState]` component that has no render mode ("The registered callback
+PersistProperty must be associated with a component or define an explicit render mode type").
 
 ## Three drivers, one script
 

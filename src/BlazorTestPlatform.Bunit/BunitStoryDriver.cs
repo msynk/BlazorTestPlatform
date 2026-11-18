@@ -1007,7 +1007,11 @@ public sealed class BunitStoryDriver : IStoryDriver
     {
         await _root.InvokeAsync(() => { }).ConfigureAwait(false);
         await SyncProgrammaticFocusAsync().ConfigureAwait(false);
+        Settled?.Invoke();
     }
+
+    /// <summary>Runs after every action settles (the leak check records the components shown at that point).</summary>
+    internal Action? Settled { get; set; }
 
     /// <summary>
     /// Applies <c>ElementReference.FocusAsync()</c> calls captured from JS interop, in call order, through the same path as

@@ -51,7 +51,8 @@ public sealed class DialogStories : Stories<Dialog>
             }));
 
         stories.Add("Keyboard", s => s
-            .Description("Keyboard only: Enter opens, Tab moves inside the dialog, Escape cancels and focus returns to the trigger.")
+            .Description("Keyboard only: Enter opens, Tab moves inside the dialog, Escape cancels and focus returns to the trigger. Accessibility is checked after every key press.")
+            .CheckAccessibilityAfterActions()
             .Play(async ctx =>
             {
                 var trigger = ctx.GetByRole("button", "Publish…", exact: true);

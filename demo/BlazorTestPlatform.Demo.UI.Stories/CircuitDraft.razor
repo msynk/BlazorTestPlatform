@@ -1,0 +1,21 @@
+@namespace BlazorTestPlatform.Demo.UI.Stories
+@using Microsoft.AspNetCore.Components.Web
+
+@* Fixture for circuit pause and resume: one count persisted with [PersistentState], one kept only in the circuit's memory. *@
+<p data-testid="saved">Saved: @Saved</p>
+<p data-testid="unsaved">Unsaved: @unsaved</p>
+<button type="button" @onclick="Add">Add</button>
+
+@code {
+    private int unsaved;
+
+    /// <summary>Persisted when the circuit pauses (and from prerendering), restored when it resumes.</summary>
+    [PersistentState]
+    public int Saved { get; set; }
+
+    private void Add()
+    {
+        Saved++;
+        unsaved++;
+    }
+}
